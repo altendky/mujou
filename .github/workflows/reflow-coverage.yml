@@ -21,5 +21,7 @@ jobs:
         with:
           tool: cargo-llvm-cov,cargo-nextest
 
+      # TODO: Upload lcov.info to Codecov once coverage reporting is set up.
+      #   See: docs/src/project/open-questions.md (Deferred > Infrastructure > Coverage reporting)
       - name: Generate coverage
         run: cargo llvm-cov nextest --all-features --workspace --no-tests=warn --lcov --output-path lcov.info
