@@ -14,7 +14,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-          targets: wasm32-unknown-unknown
+          target: wasm32-unknown-unknown
 
       - name: Install Dioxus CLI
         uses: taiki-e/install-action@v2
@@ -22,4 +22,4 @@ jobs:
           tool: dioxus-cli
 
       - name: Build WASM
-        run: dx build --platform web
+        run: dx build --package mujou --platform web
