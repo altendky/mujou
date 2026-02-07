@@ -95,10 +95,11 @@ mod tests {
         let mut img = GrayImage::new(10, 10);
         img.put_pixel(5, 5, image::Luma([255]));
         let result = ContourTracerKind::BorderFollowing.trace(&img);
-        // Single pixel may produce a very short contour; we only keep >= 2 points.
-        for polyline in &result {
-            assert!(polyline.len() >= 2);
-        }
+        assert!(
+            result.is_empty(),
+            "single-pixel contour should be filtered out, got {} polyline(s)",
+            result.len()
+        );
     }
 
     #[test]
