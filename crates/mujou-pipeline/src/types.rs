@@ -38,7 +38,7 @@ impl Point {
 
 /// A sequence of connected points forming a path segment.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Polyline(pub Vec<Point>);
+pub struct Polyline(Vec<Point>);
 
 impl Polyline {
     /// Create a new polyline from a vector of points.
@@ -75,6 +75,12 @@ impl Polyline {
     #[must_use]
     pub fn points(&self) -> &[Point] {
         &self.0
+    }
+
+    /// Consumes the polyline and returns the underlying vector of points.
+    #[must_use]
+    pub fn into_points(self) -> Vec<Point> {
+        self.0
     }
 }
 
