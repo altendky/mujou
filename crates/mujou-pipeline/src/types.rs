@@ -97,6 +97,15 @@ pub struct Dimensions {
 ///
 /// All parameters have sensible defaults matching the
 /// pipeline specification.
+///
+/// # Future work
+///
+/// Fields are currently public with no construction-time validation.
+/// A validated constructor (`try_new`) or builder should be added to
+/// enforce invariants such as `blur_sigma > 0`, `canny_low <= canny_high`,
+/// `0.0 <= mask_diameter <= 1.0`, and `simplify_tolerance >= 0.0`.
+/// Invalid values would return [`PipelineError::InvalidConfig`].
+/// See [open-questions: PipelineConfig validation](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PipelineConfig {
     /// Gaussian blur kernel sigma. Higher values produce more smoothing
