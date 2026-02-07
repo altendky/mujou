@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: ["**"]
+  merge_group:
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('{0}-{1}', github.workflow_ref, github.event.pull_request.number) || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: Pre-commit
+    uses: ./.github/workflows/reflow-pre-commit.yml
+
+  rust:
+    name: Rust
+    uses: ./.github/workflows/reflow-rust.yml
+
+  wasm:
+    name: WASM
+    uses: ./.github/workflows/reflow-wasm.yml
+
+  coverage:
+    name: Coverage
+    uses: ./.github/workflows/reflow-coverage.yml
+
+  all:
+    name: all
+    if: always()
+    needs: [pre-commit, rust, wasm, coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

@@ -1,0 +1,21 @@
+[package]
+name = "mujou-pipeline"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Pure image processing pipeline for mujou (sans-IO)"
+keywords = ["image-processing", "edge-detection", "contour"]
+categories = ["graphics"]
+
+[dependencies]
+image.workspace = true
+imageproc.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

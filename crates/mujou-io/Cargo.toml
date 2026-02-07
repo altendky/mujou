@@ -1,0 +1,23 @@
+[package]
+name = "mujou-io"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Browser I/O and Dioxus components for mujou"
+keywords = ["wasm", "dioxus", "file-upload"]
+categories = ["wasm"]
+
+[dependencies]
+dioxus.workspace = true
+mujou-pipeline.workspace = true
+mujou-export.workspace = true
+web-sys.workspace = true
+wasm-bindgen.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

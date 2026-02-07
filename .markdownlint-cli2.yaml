@@ -1,0 +1,22 @@
+# Markdownlint configuration
+# See: https://github.com/DavidAnson/markdownlint
+
+# This project uses semantic line breaks (one sentence per line) for better
+# diffs and easier editing. See: https://sembr.org/
+#
+# Long lines are intentional and should not be wrapped at arbitrary positions.
+
+# Automatically respect .gitignore
+gitignore: true
+
+config:
+  # Disable line length checking - we use semantic newlines
+  MD013: false
+  # Allow duplicate headings under different parents (common in format specs)
+  MD024:
+    siblings_only: true
+  # Allow bold text used as labeled paragraphs (e.g. **Strategy: ...** )
+  MD036: false
+  # Use compact table style (single space around content, no alignment padding)
+  MD060:
+    style: "compact"

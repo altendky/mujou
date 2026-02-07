@@ -36,7 +36,7 @@ zen, garden, stone, still, calm, balance, moss, fern, mist, glade
 ### Japanese
 
 | Word | Kanji | Meaning |
-|---|---|---|
+| --- | --- | --- |
 | samon / shamon | 砂紋 | Sand pattern (raked sand in zen gardens). Note: 砂 has two on'yomi (sa, sha) so romanization varies |
 | nagi | 凪 | Calm, still sea |
 | nagisen | 凪線 | Calm + line |
@@ -118,7 +118,7 @@ Portuguese, Italian, German, Dutch, or other major Western languages. No phoneti
 #### Assessment
 
 | Concern | Severity | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Chinese death/underworld association | Moderate | 無常 in characters strongly evokes the underworld escorts and death in Chinese folk culture. Risk is lower when encountered as romanized "mujou" in Latin script, higher if bare 無常 is displayed prominently in branding. |
 | General somber tone across CJK | Low | Even in Japanese, 無常 is melancholic -- about loss and transience. Arguably a feature given the intent (patterns drawn, admired, erased), but worth noting it is not a cheerful word in any CJK language. |
 | Western phonetic collisions | Negligible | "Mujou" has no unfortunate overlap with words in major Western languages. |
@@ -155,7 +155,7 @@ Preferred candidates are marked with `>>`.
 Domain columns show the domain if available, `premium` with price if premium, `-` if taken, `?` if unchecked.
 
 | | Name | Meaning | crates.io | .art | .garden |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | **>>** | **CRATE + DOMAIN AVAILABLE** | | | | |
 | >> | samon | 砂紋, sand pattern | available | premium $81.90 | samon.garden |
 | >> | sandrake | sand + rake | available | sandrake.art | sandrake.garden |
