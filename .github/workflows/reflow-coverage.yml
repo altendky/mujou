@@ -22,4 +22,4 @@ jobs:
           tool: cargo-llvm-cov,cargo-nextest
 
       - name: Generate coverage
-        run: cargo llvm-cov nextest --all-features --workspace --lcov --output-path lcov.info -- --no-tests=warn
+        run: cargo llvm-cov nextest --all-features --workspace --no-tests=warn --lcov --output-path lcov.info
