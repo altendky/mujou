@@ -1,0 +1,184 @@
+# Output Formats
+
+All exports derive from the internal `Vec<Polyline>` representation.
+Each serializer is a pure function in the `mujou-export` crate (core layer, no I/O).
+
+## Theta-Rho (.thr)
+
+For Sisyphus tables, Oasis Mini, and DIY polar sand tables.
+
+### Format Specification
+
+- Plain text, one `theta rho` pair per line (space-separated)
+- Theta: continuous radians (accumulating, does NOT wrap at 2pi)
+- Rho: 0.0 (center) to 1.0 (edge), normalized
+
+### Example
+
+```text
+0.0 0.0
+0.1 0.15
+0.2 0.30
+0.5 0.45
+1.0 0.60
+```
+
+### XY-to-Polar Conversion
+
+This is the most complex export step.
+
+1. **Center**: Image center = polar origin
+2. **Rho**: `rho = sqrt(x^2 + y^2) / max_radius`, normalized to [0.0, 1.0]
+3. **Theta**: `theta = atan2(y, x)`, with continuous accumulation
+
+**Continuous theta unwinding** is critical.
+Theta must accumulate across the full path -- if the path spirals clockwise, theta decreases past 0, -pi, -2pi, etc.
+If it spirals counterclockwise, theta increases past 2pi, 4pi, etc.
+
+Algorithm:
+
+```rust
+for each point after the first:
+    raw_theta = atan2(y, x)
+    // Choose the equivalent angle closest to previous theta
+    delta = raw_theta - prev_theta
+    while delta > PI:
+        delta -= 2 * PI
+    while delta < -PI:
+        delta += 2 * PI
+    theta = prev_theta + delta
+    prev_theta = theta
+```
+
+### Path Start/End Requirements
+
+The path must start and end with rho at 0 (center) or 1 (edge).
+If the contours don't naturally start/end there, add a spiral-in or spiral-out segment.
+
+## G-code (.gcode)
+
+For XY/Cartesian sand tables (ZenXY, GRBL/Marlin machines).
+
+### Format Specification
+
+- Standard G-code text
+- `G0 X... Y...` -- rapid move (travel between contours)
+- `G1 X... Y... F...` -- linear move (drawing)
+- Coordinates scaled to configurable bed size
+
+### Example
+
+```gcode
+G28 ; Home
+G90 ; Absolute positioning
+G0 X10.00 Y15.00
+G1 X12.50 Y18.30 F3000
+G1 X14.00 Y20.10 F3000
+G0 X30.00 Y5.00
+G1 X32.50 Y7.80 F3000
+```
+
+### Configuration
+
+| Parameter | Type | Default | Description |
+| --------- | ---- | ------- | ----------- |
+| `bed_width` | f64 | 200.0 | Bed width in mm |
+| `bed_height` | f64 | 200.0 | Bed height in mm |
+| `feed_rate` | f64 | 3000.0 | Feed rate (mm/min) |
+
+## SVG (.svg)
+
+The most versatile output format.
+Also accepted by the Oasis Mini app (upload at app.grounded.so).
+Useful for plotters, laser cutters, vinyl cutters, or viewing in a browser.
+
+### Format Specification
+
+- Standard SVG XML
+- Each polyline becomes a `<path>` element with a `d` attribute containing `M` (move to) and `L` (line to) commands
+- Disconnected contours are separate `<path>` elements
+- `viewBox` set to the image dimensions
+
+### Example
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+  <path d="M 10.0 15.0 L 12.5 18.3 L 14.0 20.1" fill="none" stroke="black" stroke-width="1"/>
+  <path d="M 30.0 5.0 L 32.5 7.8 L 35.0 10.2" fill="none" stroke="black" stroke-width="1"/>
+</svg>
+```
+
+## DXF (.dxf)
+
+CAD interchange format for OnShape, Fusion 360, etc.
+
+### Format Specification
+
+- Minimal DXF using `LINE` entities in the `ENTITIES` section
+- Each segment of each polyline becomes a `LINE` entity
+- ASCII DXF format (not binary)
+
+### Example
+
+```text
+0
+SECTION
+2
+ENTITIES
+0
+LINE
+8
+0
+10
+10.0
+20
+15.0
+11
+12.5
+21
+18.3
+0
+LINE
+8
+0
+10
+12.5
+20
+18.3
+11
+14.0
+21
+20.1
+0
+ENDSEC
+0
+EOF
+```
+
+## PNG Preview
+
+Rasterized render of the traced paths for quick sharing and thumbnailing.
+
+### Specification
+
+- Render polylines onto a pixel buffer using the `image` crate
+- White background, black strokes (or configurable colors)
+- Output as PNG-encoded bytes
+- Resolution matches the input image dimensions
+
+## Live SVG Preview (UI)
+
+In the browser UI, traced paths are rendered as inline SVG elements directly in the Dioxus DOM.
+This provides crisp vector rendering at any zoom level without requiring canvas or JS interop.
+
+The preview uses a simplified version of the paths (higher RDP tolerance) to keep the DOM lightweight when the full path set is very large.
+
+### Preview Modes
+
+| Mode | Description |
+| ---- | ----------- |
+| Original | Source image displayed as-is |
+| Edges | Binary edge map (Canny output) |
+| Paths | Traced polylines overlaid on original |
+| Paths only | Traced polylines on blank background |
