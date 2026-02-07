@@ -12,9 +12,6 @@ jobs:
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-          components: llvm-tools-preview
 
       - name: Install cargo-llvm-cov and cargo-nextest
         uses: taiki-e/install-action@v2
