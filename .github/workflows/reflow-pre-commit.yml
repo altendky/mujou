@@ -20,9 +20,4 @@ jobs:
           toolchain: stable
           components: rustfmt, clippy
 
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny
-
       - uses: pre-commit/action@v3.0.1
