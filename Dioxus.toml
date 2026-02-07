@@ -10,7 +10,7 @@ output = "assets/tailwind.css"
 title = "mujou"
 
 [web.watcher]
-watch_path = ["crates"]
+watch_path = ["crates", "input.css"]
 
 [web.resource.dev]
 style = ["assets/tailwind.css"]
