@@ -12,8 +12,6 @@ categories = ["graphics"]
 
 [dependencies]
 dioxus.workspace = true
-mujou-pipeline.workspace = true
-mujou-export.workspace = true
 mujou-io.workspace = true
 
 [dev-dependencies]
