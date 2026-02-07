@@ -262,6 +262,13 @@ mod tests {
         assert_eq!(pl.points(), &points);
     }
 
+    #[test]
+    fn polyline_into_points_returns_owned_vec() {
+        let points = vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)];
+        let pl = Polyline::new(points.clone());
+        assert_eq!(pl.into_points(), points);
+    }
+
     // --- Dimensions tests ---
 
     #[test]
