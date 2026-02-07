@@ -8,14 +8,15 @@ use image::GrayImage;
 
 /// Apply Gaussian blur to a grayscale image.
 ///
-/// Higher `sigma` values produce more smoothing. A sigma of 0.0 returns
-/// the image unchanged (no blur applied).
+/// Higher `sigma` values produce more smoothing. Non-positive sigma values
+/// (zero or negative) return the image unchanged, since `imageproc`'s
+/// underlying function panics on `sigma <= 0.0`.
 ///
 /// This is step 3 in the pipeline, between grayscale conversion and
 /// Canny edge detection.
 #[must_use = "returns the blurred image"]
 pub fn gaussian_blur(image: &GrayImage, sigma: f32) -> GrayImage {
-    if sigma == 0.0 {
+    if sigma <= 0.0 {
         return image.clone();
     }
 
@@ -41,6 +42,13 @@ mod tests {
     fn zero_sigma_returns_identical_image() {
         let img = sharp_edge_image();
         let blurred = gaussian_blur(&img, 0.0);
+        assert_eq!(img, blurred);
+    }
+
+    #[test]
+    fn negative_sigma_returns_identical_image() {
+        let img = sharp_edge_image();
+        let blurred = gaussian_blur(&img, -1.0);
         assert_eq!(img, blurred);
     }
 
