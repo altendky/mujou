@@ -1,0 +1,8 @@
+/target/
+/dist/
+
+# Tailwind CSS build output
+/assets/tailwind.css
+
+# Node
+node_modules/

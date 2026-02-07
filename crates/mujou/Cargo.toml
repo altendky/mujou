@@ -1,0 +1,22 @@
+[package]
+name = "mujou"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Convert raster images to vector paths for sand tables and CNC devices"
+keywords = ["image-processing", "vector", "wasm", "sand-table"]
+categories = ["graphics"]
+
+[dependencies]
+dioxus.workspace = true
+mujou-pipeline.workspace = true
+mujou-export.workspace = true
+mujou-io.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

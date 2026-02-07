@@ -1,0 +1,48 @@
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/altendky/mujou"
+homepage = "https://github.com/altendky/mujou"
+description = "Convert raster images to vector paths for sand tables, pen plotters, and CNC devices"
+keywords = ["image-processing", "vector", "wasm", "sand-table"]
+categories = ["graphics", "wasm"]
+
+[workspace.dependencies]
+# Internal crates
+mujou-pipeline = { path = "crates/mujou-pipeline", version = "0.1.0" }
+mujou-export = { path = "crates/mujou-export", version = "0.1.0" }
+mujou-io = { path = "crates/mujou-io", version = "0.1.0" }
+
+# Image processing
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "webp"] }
+imageproc = { version = "0.26", default-features = false }
+
+# WASM support
+getrandom = { version = "0.3", features = ["wasm-bindgen"] }
+web-sys = "0.3"
+wasm-bindgen = "0.2"
+
+# UI framework
+dioxus = "0.7"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
