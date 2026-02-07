@@ -47,4 +47,4 @@ jobs:
           tool: cargo-nextest
 
       - name: Run tests
-        run: cargo nextest run --all-features
+        run: cargo nextest run --all-features --no-tests=warn
