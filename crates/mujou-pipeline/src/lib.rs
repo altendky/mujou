@@ -87,7 +87,8 @@ pub fn process(image_bytes: &[u8], config: &PipelineConfig) -> Result<Polyline, 
             f64::from(dimensions.width) / 2.0,
             f64::from(dimensions.height) / 2.0,
         );
-        let radius = f64::from(dimensions.width) * config.mask_diameter / 2.0;
+        let extent = dimensions.width.min(dimensions.height);
+        let radius = f64::from(extent) * config.mask_diameter / 2.0;
         let clipped = mask::clip_polyline_to_circle(&joined, center, radius);
 
         // Re-join the clipped segments into a single path.
@@ -185,6 +186,36 @@ mod tests {
         let polyline = result.ok();
         let center = Point::new(20.0, 20.0);
         let radius = 40.0 * 0.8 / 2.0; // 16.0
+        if let Some(pl) = &polyline {
+            for p in pl.points() {
+                let dist = p.distance(center);
+                assert!(
+                    dist <= radius + 1e-6,
+                    "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
+                    p.x,
+                    p.y,
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn process_with_circular_mask_nonsquare() {
+        // Non-square image: mask radius should use min(width, height)
+        // so the circle fits entirely within the image.
+        let png = sharp_edge_png(60, 40);
+        let config = PipelineConfig {
+            circular_mask: true,
+            mask_diameter: 1.0,
+            ..PipelineConfig::default()
+        };
+        let result = process(&png, &config);
+        assert!(result.is_ok(), "expected Ok with mask, got {result:?}");
+
+        // Radius should be based on min(60, 40) = 40, so radius = 20.0.
+        let polyline = result.ok();
+        let center = Point::new(30.0, 20.0);
+        let radius = 40.0 / 2.0; // 20.0, based on min dimension
         if let Some(pl) = &polyline {
             for p in pl.points() {
                 let dist = p.distance(center);
