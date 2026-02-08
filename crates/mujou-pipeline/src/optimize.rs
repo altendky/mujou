@@ -43,9 +43,8 @@ pub fn optimize_path_order(contours: &[Polyline]) -> Vec<Polyline> {
             .copied()
             .unwrap_or(Point::new(0.0, 0.0));
 
-        let mut best_idx = 0;
+        let mut best: Option<(usize, bool)> = None;
         let mut best_dist = f64::INFINITY;
-        let mut best_reversed = false;
 
         for (j, candidate) in candidates.iter().enumerate() {
             if visited[j] {
@@ -67,10 +66,16 @@ pub fn optimize_path_order(contours: &[Polyline]) -> Vec<Polyline> {
 
             if dist < best_dist {
                 best_dist = dist;
-                best_idx = j;
-                best_reversed = reversed;
+                best = Some((j, reversed));
             }
         }
+
+        // The loop invariant guarantees at least one unvisited candidate,
+        // so `best` is always `Some` here. Use `continue` to satisfy the
+        // type system without panicking.
+        let Some((best_idx, best_reversed)) = best else {
+            continue;
+        };
 
         visited[best_idx] = true;
 
