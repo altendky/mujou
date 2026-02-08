@@ -107,6 +107,9 @@ mod tests {
     ///
     /// The left half is black, the right half is white, producing a strong
     /// vertical edge that Canny will detect.
+    ///
+    /// NOTE: The PNG encoding pattern here is duplicated in
+    /// `grayscale.rs::encode_rgba_pixel`. See #4 for consolidation.
     fn sharp_edge_png(width: u32, height: u32) -> Vec<u8> {
         let img = image::RgbaImage::from_fn(width, height, |x, _y| {
             if x < width / 2 {

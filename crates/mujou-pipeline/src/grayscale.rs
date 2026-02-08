@@ -109,6 +109,9 @@ mod tests {
     }
 
     /// Helper: encode a single 1x1 RGBA pixel as a PNG byte buffer.
+    ///
+    /// NOTE: The PNG encoding pattern here is duplicated in
+    /// `lib.rs::sharp_edge_png`. See #4 for consolidation.
     fn encode_rgba_pixel(r: u8, g: u8, b: u8) -> Vec<u8> {
         let img = image::RgbaImage::from_fn(1, 1, |_, _| image::Rgba([r, g, b, 255]));
         let mut buf = Vec::new();
