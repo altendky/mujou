@@ -28,6 +28,10 @@ Items to address after MVP:
 
 - [ ] `PipelineConfig` validated constructor -- Add `try_new()` (or a builder) that enforces invariants (`blur_sigma > 0`, `canny_low <= canny_high`, `0.0 <= mask_diameter <= 1.0`, `simplify_tolerance >= 0.0`), make fields private, add getters, and return `PipelineError::InvalidConfig` on failure. See [PR #2 discussion](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
 
+### Architecture
+
+- [ ] Shared types crate extraction -- `mujou-export` currently depends on `mujou-pipeline` to access shared types (`Point`, `Polyline`, `Dimensions`). Consider extracting these into a `mujou-types` crate to avoid coupling the export layer to the pipeline layer. Evaluate if the coupling causes problems as more export formats are added.
+
 ### Features
 
 - [ ] `MarchingSquares` contour tracer -- New `ContourTracer` impl using marching squares isoline extraction. Produces single centerline paths at sub-pixel precision instead of doubled borders. Cleaner geometry without relying on RDP to collapse border doubling, more natural handling of open vs closed paths. ~80-120 lines custom code. `imageproc` does not provide this.

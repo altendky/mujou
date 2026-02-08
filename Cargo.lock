@@ -1197,6 +1197,8 @@ dependencies = [
 name = "mujou-export"
 version = "0.1.0"
 dependencies = [
+ "image",
+ "mujou-pipeline",
  "thiserror 2.0.18",
 ]
 

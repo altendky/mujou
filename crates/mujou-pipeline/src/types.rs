@@ -160,6 +160,22 @@ impl Default for PipelineConfig {
     }
 }
 
+/// Result of running the full image processing pipeline.
+///
+/// Contains the traced polyline and metadata about the source image
+/// needed by downstream consumers (e.g., export serializers).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProcessResult {
+    /// The single continuous path produced by the pipeline.
+    pub polyline: Polyline,
+
+    /// Dimensions of the source image in pixels.
+    ///
+    /// Export serializers use this to set coordinate spaces
+    /// (e.g., SVG `viewBox`, G-code bed scaling).
+    pub dimensions: Dimensions,
+}
+
 /// Errors that can occur during pipeline processing.
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineError {

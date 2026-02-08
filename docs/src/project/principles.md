@@ -16,7 +16,7 @@ The project follows **full sans-IO design principles** to maximize testability.
 
 ```rust
 // Core crate (mujou-pipeline) - pure logic, no I/O
-pub fn process(image_bytes: &[u8], config: &PipelineConfig) -> Result<Polyline, PipelineError> {
+pub fn process(image_bytes: &[u8], config: &PipelineConfig) -> Result<ProcessResult, PipelineError> {
     let img = decode_image(image_bytes)?;
     let gray = to_grayscale(&img);
     let blurred = gaussian_blur(&gray, config.blur_sigma);
@@ -25,7 +25,7 @@ pub fn process(image_bytes: &[u8], config: &PipelineConfig) -> Result<Polyline, 
     let simplified = simplify_paths(&contours, config.simplify_tolerance);
     let optimized = optimize_path_order(&simplified);
     let joined = config.path_joiner.join(&optimized);
-    Ok(joined)
+    Ok(ProcessResult { polyline: joined, dimensions: img.dimensions() })
 }
 
 // Core crate (mujou-export) - pure serialization, no I/O
