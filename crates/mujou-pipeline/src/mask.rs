@@ -153,7 +153,8 @@ fn line_circle_both_intersections(
 /// Solve the quadratic for line-circle intersection parameters.
 ///
 /// Returns `Some((t_small, t_large))` where `t_small <= t_large`.
-/// Returns `None` if the line misses the circle (negative discriminant).
+/// Returns `None` if the line misses the circle (negative discriminant)
+/// or if the segment is degenerate (zero length, i.e. `a == b`).
 fn solve_line_circle(a: Point, b: Point, center: Point, radius: f64) -> Option<(f64, f64)> {
     let dx = b.x - a.x;
     let dy = b.y - a.y;
@@ -161,6 +162,10 @@ fn solve_line_circle(a: Point, b: Point, center: Point, radius: f64) -> Option<(
     let fy = a.y - center.y;
 
     let a_coeff = dx.mul_add(dx, dy * dy);
+    if a_coeff == 0.0 {
+        // Degenerate segment (a == b): no meaningful intersection.
+        return None;
+    }
     let b_coeff = 2.0 * dx.mul_add(fx, dy * fy);
     let c_coeff = radius.mul_add(-radius, fx.mul_add(fx, fy * fy));
 
