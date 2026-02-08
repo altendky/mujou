@@ -31,6 +31,8 @@ fn app() -> Element {
             .map_or(name.as_str(), |(base, _)| base)
             .to_owned();
         filename.set(base_name);
+        result.set(None);
+        error.set(None);
         image_bytes.set(Some(bytes));
     };
 
