@@ -32,6 +32,7 @@ use mujou_pipeline::{Dimensions, Polyline};
 /// ];
 /// let dims = Dimensions { width: 800, height: 600 };
 /// let svg = to_svg(&polylines, dims);
+/// assert!(svg.contains("width=\"800\" height=\"600\""));
 /// assert!(svg.contains("viewBox=\"0 0 800 600\""));
 /// assert!(svg.contains("M 10.0 15.0 L 12.5 18.3"));
 /// ```
@@ -42,11 +43,11 @@ pub fn to_svg(polylines: &[Polyline], dimensions: Dimensions) -> String {
     // XML declaration
     let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
 
-    // Opening <svg> tag with namespace and viewBox
+    // Opening <svg> tag with namespace, explicit dimensions, and viewBox
     let _ = writeln!(
         out,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {} {}">"#,
-        dimensions.width, dimensions.height,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
+        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
     );
 
     // One <path> per polyline (skip polylines with fewer than 2 points)
@@ -93,6 +94,7 @@ mod tests {
     fn empty_polylines_produces_valid_svg_with_no_paths() {
         let svg = to_svg(&[], dims(100, 50));
         assert!(svg.contains(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
+        assert!(svg.contains(r#"width="100" height="50""#));
         assert!(svg.contains(r#"viewBox="0 0 100 50""#));
         assert!(!svg.contains("<path"));
         assert!(svg.contains("</svg>"));
@@ -122,6 +124,7 @@ mod tests {
         ])];
         let svg = to_svg(&polylines, dims(800, 600));
 
+        assert!(svg.contains(r#"width="800" height="600""#));
         assert!(svg.contains(r#"viewBox="0 0 800 600""#));
         assert!(svg.contains(r#"d="M 10.0 20.0 L 30.0 40.0""#));
         assert!(svg.contains(r#"fill="none""#));
@@ -203,6 +206,7 @@ mod tests {
     #[test]
     fn viewbox_reflects_dimensions() {
         let svg = to_svg(&[], dims(1920, 1080));
+        assert!(svg.contains(r#"width="1920" height="1080""#));
         assert!(svg.contains(r#"viewBox="0 0 1920 1080""#));
     }
 
@@ -261,6 +265,7 @@ mod tests {
 
         // Valid SVG structure
         assert!(svg.contains(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
+        assert!(svg.contains(r#"width="40" height="40""#));
         assert!(svg.contains(r#"viewBox="0 0 40 40""#));
         assert!(svg.contains("<path"));
         assert!(svg.contains("</svg>"));
@@ -288,6 +293,7 @@ mod tests {
         ];
         let svg = to_svg(&polylines, dims(800, 600));
 
+        assert!(svg.contains(r#"width="800" height="600""#));
         assert!(svg.contains(r#"viewBox="0 0 800 600""#));
         assert!(svg.contains(r#"d="M 10.0 15.0 L 12.5 18.3 L 14.0 20.1""#));
         assert!(svg.contains(r#"d="M 30.0 5.0 L 32.5 7.8 L 35.0 10.2""#));
