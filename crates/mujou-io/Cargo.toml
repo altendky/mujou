@@ -16,6 +16,8 @@ mujou-pipeline.workspace = true
 mujou-export.workspace = true
 web-sys.workspace = true
 wasm-bindgen.workspace = true
+js-sys.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 
