@@ -89,7 +89,7 @@ fn perpendicular_distance(p: Point, a: Point, b: Point) -> f64 {
     }
 
     // |cross product| / |line length|
-    let cross = (dx * (a.y - p.y)).abs() - (dy * (a.x - p.x)).abs();
+    let cross = dx.mul_add(a.y - p.y, -(dy * (a.x - p.x)));
     cross.abs() / length_sq.sqrt()
 }
 
@@ -208,6 +208,19 @@ mod tests {
             Point::new(2.0, 0.0),
         );
         assert!((d - 3.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn perpendicular_distance_diagonal_segment() {
+        // Point (2, -1) is ~1.789 from line (0,0)->(4,2).
+        // Correct: |4*(-1) - 2*(-2)| / sqrt(20) = 8 / sqrt(20)
+        let d = perpendicular_distance(
+            Point::new(2.0, -1.0),
+            Point::new(0.0, 0.0),
+            Point::new(4.0, 2.0),
+        );
+        let expected = 8.0 / 20.0_f64.sqrt();
+        assert!((d - expected).abs() < 1e-10, "got {d}, expected {expected}",);
     }
 
     #[test]
