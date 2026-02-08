@@ -242,7 +242,11 @@ mod tests {
         };
         // Inverted edge map on a sharp-edge image should still produce
         // contours (the inverted map has large white regions).
-        let result = process(&png, &config);
-        assert!(result.is_ok(), "expected Ok with invert, got {result:?}");
+        let polyline = process(&png, &config).unwrap();
+        assert!(
+            polyline.len() >= 2,
+            "expected non-trivial polyline with invert, got {} points",
+            polyline.len(),
+        );
     }
 }
