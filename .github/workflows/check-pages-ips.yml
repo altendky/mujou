@@ -1,0 +1,110 @@
+name: Check GitHub Pages IPs
+
+on:
+  schedule:
+    # Weekly on Monday at 12:00 UTC
+    - cron: "0 12 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check:
+    name: Check IPs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Resolve current IPs
+        id: resolve
+        run: |
+          a_records=$(dig +short altendky.github.io A | sort)
+          aaaa_records=$(dig +short altendky.github.io AAAA | sort)
+
+          echo "Current A records:"
+          echo "$a_records"
+          echo "Current AAAA records:"
+          echo "$aaaa_records"
+
+          a_json=$(echo "$a_records" | jq -R -s '[split("\n") | .[] | select(length > 0)]')
+          aaaa_json=$(echo "$aaaa_records" | jq -R -s '[split("\n") | .[] | select(length > 0)]')
+          resolved=$(jq -n --argjson a "$a_json" --argjson aaaa "$aaaa_json" '{"a": $a, "aaaa": $aaaa}')
+
+          echo "$resolved" > /tmp/resolved-ips.json
+          {
+            echo "resolved<<RESOLVED_EOF"
+            echo "$resolved"
+            echo "RESOLVED_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Compare with known IPs
+        id: compare
+        run: |
+          known=$(jq -S . .github/pages-ips.json)
+          resolved=$(jq -S . /tmp/resolved-ips.json)
+
+          if [ "$known" = "$resolved" ]; then
+            echo "IPs match, nothing to do."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "IPs have changed!"
+            echo "Known:"
+            echo "$known"
+            echo "Resolved:"
+            echo "$resolved"
+            {
+              echo "changed=true"
+              echo "known<<KNOWN_EOF"
+              echo "$known"
+              echo "KNOWN_EOF"
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update IPs file and open PR
+        if: steps.compare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          KNOWN_IPS: ${{ steps.compare.outputs.known }}
+          RESOLVED_IPS: ${{ steps.resolve.outputs.resolved }}
+        run: |
+          branch="update-pages-ips-$(date +%Y%m%d)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+
+          cp /tmp/resolved-ips.json .github/pages-ips.json
+
+          git add .github/pages-ips.json
+          git commit -m "update GitHub Pages IP addresses"
+          git push origin "$branch"
+
+          gh pr create \
+            --title "GitHub Pages IP addresses have changed" \
+            --body "## GitHub Pages IP addresses have changed
+
+          \`altendky.github.io\` now resolves to different IP addresses than those stored in \`.github/pages-ips.json\`.
+
+          ### Action required
+
+          **Update the DNS A and AAAA records at the domain registrar** to match the new IPs.
+          See [requirements.md](docs/src/project/requirements.md#custom-domain-dns-configuration) for the full DNS configuration.
+          Update the IP tables in that file as part of this PR.
+
+          ### Previous IPs
+
+          \`\`\`json
+          ${KNOWN_IPS}
+          \`\`\`
+
+          ### New IPs
+
+          \`\`\`json
+          ${RESOLVED_IPS}
+          \`\`\`
+
+          ### Reference
+
+          - [GitHub docs: Managing a custom domain](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site)"
