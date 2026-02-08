@@ -31,6 +31,7 @@ pub fn decode_and_grayscale(bytes: &[u8]) -> Result<GrayImage, PipelineError> {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -61,12 +62,9 @@ mod tests {
         )
         .ok();
 
-        let gray = decode_and_grayscale(&buf);
-        assert!(gray.is_ok());
-        let gray = gray.ok();
+        let gray = decode_and_grayscale(&buf).unwrap();
         // All pixels should be white (255) in grayscale.
-        let gray = gray.as_ref();
-        for pixel in gray.into_iter().flat_map(|g| g.pixels()) {
+        for pixel in gray.pixels() {
             assert_eq!(pixel.0[0], 255);
         }
     }
@@ -85,11 +83,9 @@ mod tests {
         )
         .ok();
 
-        let gray = decode_and_grayscale(&buf);
-        assert!(gray.is_ok());
-        let gray = gray.ok();
-        assert_eq!(gray.as_ref().map(GrayImage::width), Some(17));
-        assert_eq!(gray.as_ref().map(GrayImage::height), Some(31));
+        let gray = decode_and_grayscale(&buf).unwrap();
+        assert_eq!(gray.width(), 17);
+        assert_eq!(gray.height(), 31);
     }
 
     #[test]
@@ -101,20 +97,14 @@ mod tests {
         let green = encode_rgba_pixel(0, 255, 0);
         let blue = encode_rgba_pixel(0, 0, 255);
 
-        let r_val = decode_and_grayscale(&red)
-            .ok()
-            .map(|g| g.get_pixel(0, 0).0[0]);
-        let g_val = decode_and_grayscale(&green)
-            .ok()
-            .map(|g| g.get_pixel(0, 0).0[0]);
-        let b_val = decode_and_grayscale(&blue)
-            .ok()
-            .map(|g| g.get_pixel(0, 0).0[0]);
+        let r_val = decode_and_grayscale(&red).unwrap().get_pixel(0, 0).0[0];
+        let g_val = decode_and_grayscale(&green).unwrap().get_pixel(0, 0).0[0];
+        let b_val = decode_and_grayscale(&blue).unwrap().get_pixel(0, 0).0[0];
 
         // Green should produce the brightest value (highest luminance weight).
         assert!(
             g_val > r_val && r_val > b_val,
-            "expected green > red > blue luminance, got R={r_val:?} G={g_val:?} B={b_val:?}",
+            "expected green > red > blue luminance, got R={r_val} G={g_val} B={b_val}",
         );
     }
 
