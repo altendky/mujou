@@ -13,7 +13,8 @@ use crate::types::{Point, Polyline};
 /// Simplify a single polyline using the Ramer-Douglas-Peucker algorithm.
 ///
 /// Points within `tolerance` pixels of the line between their endpoints
-/// are removed. A tolerance of 0.0 preserves all points.
+/// are removed. A tolerance of 0.0 preserves all non-collinear points
+/// (perfectly collinear interior points are still removed).
 ///
 /// Returns the simplified polyline. Polylines with fewer than 3 points
 /// are returned unchanged (nothing to simplify).
@@ -119,7 +120,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_tolerance_preserves_all_points() {
+    fn zero_tolerance_preserves_non_collinear_points() {
         let pl = Polyline::new(vec![
             Point::new(0.0, 0.0),
             Point::new(1.0, 0.1),
