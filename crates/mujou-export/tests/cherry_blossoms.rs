@@ -1,17 +1,21 @@
 //! Integration test: run the cherry blossoms example image through the full pipeline and export to SVG.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
 
 #[test]
 fn cherry_blossoms_pipeline_to_svg() {
-    // Locate the example image relative to the workspace root.
+    // Locate the workspace root by searching upward for Cargo.lock.
     let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+        .ancestors()
+        .find(|dir| dir.join("Cargo.lock").exists())
+        .unwrap_or_else(|| {
+            panic!(
+                "could not find workspace root (no Cargo.lock above {:?})",
+                env!("CARGO_MANIFEST_DIR"),
+            )
+        })
         .to_path_buf();
     let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
     assert!(
