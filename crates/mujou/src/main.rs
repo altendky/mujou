@@ -16,6 +16,7 @@ fn app() -> Element {
     let mut result = use_signal(|| Option::<mujou_pipeline::ProcessResult>::None);
     let mut processing = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
+    let mut generation = use_signal(|| 0u64);
 
     // Use default config for now (Phase 4 adds controls).
     let config = use_signal(mujou_pipeline::PipelineConfig::default);
@@ -41,6 +42,11 @@ fn app() -> Element {
         };
         let cfg = config();
 
+        // Increment generation so any in-flight task from a prior
+        // trigger knows it is stale and should discard its result.
+        generation += 1;
+        let my_generation = generation();
+
         processing.set(true);
         error.set(None);
 
@@ -49,7 +55,15 @@ fn app() -> Element {
             // "Processing..." state before we block on the pipeline.
             gloo_timers::future::TimeoutFuture::new(0).await;
 
-            match mujou_pipeline::process(&bytes, &cfg) {
+            let outcome = mujou_pipeline::process(&bytes, &cfg);
+
+            // If another run was triggered while we were processing,
+            // discard this stale result silently.
+            if generation() != my_generation {
+                return;
+            }
+
+            match outcome {
                 Ok(res) => {
                     result.set(Some(res));
                     error.set(None);
