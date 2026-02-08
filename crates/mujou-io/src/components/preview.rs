@@ -59,7 +59,7 @@ fn build_path_data(polyline: &Polyline) -> String {
     let mut d = String::new();
     for (i, p) in points.iter().enumerate() {
         let cmd = if i == 0 { "M" } else { "L" };
-        let _ = write!(d, "{cmd}{:.1},{:.1} ", p.x, p.y);
+        let _ = write!(d, "{cmd} {:.1} {:.1} ", p.x, p.y);
     }
     d
 }
