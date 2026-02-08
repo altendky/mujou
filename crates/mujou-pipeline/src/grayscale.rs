@@ -60,7 +60,7 @@ mod tests {
             img.height(),
             image::ExtendedColorType::Rgba8,
         )
-        .ok();
+        .unwrap();
 
         let gray = decode_and_grayscale(&buf).unwrap();
         // All pixels should be white (255) in grayscale.
@@ -81,7 +81,7 @@ mod tests {
             img.height(),
             image::ExtendedColorType::Rgba8,
         )
-        .ok();
+        .unwrap();
 
         let gray = decode_and_grayscale(&buf).unwrap();
         assert_eq!(gray.width(), 17);
@@ -123,7 +123,7 @@ mod tests {
             img.height(),
             image::ExtendedColorType::Rgba8,
         )
-        .ok();
+        .unwrap();
         buf
     }
 }

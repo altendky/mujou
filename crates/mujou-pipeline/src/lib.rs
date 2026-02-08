@@ -100,6 +100,7 @@ pub fn process(image_bytes: &[u8], config: &PipelineConfig) -> Result<Polyline, 
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -127,7 +128,7 @@ mod tests {
             img.height(),
             image::ExtendedColorType::Rgba8,
         )
-        .ok();
+        .unwrap();
         buf
     }
 
@@ -156,7 +157,7 @@ mod tests {
             img.height(),
             image::ExtendedColorType::Rgba8,
         )
-        .ok();
+        .unwrap();
 
         let result = process(&buf, &PipelineConfig::default());
         assert!(matches!(result, Err(PipelineError::NoContours)));
