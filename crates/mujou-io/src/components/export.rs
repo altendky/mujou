@@ -23,6 +23,14 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
     let has_result = props.result.is_some();
     let mut export_error = use_signal(|| Option::<String>::None);
 
+    // Clear stale export errors when the pipeline result changes.
+    let result_present = props.result.is_some();
+    use_effect(move || {
+        // Subscribe to result_present so this fires on each change.
+        let _ = result_present;
+        export_error.set(None);
+    });
+
     let svg_click = {
         let result = props.result.clone();
         let filename = props.filename;
