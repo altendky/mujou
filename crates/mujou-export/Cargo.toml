@@ -11,9 +11,11 @@ keywords = ["vector", "svg", "gcode", "export"]
 categories = ["graphics"]
 
 [dependencies]
+mujou-pipeline.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+image.workspace = true
 
 [lints]
 workspace = true

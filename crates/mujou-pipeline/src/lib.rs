@@ -20,13 +20,14 @@ pub mod types;
 
 pub use contour::{ContourTracer, ContourTracerKind};
 pub use join::{PathJoiner, PathJoinerKind};
-pub use types::{Dimensions, PipelineConfig, PipelineError, Point, Polyline};
+pub use types::{Dimensions, PipelineConfig, PipelineError, Point, Polyline, ProcessResult};
 
 /// Run the full image processing pipeline.
 ///
 /// Takes raw image bytes (PNG, JPEG, BMP, WebP) and a configuration,
-/// then produces a single continuous polyline suitable for sand tables,
-/// pen plotters, and similar CNC devices.
+/// then produces a [`ProcessResult`] containing a single continuous
+/// polyline and the source image dimensions. The dimensions are needed
+/// by export serializers to set coordinate spaces (e.g., SVG `viewBox`).
 ///
 /// # Pipeline steps
 ///
@@ -45,7 +46,10 @@ pub use types::{Dimensions, PipelineConfig, PipelineError, Point, Polyline};
 /// Returns [`PipelineError::EmptyInput`] if `image_bytes` is empty.
 /// Returns [`PipelineError::ImageDecode`] if the image format is unrecognized.
 /// Returns [`PipelineError::NoContours`] if edge detection produces no contours.
-pub fn process(image_bytes: &[u8], config: &PipelineConfig) -> Result<Polyline, PipelineError> {
+pub fn process(
+    image_bytes: &[u8],
+    config: &PipelineConfig,
+) -> Result<ProcessResult, PipelineError> {
     // 1. Decode and convert to grayscale.
     let gray = grayscale::decode_and_grayscale(image_bytes)?;
     let dimensions = Dimensions {
@@ -93,9 +97,15 @@ pub fn process(image_bytes: &[u8], config: &PipelineConfig) -> Result<Polyline, 
 
         // Re-join the clipped segments into a single path.
         let rejoined = config.path_joiner.join(&clipped);
-        Ok(rejoined)
+        Ok(ProcessResult {
+            polyline: rejoined,
+            dimensions,
+        })
     } else {
-        Ok(joined)
+        Ok(ProcessResult {
+            polyline: joined,
+            dimensions,
+        })
     }
 }
 
@@ -168,10 +178,17 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let result = process(&png, &PipelineConfig::default());
         assert!(result.is_ok(), "expected Ok, got {result:?}");
-        let polyline = result.ok();
+        let process_result = result.unwrap();
         assert!(
-            polyline.as_ref().is_some_and(|p| !p.is_empty()),
-            "expected non-empty polyline",
+            !process_result.polyline.is_empty(),
+            "expected non-empty polyline"
+        );
+        assert_eq!(
+            process_result.dimensions,
+            Dimensions {
+                width: 40,
+                height: 40
+            }
         );
     }
 
@@ -187,19 +204,17 @@ mod tests {
         assert!(result.is_ok(), "expected Ok with mask, got {result:?}");
 
         // All points should be within the mask circle.
-        let polyline = result.ok();
+        let process_result = result.unwrap();
         let center = Point::new(20.0, 20.0);
         let radius = 40.0 * 0.8 / 2.0; // 16.0
-        if let Some(pl) = &polyline {
-            for p in pl.points() {
-                let dist = p.distance(center);
-                assert!(
-                    dist <= radius + 1e-6,
-                    "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
-                    p.x,
-                    p.y,
-                );
-            }
+        for p in process_result.polyline.points() {
+            let dist = p.distance(center);
+            assert!(
+                dist <= radius + 1e-6,
+                "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
+                p.x,
+                p.y,
+            );
         }
     }
 
@@ -217,19 +232,17 @@ mod tests {
         assert!(result.is_ok(), "expected Ok with mask, got {result:?}");
 
         // Radius should be based on min(60, 40) = 40, so radius = 20.0.
-        let polyline = result.ok();
+        let process_result = result.unwrap();
         let center = Point::new(30.0, 20.0);
         let radius = 40.0 / 2.0; // 20.0, based on min dimension
-        if let Some(pl) = &polyline {
-            for p in pl.points() {
-                let dist = p.distance(center);
-                assert!(
-                    dist <= radius + 1e-6,
-                    "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
-                    p.x,
-                    p.y,
-                );
-            }
+        for p in process_result.polyline.points() {
+            let dist = p.distance(center);
+            assert!(
+                dist <= radius + 1e-6,
+                "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
+                p.x,
+                p.y,
+            );
         }
     }
 
@@ -242,11 +255,11 @@ mod tests {
         };
         // Inverted edge map on a sharp-edge image should still produce
         // contours (the inverted map has large white regions).
-        let polyline = process(&png, &config).unwrap();
+        let result = process(&png, &config).unwrap();
         assert!(
-            polyline.len() >= 2,
+            result.polyline.len() >= 2,
             "expected non-trivial polyline with invert, got {} points",
-            polyline.len(),
+            result.polyline.len(),
         );
     }
 }
