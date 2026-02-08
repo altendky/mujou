@@ -29,7 +29,7 @@ pub fn simplify(polyline: &Polyline, tolerance: f64) -> Polyline {
     kept[0] = true;
     kept[points.len() - 1] = true;
 
-    rdp_recurse(points, 0, points.len() - 1, tolerance, &mut kept);
+    rdp_iterative(points, tolerance, &mut kept);
 
     let simplified: Vec<Point> = points
         .iter()
@@ -47,31 +47,36 @@ pub fn simplify_paths(polylines: &[Polyline], tolerance: f64) -> Vec<Polyline> {
     polylines.iter().map(|pl| simplify(pl, tolerance)).collect()
 }
 
-/// Recursive step of the Ramer-Douglas-Peucker algorithm.
+/// Iterative core of the Ramer-Douglas-Peucker algorithm.
 ///
-/// Finds the point between `start` and `end` that is farthest from the
-/// line segment between them. If that distance exceeds `tolerance`, the
-/// point is kept and both sub-segments are processed recursively.
-fn rdp_recurse(points: &[Point], start: usize, end: usize, tolerance: f64, kept: &mut [bool]) {
-    if end <= start + 1 {
-        return;
-    }
+/// Uses an explicit stack of `(start, end)` ranges instead of recursion
+/// to avoid O(n) call-stack depth on adversarial inputs. For each range,
+/// finds the farthest point from the line segment; if that distance
+/// exceeds `tolerance`, the point is kept and both sub-ranges are pushed.
+fn rdp_iterative(points: &[Point], tolerance: f64, kept: &mut [bool]) {
+    let mut stack = vec![(0, points.len() - 1)];
 
-    let mut max_dist = 0.0;
-    let mut max_idx = start;
-
-    for i in (start + 1)..end {
-        let d = perpendicular_distance(points[i], points[start], points[end]);
-        if d > max_dist {
-            max_dist = d;
-            max_idx = i;
+    while let Some((start, end)) = stack.pop() {
+        if end <= start + 1 {
+            continue;
         }
-    }
 
-    if max_dist > tolerance {
-        kept[max_idx] = true;
-        rdp_recurse(points, start, max_idx, tolerance, kept);
-        rdp_recurse(points, max_idx, end, tolerance, kept);
+        let mut max_dist = 0.0;
+        let mut max_idx = start;
+
+        for i in (start + 1)..end {
+            let d = perpendicular_distance(points[i], points[start], points[end]);
+            if d > max_dist {
+                max_dist = d;
+                max_idx = i;
+            }
+        }
+
+        if max_dist > tolerance {
+            kept[max_idx] = true;
+            stack.push((start, max_idx));
+            stack.push((max_idx, end));
+        }
     }
 }
 
