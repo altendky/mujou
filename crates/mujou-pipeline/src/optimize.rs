@@ -71,10 +71,9 @@ pub fn optimize_path_order(contours: &[Polyline]) -> Vec<Polyline> {
         }
 
         // The loop invariant guarantees at least one unvisited candidate,
-        // so `best` is always `Some` here. Use `continue` to satisfy the
-        // type system without panicking.
+        // so `best` is always `Some` here.
         let Some((best_idx, best_reversed)) = best else {
-            continue;
+            unreachable!("all candidates visited before loop completed");
         };
 
         visited[best_idx] = true;
