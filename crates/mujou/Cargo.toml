@@ -12,7 +12,9 @@ categories = ["graphics"]
 
 [dependencies]
 dioxus.workspace = true
+gloo-timers.workspace = true
 mujou-io.workspace = true
+mujou-pipeline.workspace = true
 
 [dev-dependencies]
 

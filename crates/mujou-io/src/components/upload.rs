@@ -1,0 +1,113 @@
+//! File upload component with drag-and-drop and file picker.
+
+use dioxus::html::HasFileData;
+use dioxus::prelude::*;
+
+/// Props for the [`FileUpload`] component.
+#[derive(Props, Clone, PartialEq)]
+pub struct FileUploadProps {
+    /// Called with the raw file bytes and filename after a successful upload.
+    on_upload: EventHandler<(Vec<u8>, String)>,
+}
+
+/// A drag-and-drop zone with a file picker button.
+///
+/// Accepts PNG, JPEG, BMP, and WebP images. When a file is selected
+/// (via the picker or drag-and-drop), reads the bytes and fires
+/// `on_upload` with `(bytes, filename)`.
+#[component]
+pub fn FileUpload(props: FileUploadProps) -> Element {
+    let mut dragging = use_signal(|| false);
+    let mut filename = use_signal(|| Option::<String>::None);
+    let mut error = use_signal(|| Option::<String>::None);
+
+    let handle_files = move |evt: FormEvent| async move {
+        let files = evt.files();
+        if let Some(file) = files.first() {
+            let name = file.name();
+            match file.read_bytes().await {
+                Ok(bytes) => {
+                    filename.set(Some(name.clone()));
+                    error.set(None);
+                    props.on_upload.call((bytes.to_vec(), name));
+                }
+                Err(e) => {
+                    error.set(Some(format!("Failed to read file: {e}")));
+                }
+            }
+        }
+    };
+
+    let handle_drop = move |evt: DragEvent| async move {
+        dragging.set(false);
+        let files = evt.files();
+        if let Some(file) = files.first() {
+            let name = file.name();
+            match file.read_bytes().await {
+                Ok(bytes) => {
+                    filename.set(Some(name.clone()));
+                    error.set(None);
+                    props.on_upload.call((bytes.to_vec(), name));
+                }
+                Err(e) => {
+                    error.set(Some(format!("Failed to read file: {e}")));
+                }
+            }
+        }
+    };
+
+    let border_class = if dragging() {
+        "border-blue-400 bg-gray-700"
+    } else {
+        "border-gray-600 bg-gray-800"
+    };
+
+    rsx! {
+        div {
+            class: "border-2 border-dashed rounded-lg p-6 text-center transition-colors {border_class}",
+            ondragover: move |evt| {
+                evt.prevent_default();
+                dragging.set(true);
+            },
+            ondragleave: move |_| {
+                dragging.set(false);
+            },
+            ondrop: handle_drop,
+
+            // Hidden file input
+            input {
+                r#type: "file",
+                accept: ".png,.jpg,.jpeg,.bmp,.webp",
+                id: "file-input",
+                class: "hidden",
+                onchange: handle_files,
+            }
+
+            if let Some(ref name) = filename() {
+                p { class: "text-green-400 mb-2",
+                    "Loaded: {name}"
+                }
+            }
+
+            if let Some(ref err) = error() {
+                p { class: "text-red-400 mb-2",
+                    "{err}"
+                }
+            }
+
+            p { class: "text-gray-400 mb-3",
+                "Drop an image here or "
+            }
+
+            label {
+                r#for: "file-input",
+                class: "inline-block px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded cursor-pointer text-white font-medium transition-colors",
+                "Choose File"
+            }
+
+            p { class: "text-gray-500 text-sm mt-2",
+                "PNG, JPEG, BMP, WebP"
+            }
+        }
+    }
+}
