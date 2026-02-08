@@ -49,7 +49,7 @@ fn app() -> Element {
         // Increment generation so any in-flight task from a prior
         // trigger knows it is stale and should discard its result.
         generation += 1;
-        let my_generation = generation();
+        let my_generation = *generation.peek();
 
         processing.set(true);
         error.set(None);
@@ -63,7 +63,7 @@ fn app() -> Element {
 
             // If another run was triggered while we were processing,
             // discard this stale result silently.
-            if generation() != my_generation {
+            if *generation.peek() != my_generation {
                 return;
             }
 
