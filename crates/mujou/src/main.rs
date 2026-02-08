@@ -107,6 +107,12 @@ fn app() -> Element {
                         Preview {
                             result: Rc::clone(res),
                         }
+                    } else if image_bytes().is_some() {
+                        div { class: "flex-1 flex items-center justify-center",
+                            p { class: "text-gray-500 text-lg",
+                                "Processing failed"
+                            }
+                        }
                     } else {
                         div { class: "flex-1 flex items-center justify-center",
                             p { class: "text-gray-600 text-lg",
