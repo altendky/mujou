@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use mujou_io::{ExportPanel, FileUpload, Preview};
 
@@ -13,7 +15,7 @@ fn app() -> Element {
     // --- Application state ---
     let mut image_bytes = use_signal(|| Option::<Vec<u8>>::None);
     let mut filename = use_signal(|| String::from("output"));
-    let mut result = use_signal(|| Option::<mujou_pipeline::ProcessResult>::None);
+    let mut result = use_signal(|| Option::<Rc<mujou_pipeline::ProcessResult>>::None);
     let mut processing = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
     let mut generation = use_signal(|| 0u64);
@@ -65,7 +67,7 @@ fn app() -> Element {
 
             match outcome {
                 Ok(res) => {
-                    result.set(Some(res));
+                    result.set(Some(Rc::new(res)));
                     error.set(None);
                 }
                 Err(e) => {
@@ -101,8 +103,7 @@ fn app() -> Element {
                         }
                     } else if let Some(ref res) = result() {
                         Preview {
-                            polyline: res.polyline.clone(),
-                            dimensions: res.dimensions,
+                            result: Rc::clone(res),
                         }
                     } else {
                         div { class: "flex-1 flex items-center justify-center",

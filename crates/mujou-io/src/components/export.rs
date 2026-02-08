@@ -1,5 +1,7 @@
 //! Export panel component with download buttons.
 
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use mujou_pipeline::ProcessResult;
 
@@ -9,7 +11,8 @@ use crate::download;
 #[derive(Props, Clone, PartialEq)]
 pub struct ExportPanelProps {
     /// The pipeline result to export. `None` disables all buttons.
-    result: Option<ProcessResult>,
+    /// Wrapped in `Rc` to avoid cloning the full polyline on each render.
+    result: Option<Rc<ProcessResult>>,
     /// Base filename (without extension) for downloads.
     filename: String,
 }

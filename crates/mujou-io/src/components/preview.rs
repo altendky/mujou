@@ -1,17 +1,17 @@
 //! SVG preview component for rendering traced paths.
 
 use std::fmt::Write;
+use std::rc::Rc;
 
 use dioxus::prelude::*;
-use mujou_pipeline::{Dimensions, Polyline};
+use mujou_pipeline::{Polyline, ProcessResult};
 
 /// Props for the [`Preview`] component.
 #[derive(Props, Clone, PartialEq)]
 pub struct PreviewProps {
-    /// The traced polyline to render.
-    polyline: Polyline,
-    /// Source image dimensions (used for the SVG `viewBox`).
-    dimensions: Dimensions,
+    /// The pipeline result to render (shared via `Rc` to avoid
+    /// cloning the full `Vec<Point>` on every render).
+    result: Rc<ProcessResult>,
 }
 
 /// Renders a `Polyline` as an inline SVG element.
@@ -21,9 +21,9 @@ pub struct PreviewProps {
 /// maintains aspect ratio.
 #[component]
 pub fn Preview(props: PreviewProps) -> Element {
-    let d = build_path_data(&props.polyline);
-    let w = props.dimensions.width;
-    let h = props.dimensions.height;
+    let d = build_path_data(&props.result.polyline);
+    let w = props.result.dimensions.width;
+    let h = props.result.dimensions.height;
     let view_box = format!("0 0 {w} {h}");
 
     rsx! {
