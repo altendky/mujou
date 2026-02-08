@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>mujou</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        background: #fafafa;
+        color: #1a1a1a;
+      }
+      main {
+        text-align: center;
+        padding: 2rem;
+      }
+      h1 {
+        font-size: 3rem;
+        font-weight: 300;
+        letter-spacing: 0.2em;
+        margin-bottom: 0.5rem;
+      }
+      p {
+        font-size: 1rem;
+        color: #666;
+        margin-bottom: 2rem;
+      }
+      nav { display: flex; gap: 2rem; justify-content: center; }
+      a {
+        color: #1a1a1a;
+        text-decoration: none;
+        border-bottom: 1px solid #ccc;
+        padding-bottom: 2px;
+      }
+      a:hover { border-bottom-color: #1a1a1a; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>mujou</h1>
+      <p>images to sand table paths</p>
+      <nav>
+        <a href="/app/">open app</a>
+        <a href="{{REPO_URL}}">source</a>
+      </nav>
+    </main>
+  </body>
+</html>

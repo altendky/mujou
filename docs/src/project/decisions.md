@@ -73,6 +73,24 @@ Move to web workers if UI blocking proves unacceptable with real-world images.
 Image2Sand uses the same approach.
 2-opt improvement deferred as a future enhancement.
 
+## Deployment Target
+
+**Decision:** GitHub Pages with custom domain (`mujou.art`), app at `/app/` path.
+
+**Rationale:** Simplest option that avoids adding a vendor.
+The code is already on GitHub, so Pages is a setting on the same repo rather than a new account and billing relationship.
+Free tier (100GB bandwidth/mo) is sufficient for a niche tool.
+Build pipeline uses GitHub Actions, which is needed for CI anyway.
+Static sites are inherently portable -- if GitHub Pages becomes insufficient, migrating to any other static host requires only changing the deploy target.
+
+**Alternatives considered:**
+
+- **Cloudflare Pages** -- faster CDN, generous free tier, pairs with R2 for blob storage. Rejected to avoid Cloudflare platform lock-in; each additional Cloudflare service (Workers, KV, R2, D1) increases coupling. The performance difference is negligible for a niche tool.
+- **Netlify** -- best deploy DX (preview deploys, form handling, split testing). Rejected because its differentiating features (forms, serverless functions) are unused by mujou, and it adds a vendor for no capability gain over GitHub Pages. Bandwidth overages are billed at $55/100GB.
+- **Subdomains** (`app.mujou.art`) -- preferred over path-based routing but requires either two repos (one per GitHub Pages site) or a different hosting provider. Path-based (`/app/`) is acceptable and keeps everything in one repo. Revisit if hosting provider changes.
+
+**Configuration:** See [Requirements](requirements.md#deployment).
+
 ## Project Architecture
 
 **Decision:** Sans-IO with three-layer Cargo workspace.

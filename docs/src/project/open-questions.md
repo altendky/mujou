@@ -7,7 +7,7 @@
 - [x] Contour tracing suitability -- Decided: design as a [pluggable algorithm strategy](principles.md#pluggable-algorithm-strategies) via the `ContourTracer` trait. MVP ships with `BorderFollowing` (Suzuki-Abe via `imageproc`). On 1px-wide Canny edges this produces doubled borders that RDP collapses in practice (same approach as Image2Sand). `MarchingSquares` is a deferred alternative for cleaner single-line geometry. See [Pipeline](pipeline.md#5-contour-tracing).
 - [ ] Spiral in/out for .thr -- Should we generate spiral-in/out paths for sand tables that need the ball to start/end at center/edge, or is that the table firmware's responsibility? Image2Sand does not generate spirals.
 - [ ] Point interpolation for .thr -- Image2Sand interpolates additional points along segments for smoother polar coordinate conversion. Do we need this, or is the point density from contour tracing sufficient?
-- [ ] Deployment target -- GitHub Pages, Cloudflare Pages, or Netlify? All support static sites. GitHub Pages is simplest (same repo), Cloudflare is fastest.
+- [x] Deployment target -- Decided: GitHub Pages. Simplest option (same repo, no additional vendor), free tier sufficient, avoids platform lock-in. App served at `/app/` path with landing page at root. See [Decisions](decisions.md#deployment-target).
 - [ ] Pre-commit scope -- Match onshape-mcp's full hook suite from day one, or start with a minimal set?
 - [ ] CI setup -- GitHub Actions workflows, when to set up? After MVP UI is working, or earlier?
 - [x] Project naming -- Decided: **mujou** (無常, impermanence), domain **mujou.art**. See [Naming](naming.md) for full exploration and reasoning.
@@ -47,3 +47,5 @@ Items to address after MVP:
 - [ ] GitHub Actions CI -- Linting, testing, WASM build, deployment
 - [ ] Release workflow -- Automated static site deployment on tag
 - [ ] Coverage reporting -- Codecov integration
+- [ ] Auto-deploy on merge to main -- Currently deploy is manual (`workflow_dispatch`). Consider triggering on push to `main` once the workflow is proven reliable. If enabled, consider whether deploy should be gated on CI passing (via `workflow_run` trigger or a combined workflow) to prevent deploying broken builds.
+- [ ] PR preview deploys -- GitHub Pages does not support deploy previews from PRs natively. Options include external services (surge.sh, Cloudflare Pages for previews only), downloadable build artifacts for manual review, or no previews (rely on local `dx serve`). Revisit if reviewing UI changes from PRs becomes painful.
