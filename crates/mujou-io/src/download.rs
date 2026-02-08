@@ -69,10 +69,11 @@ pub fn trigger_download(data: &str, filename: &str, mime_type: &str) -> Result<(
         .ok_or_else(|| DownloadError::JsError("no document body".into()))?;
     body.append_child(&anchor)?;
     anchor.click();
-    body.remove_child(&anchor)?;
 
-    // Revoke the object URL to free memory.
-    web_sys::Url::revoke_object_url(&url)?;
+    // Best-effort cleanup — the download is already initiated.
+    // Failures here should not be reported as "download failed".
+    let _ = body.remove_child(&anchor);
+    let _ = web_sys::Url::revoke_object_url(&url);
 
     Ok(())
 }
