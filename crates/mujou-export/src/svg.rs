@@ -57,18 +57,20 @@ pub fn to_svg(polylines: &[Polyline], dimensions: Dimensions) -> String {
             continue;
         }
 
-        let _ = write!(out, r#"  <path d=""#);
+        let d: String = points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let cmd = if i == 0 { "M" } else { "L" };
+                format!("{cmd} {:.1} {:.1}", p.x, p.y)
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
 
-        for (i, point) in points.iter().enumerate() {
-            let cmd = if i == 0 { "M" } else { "L" };
-            let _ = write!(out, "{cmd} {:.1} {:.1}", point.x, point.y);
-
-            if i < points.len() - 1 {
-                let _ = write!(out, " ");
-            }
-        }
-
-        let _ = writeln!(out, r#"" fill="none" stroke="black" stroke-width="1"/>"#);
+        let _ = writeln!(
+            out,
+            r#"  <path d="{d}" fill="none" stroke="black" stroke-width="1"/>"#,
+        );
     }
 
     // Closing tag
