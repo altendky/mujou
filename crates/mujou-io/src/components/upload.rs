@@ -3,6 +3,18 @@
 use dioxus::html::HasFileData;
 use dioxus::prelude::*;
 
+/// Allowed file extensions for image uploads.
+const ALLOWED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "bmp", "webp"];
+
+/// Check whether a filename has an allowed image extension.
+fn has_allowed_extension(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(_, ext)| {
+        ALLOWED_EXTENSIONS
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(ext))
+    })
+}
+
 /// Props for the [`FileUpload`] component.
 #[derive(Props, Clone, PartialEq)]
 pub struct FileUploadProps {
@@ -25,6 +37,10 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
         let files = evt.files();
         if let Some(file) = files.first() {
             let name = file.name();
+            if !has_allowed_extension(&name) {
+                error.set(Some(format!("Unsupported file type: {name}")));
+                return;
+            }
             match file.read_bytes().await {
                 Ok(bytes) => {
                     filename.set(Some(name.clone()));
@@ -39,10 +55,15 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
     };
 
     let handle_drop = move |evt: DragEvent| async move {
+        evt.prevent_default();
         dragging.set(false);
         let files = evt.files();
         if let Some(file) = files.first() {
             let name = file.name();
+            if !has_allowed_extension(&name) {
+                error.set(Some(format!("Unsupported file type: {name}")));
+                return;
+            }
             match file.read_bytes().await {
                 Ok(bytes) => {
                     filename.set(Some(name.clone()));
@@ -74,15 +95,6 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
             },
             ondrop: handle_drop,
 
-            // Hidden file input
-            input {
-                r#type: "file",
-                accept: ".png,.jpg,.jpeg,.bmp,.webp",
-                id: "file-input",
-                class: "hidden",
-                onchange: handle_files,
-            }
-
             if let Some(ref name) = filename() {
                 p { class: "text-green-400 mb-2",
                     "Loaded: {name}"
@@ -100,8 +112,13 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
             }
 
             label {
-                r#for: "file-input",
                 class: "inline-block px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded cursor-pointer text-white font-medium transition-colors",
+                input {
+                    r#type: "file",
+                    accept: ".png,.jpg,.jpeg,.bmp,.webp",
+                    class: "hidden",
+                    onchange: handle_files,
+                }
                 "Choose File"
             }
 
