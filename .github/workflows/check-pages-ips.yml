@@ -75,7 +75,7 @@ jobs:
           KNOWN_IPS: ${{ steps.compare.outputs.known }}
           RESOLVED_IPS: ${{ steps.resolve.outputs.resolved }}
         run: |
-          branch="update-pages-ips-$(date +%Y%m%d)"
+          branch="update-pages-ips-$(date +%Y%m%d-%H%M%S)"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
