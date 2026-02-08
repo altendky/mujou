@@ -136,7 +136,7 @@ The `{{REPO_URL}}` placeholder in `site/index.html` is substituted by the deploy
 
 The [deploy workflow](../../.github/workflows/deploy-github-pages.yml) assembles this structure before uploading:
 
-```
+```text
 deploy/                         # assembled by CI (not checked in)
 ├── index.html                  # from site/, with {{REPO_URL}} substituted
 ├── app/
