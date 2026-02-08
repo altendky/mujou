@@ -20,8 +20,8 @@ jobs:
       - name: Resolve current IPs
         id: resolve
         run: |
-          a_records=$(dig +short altendky.github.io A | sort)
-          aaaa_records=$(dig +short altendky.github.io AAAA | sort)
+          a_records=$(dig +short altendky.github.io A | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | sort)
+          aaaa_records=$(dig +short altendky.github.io AAAA | grep -E '^[0-9a-fA-F:]+$' | sort)
 
           echo "Current A records:"
           echo "$a_records"
@@ -30,6 +30,12 @@ jobs:
 
           a_json=$(echo "$a_records" | jq -R -s '[split("\n") | .[] | select(length > 0)]')
           aaaa_json=$(echo "$aaaa_records" | jq -R -s '[split("\n") | .[] | select(length > 0)]')
+
+          if [ "$a_json" = "[]" ] && [ "$aaaa_json" = "[]" ]; then
+            echo "::error::DNS resolution returned no records. Aborting."
+            exit 1
+          fi
+
           resolved=$(jq -n --argjson a "$a_json" --argjson aaaa "$aaaa_json" '{"a": $a, "aaaa": $aaaa}')
 
           echo "$resolved" > /tmp/resolved-ips.json
