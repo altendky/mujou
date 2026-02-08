@@ -1,6 +1,6 @@
 //! File upload component with drag-and-drop and file picker.
 
-use dioxus::html::HasFileData;
+use dioxus::html::{FileData, HasFileData};
 use dioxus::prelude::*;
 
 /// Allowed file extensions for image uploads.
@@ -33,8 +33,12 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
     let mut filename = use_signal(|| Option::<String>::None);
     let mut error = use_signal(|| Option::<String>::None);
 
-    let handle_files = move |evt: FormEvent| async move {
-        let files = evt.files();
+    // Validate, read, and forward the first file from a list.
+    //
+    // Shared by the file-picker (`handle_files`) and drag-and-drop
+    // (`handle_drop`) paths so the validation/read/callback logic
+    // lives in one place.
+    let process_files = move |files: Vec<FileData>| async move {
         if let Some(file) = files.first() {
             let name = file.name();
             if !has_allowed_extension(&name) {
@@ -54,27 +58,14 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
         }
     };
 
+    let handle_files = move |evt: FormEvent| async move {
+        process_files(evt.files()).await;
+    };
+
     let handle_drop = move |evt: DragEvent| async move {
         evt.prevent_default();
         dragging.set(false);
-        let files = evt.files();
-        if let Some(file) = files.first() {
-            let name = file.name();
-            if !has_allowed_extension(&name) {
-                error.set(Some(format!("Unsupported file type: {name}")));
-                return;
-            }
-            match file.read_bytes().await {
-                Ok(bytes) => {
-                    filename.set(Some(name.clone()));
-                    error.set(None);
-                    props.on_upload.call((bytes.to_vec(), name));
-                }
-                Err(e) => {
-                    error.set(Some(format!("Failed to read file: {e}")));
-                }
-            }
-        }
+        process_files(evt.files()).await;
     };
 
     let border_class = if dragging() {
