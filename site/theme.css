@@ -93,3 +93,8 @@
   border-color: var(--link-hover);
   color: var(--text);
 }
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--border-accent);
+  outline-offset: 2px;
+}
