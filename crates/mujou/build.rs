@@ -148,6 +148,11 @@ fn generate_index_html(site_dir: &Path, manifest_dir: &Path) {
     let detect_js = fs::read_to_string(site_dir.join("theme-detect.js"))
         .expect("failed to read site/theme-detect.js");
 
+    assert!(
+        !detect_js.contains("</script"),
+        "theme-detect.js must not contain '</script' — it is inlined in a <script> tag"
+    );
+
     let index_html = format!(
         r#"<!DOCTYPE html>
 <html>
