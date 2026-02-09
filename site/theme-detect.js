@@ -6,7 +6,8 @@
  * <html> immediately based on localStorage + system preference.
  */
 (function () {
-  var mode = localStorage.getItem("theme") || "system";
+  var mode = "system";
+  try { mode = localStorage.getItem("theme") || "system"; } catch (e) {}
   var dark =
     mode === "dark" ||
     (mode === "system" &&
