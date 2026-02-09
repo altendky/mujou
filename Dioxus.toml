@@ -2,15 +2,8 @@
 name = "mujou"
 default_platform = "web"
 
-[application.tools.tailwindcss]
-input = "input.css"
-output = "assets/tailwind.css"
-
 [web.app]
 title = "mujou"
 
 [web.watcher]
-watch_path = ["crates", "input.css"]
-
-[web.resource.dev]
-style = ["assets/tailwind.css"]
+watch_path = ["crates"]

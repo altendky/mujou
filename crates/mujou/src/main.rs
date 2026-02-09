@@ -84,11 +84,27 @@ fn app() -> Element {
 
     // --- Layout ---
     rsx! {
-        div { class: "min-h-screen bg-gray-900 text-white flex flex-col",
+        // Tailwind CSS utilities (built by Dioxus CLI prebuild or manual npx)
+        style { dangerous_inner_html: include_str!("../assets/tailwind.css") }
+
+        // Shared theme (CSS variables + toggle button styles) injected from single source file
+        style { dangerous_inner_html: include_str!("../../../site/theme.css") }
+
+        // Theme toggle logic (shared with landing page via single source file)
+        script { dangerous_inner_html: include_str!("../../../site/theme-toggle.js") }
+
+        div { class: "min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col",
+            // Theme toggle (fixed-positioned via shared theme.css;
+            // content injected by shared theme-toggle.js)
+            button {
+                class: "theme-toggle",
+                aria_label: "Toggle theme",
+            }
+
             // Header
-            header { class: "px-6 py-4 border-b border-gray-800",
+            header { class: "px-6 py-4 border-b border-[var(--border)]",
                 h1 { class: "text-2xl font-bold", "mujou" }
-                p { class: "text-gray-500 text-sm",
+                p { class: "text-[var(--muted)] text-sm",
                     "Image to vector path converter for sand tables and CNC devices"
                 }
             }
@@ -99,7 +115,7 @@ fn app() -> Element {
                 div { class: "flex-1 flex flex-col gap-4",
                     if processing() {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-gray-400 text-lg animate-pulse",
+                            p { class: "text-[var(--text-secondary)] text-lg animate-pulse",
                                 "Processing..."
                             }
                         }
@@ -109,13 +125,13 @@ fn app() -> Element {
                         }
                     } else if image_bytes().is_some() {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-gray-500 text-lg",
+                            p { class: "text-[var(--muted)] text-lg",
                                 "Processing failed"
                             }
                         }
                     } else {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-gray-600 text-lg",
+                            p { class: "text-[var(--text-placeholder)] text-lg",
                                 "Upload an image to get started"
                             }
                         }
@@ -123,8 +139,8 @@ fn app() -> Element {
 
                     // Error display
                     if let Some(ref err) = error() {
-                        div { class: "bg-red-900/50 border border-red-700 rounded p-3",
-                            p { class: "text-red-300 text-sm", "{err}" }
+                        div { class: "bg-[var(--error-bg)] border border-[var(--error-border)] rounded p-3",
+                            p { class: "text-[var(--text-error)] text-sm", "{err}" }
                         }
                     }
                 }

@@ -3,6 +3,7 @@
 
 # Tailwind CSS build output
 /assets/tailwind.css
+/crates/mujou/assets/tailwind.css
 
 # Node
 node_modules/

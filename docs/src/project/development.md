@@ -10,11 +10,9 @@
 ## Local Development
 
 ```bash
-# Install Tailwind CSS and run watcher (separate terminal)
-npx @tailwindcss/cli -i ./input.css -o ./assets/tailwind.css --watch
-
 # Start Dioxus dev server (web target)
-dx serve --platform web
+# Tailwind CSS is built by the Dioxus CLI prebuild step and injected via include_str!()
+dx serve --platform web --package mujou
 
 # Format
 cargo fmt
