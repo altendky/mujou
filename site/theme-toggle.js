@@ -27,7 +27,9 @@
   };
   var labels = { system: "System theme", light: "Light theme", dark: "Dark theme" };
 
-  var mode = localStorage.getItem("theme") || "system";
+  var stored = null;
+  try { stored = localStorage.getItem("theme"); } catch (e) {}
+  var mode = (stored && modes.indexOf(stored) !== -1) ? stored : "system";
 
   // Resolve the effective data-theme value for a given mode.
   function resolve(m) {
