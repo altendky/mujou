@@ -6,4 +6,4 @@ default_platform = "web"
 title = "mujou"
 
 [web.watcher]
-watch_path = ["crates"]
+watch_path = ["crates", "site"]
