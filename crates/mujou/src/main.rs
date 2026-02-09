@@ -96,7 +96,7 @@ fn app() -> Element {
         // Theme toggle logic — copied from site/theme-toggle.js by build.rs.
         script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
 
-        div { class: "min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col",
+        div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col",
             // Theme toggle (fixed-positioned via shared theme.css;
             // content injected by shared theme-toggle.js)
             button {
@@ -105,9 +105,9 @@ fn app() -> Element {
             }
 
             // Header
-            header { class: "px-6 py-4 border-b border-[var(--border)]",
+            header { class: "px-6 py-4 border-b border-(--border)",
                 h1 { class: "text-2xl font-bold", "mujou" }
-                p { class: "text-[var(--muted)] text-sm",
+                p { class: "text-(--muted) text-sm",
                     "Image to vector path converter for sand tables and CNC devices"
                 }
             }
@@ -118,7 +118,7 @@ fn app() -> Element {
                 div { class: "flex-1 flex flex-col gap-4",
                     if processing() {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-[var(--text-secondary)] text-lg animate-pulse",
+                            p { class: "text-(--text-secondary) text-lg animate-pulse",
                                 "Processing..."
                             }
                         }
@@ -128,13 +128,13 @@ fn app() -> Element {
                         }
                     } else if image_bytes().is_some() {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-[var(--muted)] text-lg",
+                            p { class: "text-(--muted) text-lg",
                                 "Processing failed"
                             }
                         }
                     } else {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-[var(--text-placeholder)] text-lg",
+                            p { class: "text-(--text-placeholder) text-lg",
                                 "Upload an image to get started"
                             }
                         }
@@ -142,8 +142,8 @@ fn app() -> Element {
 
                     // Error display
                     if let Some(ref err) = error() {
-                        div { class: "bg-[var(--error-bg)] border border-[var(--error-border)] rounded p-3",
-                            p { class: "text-[var(--text-error)] text-sm", "{err}" }
+                        div { class: "bg-(--error-bg) border border-(--error-border) rounded p-3",
+                            p { class: "text-(--text-error) text-sm", "{err}" }
                         }
                     }
                 }
