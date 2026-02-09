@@ -61,42 +61,17 @@
     }
   });
 
-  // Wire up toggle buttons once they exist in the DOM.
-  // We track which buttons have already been wired to avoid duplicate listeners.
-  var wired = new WeakSet();
-
-  function wireButtons() {
-    var buttons = document.querySelectorAll(".theme-toggle");
-    var found = false;
-    for (var i = 0; i < buttons.length; i++) {
-      found = true;
-      if (!wired.has(buttons[i])) {
-        wired.add(buttons[i]);
-        buttons[i].addEventListener("click", function () {
-          apply(modes[(modes.indexOf(mode) + 1) % modes.length]);
-        });
-      }
+  // Delegate click on the document so dynamically-rendered buttons
+  // (e.g. Dioxus WASM re-renders) always work without re-wiring.
+  document.addEventListener("click", function (e) {
+    if (e.target.closest(".theme-toggle")) {
+      apply(modes[(modes.indexOf(mode) + 1) % modes.length]);
     }
-    if (found) {
-      apply(mode);
-    }
-    return found;
-  }
+  });
 
-  // Try immediately, then observe for dynamically-rendered buttons
-  // (e.g. Dioxus WASM mounts after DOMContentLoaded).
+  // Apply current mode to any existing toggle buttons.
   function init() {
-    if (wireButtons()) return;
-
-    var observer = new MutationObserver(function () {
-      if (wireButtons()) {
-        observer.disconnect();
-      }
-    });
-    observer.observe(document.body || document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
+    apply(mode);
   }
 
   if (document.readyState === "loading") {
