@@ -85,14 +85,17 @@ fn build_tailwind_css(manifest_dir: &Path, workspace_root: &Path, out_dir: &Path
     let crates_dir = workspace_root.join("crates");
     register_rs_sources(&crates_dir);
 
+    let input_lossy = input.to_string_lossy();
+    let output_lossy = output.to_string_lossy();
+    let mut args: Vec<&str> = vec!["@tailwindcss/cli", "-i", &input_lossy, "-o", &output_lossy];
+
+    let profile = env::var("PROFILE").unwrap_or_default();
+    if profile == "release" {
+        args.push("--minify");
+    }
+
     let status = Command::new("npx")
-        .args([
-            "@tailwindcss/cli",
-            "-i",
-            &input.to_string_lossy(),
-            "-o",
-            &output.to_string_lossy(),
-        ])
+        .args(&args)
         .status()
         .unwrap_or_else(|e| {
             panic!(
