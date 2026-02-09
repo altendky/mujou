@@ -7,7 +7,7 @@
 //! ## Tailwind CSS compilation (see [issue #12])
 //!
 //! Runs `npx @tailwindcss/cli` to compile `crates/mujou/tailwind.css`
-//! into `crates/mujou/assets/tailwind.css`.  This replaces the Dioxus
+//! into `$OUT_DIR/assets/tailwind.css`.  This replaces the Dioxus
 //! CLI's bundled Tailwind integration so we control the version and
 //! every `cargo` invocation (clippy, test, coverage, etc.) can compile
 //! without relying on `dx build` having run first.
@@ -48,7 +48,7 @@ fn main() {
         .expect("could not find workspace root");
     let site_dir = workspace_root.join("site");
 
-    build_tailwind_css(&manifest_dir, workspace_root);
+    build_tailwind_css(&manifest_dir, workspace_root, &out_dir);
     copy_site_assets(&site_dir, &out_dir);
     generate_index_html(&site_dir, &manifest_dir);
 }
@@ -56,15 +56,19 @@ fn main() {
 /// Compile Tailwind CSS via `npx @tailwindcss/cli`.
 ///
 /// Input:  `crates/mujou/tailwind.css`
-/// Output: `crates/mujou/assets/tailwind.css` (gitignored)
+/// Output: `$OUT_DIR/assets/tailwind.css`
+///
+/// Writing to `OUT_DIR` (rather than the source tree) avoids issues
+/// with read-only source trees (Nix, CI sandboxes) and races from
+/// concurrent `cargo` invocations.
 ///
 /// The output path is exposed as `TAILWIND_CSS_PATH` for
 /// `include_str!(env!("TAILWIND_CSS_PATH"))` in `main.rs`.
 ///
 /// See: <https://github.com/altendky/mujou/issues/12>
-fn build_tailwind_css(manifest_dir: &Path, workspace_root: &Path) {
+fn build_tailwind_css(manifest_dir: &Path, workspace_root: &Path, out_dir: &Path) {
     let input = manifest_dir.join("tailwind.css");
-    let assets_dir = manifest_dir.join("assets");
+    let assets_dir = out_dir.join("assets");
     let output = assets_dir.join("tailwind.css");
 
     // Ensure the assets directory exists.
