@@ -78,12 +78,13 @@ fn build_tailwind_css(manifest_dir: &Path, workspace_root: &Path, out_dir: &Path
     // Rerun when the Tailwind input file changes.
     println!("cargo:rerun-if-changed={}", input.display());
 
-    // Rerun when any .rs file under crates/ changes, because Tailwind
-    // scans them for utility class names via `@source "../"` in the
-    // input CSS.  This is broad but ensures the CSS output stays in
-    // sync with class usage across all crates.
+    // Rerun when .rs files in UI crates change, because Tailwind scans
+    // them for utility class names via `@source "../"` in the input CSS.
+    // Only `mujou` and `mujou-io` contain Tailwind utility classes;
+    // core crates (`mujou-pipeline`, `mujou-export`) do not.
     let crates_dir = workspace_root.join("crates");
-    register_rs_sources(&crates_dir);
+    register_rs_sources(&crates_dir.join("mujou"));
+    register_rs_sources(&crates_dir.join("mujou-io"));
 
     let input_lossy = input.to_string_lossy();
     let output_lossy = output.to_string_lossy();
