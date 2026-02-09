@@ -11,6 +11,7 @@ fn main() {
 ///
 /// Manages the core application state via Dioxus signals and wires
 /// together the upload, preview, and export components.
+#[allow(clippy::too_many_lines)]
 fn app() -> Element {
     // --- Application state ---
     let mut image_bytes = use_signal(|| Option::<Vec<u8>>::None);
@@ -84,8 +85,9 @@ fn app() -> Element {
 
     // --- Layout ---
     rsx! {
-        // Tailwind CSS utilities (built by Dioxus CLI prebuild or manual npx)
-        style { dangerous_inner_html: include_str!("../assets/tailwind.css") }
+        // Tailwind CSS utilities — compiled by build.rs via npx @tailwindcss/cli.
+        // See: https://github.com/altendky/mujou/issues/12
+        style { dangerous_inner_html: include_str!(env!("TAILWIND_CSS_PATH")) }
 
         // Shared theme (CSS variables + toggle button styles) — copied from
         // site/theme.css by build.rs to avoid fragile ../../../ paths.

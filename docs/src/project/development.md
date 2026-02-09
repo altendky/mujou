@@ -11,7 +11,11 @@
 
 ```bash
 # Start Dioxus dev server (web target)
-# Tailwind CSS is built by the Dioxus CLI prebuild step.
+# Tailwind CSS is compiled by build.rs via `npx @tailwindcss/cli` so that
+# every cargo invocation (clippy, test, coverage, dx serve, etc.) works
+# without relying on the Dioxus CLI's bundled Tailwind.
+# See: https://github.com/altendky/mujou/issues/12
+#
 # Shared theme assets (site/theme.css, site/theme-toggle.js, site/theme-detect.js)
 # are copied to OUT_DIR by build.rs and injected via include_str!().
 # build.rs also generates crates/mujou/index.html (gitignored) with the
