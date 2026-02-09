@@ -87,11 +87,12 @@ fn app() -> Element {
         // Tailwind CSS utilities (built by Dioxus CLI prebuild or manual npx)
         style { dangerous_inner_html: include_str!("../assets/tailwind.css") }
 
-        // Shared theme (CSS variables + toggle button styles) injected from single source file
-        style { dangerous_inner_html: include_str!("../../../site/theme.css") }
+        // Shared theme (CSS variables + toggle button styles) — copied from
+        // site/theme.css by build.rs to avoid fragile ../../../ paths.
+        style { dangerous_inner_html: include_str!(env!("THEME_CSS_PATH")) }
 
-        // Theme toggle logic (shared with landing page via single source file)
-        script { dangerous_inner_html: include_str!("../../../site/theme-toggle.js") }
+        // Theme toggle logic — copied from site/theme-toggle.js by build.rs.
+        script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
 
         div { class: "min-h-screen bg-[var(--bg)] text-[var(--text)] flex flex-col",
             // Theme toggle (fixed-positioned via shared theme.css;

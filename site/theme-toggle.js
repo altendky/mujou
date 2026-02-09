@@ -4,10 +4,16 @@
  * Cycles: system → light → dark → system.
  * Persists choice to localStorage.
  * Looks for a button with class "theme-toggle" in the DOM.
+ *
+ * Early flash prevention is handled by theme-detect.js which must
+ * run in <head> before any CSS is applied.  This script handles the
+ * interactive toggle button and live OS preference tracking.
  */
 
 (function () {
   var modes = ["system", "light", "dark"];
+  var darkQuery = matchMedia("(prefers-color-scheme: dark)");
+
   var svg = function (body) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + body + "</svg>";
   };
@@ -23,13 +29,17 @@
 
   var mode = localStorage.getItem("theme") || "system";
 
+  // Resolve the effective data-theme value for a given mode.
+  function resolve(m) {
+    if (m === "system") {
+      return darkQuery.matches ? "dark" : "light";
+    }
+    return m;
+  }
+
   function apply(m) {
     mode = m;
-    if (m === "system") {
-      document.documentElement.removeAttribute("data-theme");
-    } else {
-      document.documentElement.setAttribute("data-theme", m);
-    }
+    document.documentElement.setAttribute("data-theme", resolve(m));
     localStorage.setItem("theme", m);
 
     // Update all toggle buttons on the page.
@@ -41,11 +51,13 @@
     }
   }
 
-  // Apply saved preference immediately (before DOM is fully ready)
-  // to avoid a flash of wrong theme.
-  if (mode !== "system") {
-    document.documentElement.setAttribute("data-theme", mode);
-  }
+  // When the OS preference changes and the user is in "system" mode,
+  // update the resolved theme live.
+  darkQuery.addEventListener("change", function () {
+    if (mode === "system") {
+      apply("system");
+    }
+  });
 
   // Wire up toggle buttons once they exist in the DOM.
   // We track which buttons have already been wired to avoid duplicate listeners.

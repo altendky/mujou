@@ -11,7 +11,11 @@
 
 ```bash
 # Start Dioxus dev server (web target)
-# Tailwind CSS is built by the Dioxus CLI prebuild step and injected via include_str!()
+# Tailwind CSS is built by the Dioxus CLI prebuild step.
+# Shared theme assets (site/theme.css, site/theme-toggle.js, site/theme-detect.js)
+# are copied to OUT_DIR by build.rs and injected via include_str!().
+# build.rs also generates crates/mujou/index.html (gitignored) with the
+# theme-detect script inlined in <head> to prevent flash of wrong theme.
 dx serve --platform web --package mujou
 
 # Format
