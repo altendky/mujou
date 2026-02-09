@@ -5,11 +5,15 @@
 - Rust (edition 2024, see `rust-toolchain.toml` for pinned version)
 - `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
 - Dioxus CLI: `cargo install dioxus-cli` or `cargo binstall dioxus-cli`
-- Node.js / npm (for Tailwind CSS)
+- Node.js / npm (for Tailwind CSS — see [issue #12](https://github.com/altendky/mujou/issues/12))
 
 ## Local Development
 
 ```bash
+# Install Tailwind CSS dependencies (required before any cargo command).
+# build.rs compiles Tailwind CSS via `npx @tailwindcss/cli`.
+npm ci
+
 # Start Dioxus dev server (web target)
 # Tailwind CSS is compiled by build.rs via `npx @tailwindcss/cli` so that
 # every cargo invocation (clippy, test, coverage, dx serve, etc.) works

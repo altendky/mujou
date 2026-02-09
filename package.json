@@ -1,0 +1,8 @@
+{
+  "private": true,
+  "description": "Tailwind CSS build dependencies for build.rs. See: https://github.com/altendky/mujou/issues/12",
+  "devDependencies": {
+    "@tailwindcss/cli": "4.1.18",
+    "tailwindcss": "4.1.18"
+  }
+}
