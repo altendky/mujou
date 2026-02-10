@@ -365,6 +365,22 @@ pub fn generate_themed_edge_urls(
     })
 }
 
+/// A single Blob URL that auto-revokes on drop.
+///
+/// Used by `use_memo` caches so the URL is revoked when the memo
+/// recomputes or the component unmounts.
+#[derive(PartialEq, Eq)]
+pub struct CachedBlobUrl {
+    /// The Blob URL string.
+    pub url: String,
+}
+
+impl Drop for CachedBlobUrl {
+    fn drop(&mut self) {
+        revoke_blob_url(&self.url);
+    }
+}
+
 /// Revoke a Blob URL previously created by [`gray_image_to_blob_url`]
 /// or [`themed_gray_image_to_blob_url`].
 ///
