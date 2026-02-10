@@ -55,6 +55,7 @@ fn main() {
 
     build_tailwind_css(&manifest_dir, workspace_root, &out_dir);
     copy_site_assets(&site_dir, &out_dir);
+    copy_example_image(workspace_root, &out_dir);
     generate_index_html(&site_dir, &manifest_dir);
 }
 
@@ -153,6 +154,20 @@ fn copy_site_assets(site_dir: &Path, out_dir: &Path) {
         });
         println!("cargo:rustc-env={env_key}={}", dst.display());
     }
+}
+
+/// Copy the cherry blossoms example image into `OUT_DIR` so that
+/// `main.rs` can `include_bytes!` it via a stable environment variable
+/// path.  This bundles the image into the WASM binary so the app can
+/// display example output on first load without requiring a user upload.
+fn copy_example_image(workspace_root: &Path, out_dir: &Path) {
+    let src = workspace_root.join("assets/examples/cherry-blossoms.png");
+    let dst = out_dir.join("cherry-blossoms.png");
+
+    println!("cargo:rerun-if-changed={}", src.display());
+    fs::copy(&src, &dst)
+        .unwrap_or_else(|e| panic!("failed to copy {} to {}: {e}", src.display(), dst.display()));
+    println!("cargo:rustc-env=CHERRY_BLOSSOMS_PATH={}", dst.display());
 }
 
 /// Generate `crates/mujou/index.html` with the theme-detect script

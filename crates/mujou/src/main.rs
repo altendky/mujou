@@ -10,6 +10,10 @@ use mujou_io::{ExportPanel, FileUpload, Filmstrip, StageControls, StageId, Stage
 /// thrashing during continuous slider drags.
 const CONFIG_DEBOUNCE_MS: u32 = 200;
 
+/// Cherry blossoms example image bundled at compile time so the app
+/// can show example output immediately on first load.
+static CHERRY_BLOSSOMS: &[u8] = include_bytes!(env!("CHERRY_BLOSSOMS_PATH"));
+
 fn main() {
     dioxus::launch(app);
 }
@@ -22,8 +26,8 @@ fn main() {
 #[allow(clippy::too_many_lines)]
 fn app() -> Element {
     // --- Application state ---
-    let mut image_bytes = use_signal(|| Option::<Vec<u8>>::None);
-    let mut filename = use_signal(|| String::from("output"));
+    let mut image_bytes = use_signal(|| Some(CHERRY_BLOSSOMS.to_vec()));
+    let mut filename = use_signal(|| String::from("cherry-blossoms"));
     let mut result = use_signal(|| Option::<Rc<mujou_pipeline::StagedResult>>::None);
     let mut processing = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
