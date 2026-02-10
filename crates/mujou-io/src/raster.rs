@@ -89,10 +89,13 @@ pub fn themed_gray_image_to_blob_url(
     bg: [u8; 3],
     fg: [u8; 3],
 ) -> Result<String, RasterError> {
+    // 0. Soft-dilate edge pixels so thin lines survive smooth downscaling.
+    let dilated = dilate_soft(image);
+
     // 1. Map grayscale pixels to RGB using bg/fg colors.
-    let (w, h) = (image.width(), image.height());
+    let (w, h) = (dilated.width(), dilated.height());
     let mut rgb_buf = Vec::with_capacity((w * h * 3) as usize);
-    for p in image.pixels() {
+    for p in dilated.pixels() {
         let v = p.0[0];
         // For binary images (0 or 255) this reduces to selecting bg or fg.
         // For intermediate values, interpolate linearly.
@@ -119,6 +122,39 @@ pub fn themed_gray_image_to_blob_url(
 
     let url = web_sys::Url::create_object_url_with_blob(&blob)?;
     Ok(url)
+}
+
+/// Soft-dilate a binary image to approximate 1.25 px stroke width.
+///
+/// Edge pixels (255) are kept at full intensity.  Their four cardinal
+/// neighbors are set to quarter intensity (64) if they are not already
+/// foreground.  The color mapper's linear interpolation then renders
+/// those fringe pixels as a 25 % blend of bg/fg, giving each 1 px
+/// edge line a visual weight of roughly 1.25 px after smooth browser
+/// downscaling.
+///
+/// Only intended for binary images (values 0 and 255).
+fn dilate_soft(image: &GrayImage) -> GrayImage {
+    let (w, h) = (image.width(), image.height());
+    GrayImage::from_fn(w, h, |x, y| {
+        // Already a foreground pixel — keep at full intensity.
+        if image.get_pixel(x, y).0[0] == 255 {
+            return image::Luma([255]);
+        }
+        // Check cardinal neighbors for a foreground pixel.
+        let neighbors: [(u32, u32); 4] = [
+            (x.wrapping_sub(1), y),
+            (x + 1, y),
+            (x, y.wrapping_sub(1)),
+            (x, y + 1),
+        ];
+        for (nx, ny) in neighbors {
+            if nx < w && ny < h && image.get_pixel(nx, ny).0[0] == 255 {
+                return image::Luma([64]);
+            }
+        }
+        image::Luma([0])
+    })
 }
 
 /// RGB color parsed from a CSS hex color value.
@@ -200,6 +236,11 @@ pub fn read_both_preview_colors() -> Result<BothPreviewColors, RasterError> {
 
     // Temporarily swap to the other theme and read its colors.
     el.set_attribute("data-theme", other_theme)?;
+    // Force synchronous style recalculation — reading a layout property
+    // makes the browser flush pending style changes before we query
+    // computed CSS custom properties.
+    let html: &web_sys::HtmlElement = wasm_bindgen::JsCast::unchecked_ref(&el);
+    let _ = html.offset_height();
     let other_colors = read_preview_colors();
     // Always restore, even if reading failed.
     let _ = el.set_attribute("data-theme", &current_theme);
