@@ -9,3 +9,4 @@ pub mod raster;
 pub mod stage;
 
 pub use components::{ExportPanel, FileUpload, Filmstrip, Preview, StageControls, StagePreview};
+pub use stage::StageId;

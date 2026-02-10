@@ -1,8 +1,7 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use mujou_io::stage::StageId;
-use mujou_io::{ExportPanel, FileUpload, Filmstrip, StageControls, StagePreview};
+use mujou_io::{ExportPanel, FileUpload, Filmstrip, StageControls, StageId, StagePreview};
 
 /// Debounce delay in milliseconds for config changes.
 ///
