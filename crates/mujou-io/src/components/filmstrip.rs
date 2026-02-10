@@ -10,7 +10,6 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use dioxus_signals::Memo;
 use mujou_pipeline::StagedResult;
 
 use crate::raster;
