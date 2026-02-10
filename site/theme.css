@@ -1,0 +1,103 @@
+/*
+ * Shared color theme for mujou.
+ *
+ * Used by both the static landing page and the Dioxus app.
+ * Supports system preference via prefers-color-scheme and
+ * manual override via data-theme attribute on <html>.
+ */
+
+:root {
+  /* -- Light palette (default) -- */
+  --bg: #fafafa;
+  --text: #1a1a1a;
+  --text-heading: #333;
+  --text-secondary: #555;
+  --text-placeholder: #999;
+  --muted: #666;
+  --border: #ddd;
+  --border-muted: #ccc;
+  --border-accent: #3b82f6;
+  --surface: #f0f0f0;
+  --surface-active: #e5e5e5;
+  --rule: #999;
+  --link-border: #ccc;
+  --link-hover: #1a1a1a;
+  --btn-primary: #2563eb;
+  --btn-primary-hover: #3b82f6;
+  --btn-disabled: #e5e5e5;
+  --text-disabled: #999;
+  --text-success: #16a34a;
+  --text-error: #dc2626;
+  --error-bg: rgba(220, 38, 38, 0.1);
+  --error-border: #f87171;
+  /* Preview canvas colors are intentionally theme-independent —
+     the drawing surface stays constant regardless of UI theme. */
+  --preview-bg: #fff;
+  --preview-stroke: #000;
+}
+
+[data-theme="dark"] {
+  --bg: #171717;
+  --text: #fafafa;
+  --text-heading: #d4d4d4;
+  --text-secondary: #a3a3a3;
+  --text-placeholder: #525252;
+  --muted: #737373;
+  --border: #262626;
+  --border-muted: #525252;
+  --border-accent: #60a5fa;
+  --surface: #262626;
+  --surface-active: #404040;
+  --rule: #525252;
+  --link-border: #525252;
+  --link-hover: #fafafa;
+  --btn-primary: #2563eb;
+  --btn-primary-hover: #3b82f6;
+  --btn-disabled: #404040;
+  --text-disabled: #737373;
+  --text-success: #4ade80;
+  --text-error: #f87171;
+  --error-bg: rgba(127, 29, 29, 0.5);
+  --error-border: #b91c1c;
+  /* Same as light — see comment above. */
+  --preview-bg: #fff;
+  --preview-stroke: #000;
+}
+
+/* Theme toggle button — shared appearance and position */
+.theme-toggle {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 50;
+  -webkit-appearance: none;
+  appearance: none;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: 1px solid var(--link-border);
+  border-radius: 50%;
+  width: 2.5rem;
+  height: 2.5rem;
+  cursor: pointer;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.theme-toggle svg {
+  width: 1.1rem;
+  height: 1.1rem;
+}
+
+.theme-toggle:hover {
+  border-color: var(--link-hover);
+  color: var(--text);
+}
+
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--border-accent);
+  outline-offset: 2px;
+}

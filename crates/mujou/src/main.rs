@@ -11,6 +11,7 @@ fn main() {
 ///
 /// Manages the core application state via Dioxus signals and wires
 /// together the upload, preview, and export components.
+#[allow(clippy::too_many_lines)]
 fn app() -> Element {
     // --- Application state ---
     let mut image_bytes = use_signal(|| Option::<Vec<u8>>::None);
@@ -84,11 +85,29 @@ fn app() -> Element {
 
     // --- Layout ---
     rsx! {
-        div { class: "min-h-screen bg-gray-900 text-white flex flex-col",
+        // Tailwind CSS utilities — compiled by build.rs via npx @tailwindcss/cli.
+        // See: https://github.com/altendky/mujou/issues/12
+        style { dangerous_inner_html: include_str!(env!("TAILWIND_CSS_PATH")) }
+
+        // Shared theme (CSS variables + toggle button styles) — copied from
+        // site/theme.css by build.rs to avoid fragile ../../../ paths.
+        style { dangerous_inner_html: include_str!(env!("THEME_CSS_PATH")) }
+
+        // Theme toggle logic — copied from site/theme-toggle.js by build.rs.
+        script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
+
+        div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col",
+            // Theme toggle (fixed-positioned via shared theme.css;
+            // content injected by shared theme-toggle.js)
+            button {
+                class: "theme-toggle",
+                aria_label: "Toggle theme",
+            }
+
             // Header
-            header { class: "px-6 py-4 border-b border-gray-800",
+            header { class: "px-6 py-4 border-b border-(--border)",
                 h1 { class: "text-2xl font-bold", "mujou" }
-                p { class: "text-gray-500 text-sm",
+                p { class: "text-(--muted) text-sm",
                     "Image to vector path converter for sand tables and CNC devices"
                 }
             }
@@ -99,7 +118,7 @@ fn app() -> Element {
                 div { class: "flex-1 flex flex-col gap-4",
                     if processing() {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-gray-400 text-lg animate-pulse",
+                            p { class: "text-(--text-secondary) text-lg animate-pulse",
                                 "Processing..."
                             }
                         }
@@ -109,13 +128,13 @@ fn app() -> Element {
                         }
                     } else if image_bytes().is_some() {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-gray-500 text-lg",
+                            p { class: "text-(--muted) text-lg",
                                 "Processing failed"
                             }
                         }
                     } else {
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-gray-600 text-lg",
+                            p { class: "text-(--text-placeholder) text-lg",
                                 "Upload an image to get started"
                             }
                         }
@@ -123,8 +142,8 @@ fn app() -> Element {
 
                     // Error display
                     if let Some(ref err) = error() {
-                        div { class: "bg-red-900/50 border border-red-700 rounded p-3",
-                            p { class: "text-red-300 text-sm", "{err}" }
+                        div { class: "bg-(--error-bg) border border-(--error-border) rounded p-3",
+                            p { class: "text-(--text-error) text-sm", "{err}" }
                         }
                     }
                 }

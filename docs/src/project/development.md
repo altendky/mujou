@@ -5,16 +5,26 @@
 - Rust (edition 2024, see `rust-toolchain.toml` for pinned version)
 - `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
 - Dioxus CLI: `cargo install dioxus-cli` or `cargo binstall dioxus-cli`
-- Node.js / npm (for Tailwind CSS)
+- Node.js / npm (for Tailwind CSS — see [issue #12](https://github.com/altendky/mujou/issues/12))
 
 ## Local Development
 
 ```bash
-# Install Tailwind CSS and run watcher (separate terminal)
-npx @tailwindcss/cli -i ./input.css -o ./assets/tailwind.css --watch
+# Install Tailwind CSS dependencies (required before any cargo command).
+# build.rs compiles Tailwind CSS via `npx @tailwindcss/cli`.
+npm ci
 
 # Start Dioxus dev server (web target)
-dx serve --platform web
+# Tailwind CSS is compiled by build.rs via `npx @tailwindcss/cli` so that
+# every cargo invocation (clippy, test, coverage, dx serve, etc.) works
+# without relying on the Dioxus CLI's bundled Tailwind.
+# See: https://github.com/altendky/mujou/issues/12
+#
+# Shared theme assets (site/theme.css, site/theme-toggle.js, site/theme-detect.js)
+# are copied to OUT_DIR by build.rs and injected via include_str!().
+# build.rs also generates crates/mujou/index.html (gitignored) with the
+# theme-detect script inlined in <head> to prevent flash of wrong theme.
+dx serve --platform web --package mujou
 
 # Format
 cargo fmt

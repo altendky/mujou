@@ -50,15 +50,16 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
         }
     };
 
-    let enabled_class = "px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded text-white font-medium transition-colors cursor-pointer";
-    let disabled_class = "px-4 py-2 bg-gray-700 rounded text-gray-500 cursor-not-allowed";
+    let enabled_class = "px-4 py-2 bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded text-white font-medium transition-colors cursor-pointer";
+    let disabled_class =
+        "px-4 py-2 bg-[var(--btn-disabled)] rounded text-[var(--text-disabled)] cursor-not-allowed";
 
     rsx! {
         div { class: "space-y-3",
-            h3 { class: "text-lg font-semibold text-gray-300", "Export" }
+            h3 { class: "text-lg font-semibold text-[var(--text-heading)]", "Export" }
 
             if let Some(ref err) = export_error() {
-                p { class: "text-red-400 text-sm", "{err}" }
+                p { class: "text-[var(--text-error)] text-sm", "{err}" }
             }
 
             div { class: "flex flex-wrap gap-2",

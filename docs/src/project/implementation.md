@@ -8,7 +8,7 @@
 - [ ] Create crate structure: `mujou-pipeline`, `mujou-export`, `mujou-io`, `mujou`
 - [ ] Create `rust-toolchain.toml`, `rustfmt.toml`, `.gitignore`
 - [ ] Create `Dioxus.toml` pointing to the `mujou` binary crate
-- [ ] Set up Tailwind CSS (`input.css`, asset pipeline)
+- [ ] Set up Tailwind CSS (`tailwind.css`, asset pipeline)
 - [ ] Add `LICENSE-MIT`, `LICENSE-APACHE`
 - [ ] Verify `dx serve --platform web` shows a basic page
 

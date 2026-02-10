@@ -69,9 +69,9 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
     };
 
     let border_class = if dragging() {
-        "border-blue-400 bg-gray-700"
+        "border-[var(--border-accent)] bg-[var(--surface-active)]"
     } else {
-        "border-gray-600 bg-gray-800"
+        "border-[var(--border-muted)] bg-[var(--surface)]"
     };
 
     rsx! {
@@ -87,23 +87,23 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
             ondrop: handle_drop,
 
             if let Some(ref name) = filename() {
-                p { class: "text-green-400 mb-2",
+                p { class: "text-[var(--text-success)] mb-2",
                     "Loaded: {name}"
                 }
             }
 
             if let Some(ref err) = error() {
-                p { class: "text-red-400 mb-2",
+                p { class: "text-[var(--text-error)] mb-2",
                     "{err}"
                 }
             }
 
-            p { class: "text-gray-400 mb-3",
+            p { class: "text-[var(--text-secondary)] mb-3",
                 "Drop an image here or "
             }
 
             label {
-                class: "inline-block px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded cursor-pointer text-white font-medium transition-colors",
+                class: "inline-block px-4 py-2 bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white font-medium transition-colors",
                 input {
                     r#type: "file",
                     accept: ".png,.jpg,.jpeg,.bmp,.webp",
@@ -113,7 +113,7 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
                 "Choose File"
             }
 
-            p { class: "text-gray-500 text-sm mt-2",
+            p { class: "text-[var(--muted)] text-sm mt-2",
                 "PNG, JPEG, BMP, WebP"
             }
         }
