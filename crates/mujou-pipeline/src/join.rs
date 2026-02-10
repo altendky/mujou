@@ -491,4 +491,60 @@ mod tests {
             result.len(),
         );
     }
+
+    /// Diagnostic test: measure algorithm behavior on realistic synthetic data.
+    ///
+    /// Run with `cargo test -p mujou-pipeline retrace_diagnostic -- --nocapture`
+    /// to see timing and output growth stats.
+    #[test]
+    fn retrace_diagnostic_reports_stats() {
+        use std::time::Instant;
+
+        // Simulate ~200 contours with ~50 points each, scattered randomly-ish
+        // across a 1000x1000 canvas.  Use a deterministic pseudo-random
+        // pattern (no rand dependency).
+        let n_contours = 200;
+        let pts_per_contour = 50;
+
+        let contours: Vec<Polyline> = (0..n_contours)
+            .map(|i| {
+                // Spread contour centers across the canvas using a simple hash.
+                let cx = f64::from((i * 137 + 17) % 1000);
+                let cy = f64::from((i * 251 + 43) % 1000);
+                let points: Vec<Point> = (0..pts_per_contour)
+                    .map(|j| {
+                        let angle =
+                            std::f64::consts::TAU * f64::from(j) / f64::from(pts_per_contour);
+                        let r = f64::from(j % 5).mul_add(2.0, 10.0);
+                        Point::new(r.mul_add(angle.cos(), cx), r.mul_add(angle.sin(), cy))
+                    })
+                    .collect();
+                Polyline::new(points)
+            })
+            .collect();
+
+        let total_input_points: usize = contours.iter().map(Polyline::len).sum();
+
+        let start = Instant::now();
+        let result = PathJoinerKind::Retrace.join(&contours);
+        let elapsed = start.elapsed();
+
+        let output_points = result.len();
+        let backtrack_points = output_points - total_input_points;
+        #[allow(clippy::cast_precision_loss)]
+        let expansion_ratio = output_points as f64 / total_input_points as f64;
+
+        eprintln!("--- retrace diagnostic ---");
+        eprintln!("  contours:         {n_contours}");
+        eprintln!("  pts/contour:      {pts_per_contour}");
+        eprintln!("  total input pts:  {total_input_points}");
+        eprintln!("  output pts:       {output_points}");
+        eprintln!("  backtrack pts:    {backtrack_points}");
+        eprintln!("  expansion ratio:  {expansion_ratio:.2}x");
+        eprintln!("  elapsed:          {elapsed:?}");
+        eprintln!("--------------------------");
+
+        // Sanity: output should be at least input size.
+        assert!(output_points >= total_input_points);
+    }
 }
