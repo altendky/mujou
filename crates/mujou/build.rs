@@ -41,7 +41,12 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    // Workspace root is two levels up from crates/mujou/
+    // Workspace root is two levels up from crates/mujou/.
+    // This assumes the crate lives at `<workspace>/crates/mujou/`.
+    // If the directory structure changes (e.g. `crates/apps/mujou/`),
+    // this will compute the wrong path — consider walking up
+    // `manifest_dir.ancestors()` to find a `Cargo.toml` containing
+    // `[workspace]` if the layout ever becomes more complex.
     let workspace_root = manifest_dir
         .parent()
         .and_then(Path::parent)
