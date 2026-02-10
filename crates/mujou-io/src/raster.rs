@@ -311,6 +311,13 @@ pub struct ThemedEdgeUrls {
     pub dark_url: String,
 }
 
+impl Drop for ThemedEdgeUrls {
+    fn drop(&mut self) {
+        revoke_blob_url(&self.light_url);
+        revoke_blob_url(&self.dark_url);
+    }
+}
+
 /// Generate both themed Blob URLs for a binary edge image.
 ///
 /// Returns a [`ThemedEdgeUrls`] with `staged_ptr` set to 0 — the caller
