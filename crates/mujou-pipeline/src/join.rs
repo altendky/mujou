@@ -85,6 +85,9 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
     }
 
     let mut points = Vec::new();
+    // At minimum, we emit every contour's points (same as straight-line).
+    let lower_bound: usize = contours.iter().map(Polyline::len).sum();
+    points.reserve(lower_bound);
 
     for (i, contour) in contours.iter().enumerate() {
         // Emit the contour in its original (forward) direction.
