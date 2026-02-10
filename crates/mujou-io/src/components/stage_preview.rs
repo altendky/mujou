@@ -2,6 +2,11 @@
 //!
 //! Dispatches between raster `<img>` display (for grayscale/blur/edges)
 //! and inline SVG display (for vector stages).
+//!
+//! The Edges stage receives special treatment: because it is a synthetic
+//! binary image (not a photograph), its colors are themed to match the
+//! current light/dark mode.  Both themed Blob URLs are generated eagerly
+//! when a new pipeline result arrives so that theme toggles are instant.
 
 use std::rc::Rc;
 
@@ -31,6 +36,9 @@ impl PartialEq for StagePreviewProps {
 ///
 /// Raster stages (Grayscale, Blur, Edges) are displayed as `<img>`
 /// elements using Blob URLs. Vector stages are displayed as inline SVG.
+///
+/// The Edges stage is themed: both light and dark Blob URLs are eagerly
+/// pre-computed so theme toggles show instantly.
 #[component]
 pub fn StagePreview(props: StagePreviewProps) -> Element {
     let staged = &props.staged;
@@ -38,12 +46,32 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     let w = staged.dimensions.width;
     let h = staged.dimensions.height;
 
+    // Reactive theme signal provided by the app root.
+    let is_dark: Signal<bool> = use_context();
+
     // Track the current blob URL so we can revoke it on re-render
     // (handles rapid re-renders where onload/onerror never fires on the
     // replaced <img>) and on unmount/stage-switch.
     let mut prev_blob_url: Signal<Option<String>> = use_signal(|| None);
 
-    // Revoke outstanding blob URL when the component is destroyed.
+    // Bridge the Rc prop into the reactive system via a Signal.
+    // Pointer equality avoids deep comparison of GrayImage data
+    // (which does not implement PartialEq).
+    let mut staged_signal = use_signal(|| Rc::clone(&props.staged));
+    if !Rc::ptr_eq(&props.staged, &*staged_signal.peek()) {
+        staged_signal.set(Rc::clone(&props.staged));
+    }
+
+    // Eagerly cached themed Blob URLs for the Edges stage.
+    // use_memo subscribes to staged_signal and recomputes when a new
+    // Rc<StagedResult> arrives.
+    let edge_cache = use_memo(move || {
+        let staged = staged_signal();
+        let ptr = Rc::as_ptr(&staged) as usize;
+        raster::generate_themed_edge_urls(&staged.edges, ptr).ok()
+    });
+
+    // Revoke outstanding blob URLs when the component is destroyed.
     {
         let prev_blob_url = prev_blob_url;
         use_drop(move || {
@@ -62,11 +90,10 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     }
 
     match selected {
-        StageId::Grayscale | StageId::Blur | StageId::Edges => {
+        StageId::Grayscale | StageId::Blur => {
             let image = match selected {
                 StageId::Grayscale => &staged.grayscale,
-                StageId::Blur => &staged.blurred,
-                _ => &staged.edges,
+                _ => &staged.blurred,
             };
 
             // Revoke the previous blob URL before creating a new one.
@@ -91,6 +118,40 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
                 Err(e) => rsx! {
                     p { class: "text-[var(--text-error)] text-sm",
                         "Failed to render {selected}: {e}"
+                    }
+                },
+            }
+        }
+
+        StageId::Edges => {
+            // Clean up any leftover raster blob URL from a previous stage.
+            if let Some(ref prev) = prev_blob_url.take() {
+                raster::revoke_blob_url(prev);
+            }
+            // Use eagerly cached themed Blob URLs for the Edges stage.
+            // Both light and dark versions are generated via use_memo when
+            // the pipeline result changes; toggling the theme simply selects
+            // the other URL.
+            let cached = edge_cache.read();
+            #[allow(clippy::option_if_let_else)]
+            match cached.as_ref() {
+                Some(c) => {
+                    let url = if is_dark() {
+                        c.dark_url.clone()
+                    } else {
+                        c.light_url.clone()
+                    };
+                    rsx! {
+                        img {
+                            src: "{url}",
+                            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
+                            alt: "Edges stage preview",
+                        }
+                    }
+                }
+                None => rsx! {
+                    p { class: "text-[var(--text-error)] text-sm",
+                        "Edge preview not available"
                     }
                 },
             }
