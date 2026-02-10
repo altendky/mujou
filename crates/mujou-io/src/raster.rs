@@ -243,16 +243,19 @@ pub fn read_both_preview_colors() -> Result<BothPreviewColors, RasterError> {
 
 /// Parse a CSS hex color string (e.g. `"#1a1a1a"` or `" #fff "`) into
 /// an `[u8; 3]` RGB triple.
+///
+/// Accepts 3-digit (`#rgb`), 4-digit (`#rgba`), 6-digit (`#rrggbb`),
+/// and 8-digit (`#rrggbbaa`) forms.  Alpha channels are silently ignored.
 fn parse_css_hex(s: &str) -> Result<Rgb, RasterError> {
     let s = s.trim();
     let hex = s
         .strip_prefix('#')
         .ok_or_else(|| RasterError::JsError(format!("not a hex color: {s:?}")))?;
     match hex.len() {
-        3 => {
-            // Short form: #rgb → #rrggbb
+        3 | 4 => {
+            // Short form: #rgb or #rgba (alpha ignored) → #rrggbb
             let mut rgb = [0u8; 3];
-            for (i, ch) in hex.chars().enumerate() {
+            for (i, ch) in hex[..3].chars().enumerate() {
                 let n = ch
                     .to_digit(16)
                     .ok_or_else(|| RasterError::JsError(format!("invalid hex char: {ch}")))?;
@@ -263,7 +266,8 @@ fn parse_css_hex(s: &str) -> Result<Rgb, RasterError> {
             }
             Ok(rgb)
         }
-        6 => {
+        6 | 8 => {
+            // Long form: #rrggbb or #rrggbbaa (alpha ignored)
             let r = u8::from_str_radix(&hex[0..2], 16);
             let g = u8::from_str_radix(&hex[2..4], 16);
             let b = u8::from_str_radix(&hex[4..6], 16);
