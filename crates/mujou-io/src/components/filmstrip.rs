@@ -39,54 +39,21 @@ impl PartialEq for FilmstripProps {
 #[component]
 pub fn Filmstrip(props: FilmstripProps) -> Element {
     let is_dark: Signal<bool> = use_context();
-    let mut edge_thumb_cache: Signal<Option<ThemedEdgeThumbUrls>> = use_signal(|| None);
 
-    // Revoke cached edge thumbnail URLs on unmount.
-    {
-        let edge_thumb_cache = edge_thumb_cache;
-        use_drop(move || {
-            if let Some(ref cached) = *edge_thumb_cache.peek() {
-                raster::revoke_blob_url(&cached.light_url);
-                raster::revoke_blob_url(&cached.dark_url);
-            }
-        });
-    }
+    // Eagerly cached themed Blob URLs for the Edges thumbnail.
+    // Computed via use_memo so signal mutations happen outside the render
+    // body, avoiding an extra render cycle on pipeline result changes.
+    let staged_for_memo = Rc::clone(&props.staged);
+    let edge_thumb_cache = use_memo(move || {
+        raster::generate_themed_edge_urls(&staged_for_memo.edges)
+            .ok()
+            .map(|mut urls| {
+                urls.staged_ptr = Rc::as_ptr(&staged_for_memo) as usize;
+                urls
+            })
+    });
 
-    // Eagerly regenerate edge thumbnail URLs when the pipeline result changes.
-    let staged_ptr = Rc::as_ptr(&props.staged) as usize;
-    let needs_regen = edge_thumb_cache
-        .peek()
-        .as_ref()
-        .is_none_or(|c| c.staged_ptr != staged_ptr);
-
-    if needs_regen {
-        if let Some(ref old) = edge_thumb_cache.take() {
-            raster::revoke_blob_url(&old.light_url);
-            raster::revoke_blob_url(&old.dark_url);
-        }
-
-        if let Ok(colors) = raster::read_both_preview_colors() {
-            let light = raster::themed_gray_image_to_blob_url(
-                &props.staged.edges,
-                colors.light.bg,
-                colors.light.fg,
-            );
-            let dark = raster::themed_gray_image_to_blob_url(
-                &props.staged.edges,
-                colors.dark.bg,
-                colors.dark.fg,
-            );
-            if let (Ok(light_url), Ok(dark_url)) = (light, dark) {
-                edge_thumb_cache.set(Some(ThemedEdgeThumbUrls {
-                    staged_ptr,
-                    light_url,
-                    dark_url,
-                }));
-            }
-        }
-    }
-
-    let edge_thumb_url = edge_thumb_cache.peek().as_ref().map(|c| {
+    let edge_thumb_url = edge_thumb_cache.read().as_ref().map(|c| {
         if is_dark() {
             c.dark_url.clone()
         } else {
@@ -258,16 +225,6 @@ fn render_thumbnail(
             }
         }
     }
-}
-
-/// Eagerly cached themed Blob URLs for the Edges filmstrip thumbnail.
-struct ThemedEdgeThumbUrls {
-    /// Pointer identity of the `StagedResult` these URLs were generated from.
-    staged_ptr: usize,
-    /// Blob URL using light-mode preview colors.
-    light_url: String,
-    /// Blob URL using dark-mode preview colors.
-    dark_url: String,
 }
 
 /// Render a single polyline as an SVG path for a thumbnail.

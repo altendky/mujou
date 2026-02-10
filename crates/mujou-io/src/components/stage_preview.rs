@@ -55,19 +55,24 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     let mut prev_blob_url: Signal<Option<String>> = use_signal(|| None);
 
     // Eagerly cached themed Blob URLs for the Edges stage.
-    let mut edge_cache: Signal<Option<ThemedEdgeUrls>> = use_signal(|| None);
+    // Computed via use_memo so signal mutations happen outside the render
+    // body, avoiding an extra render cycle on pipeline result changes.
+    let staged_for_memo = Rc::clone(&props.staged);
+    let edge_cache = use_memo(move || {
+        raster::generate_themed_edge_urls(&staged_for_memo.edges)
+            .ok()
+            .map(|mut urls| {
+                urls.staged_ptr = Rc::as_ptr(&staged_for_memo) as usize;
+                urls
+            })
+    });
 
     // Revoke outstanding blob URLs when the component is destroyed.
     {
         let prev_blob_url = prev_blob_url;
-        let edge_cache = edge_cache;
         use_drop(move || {
             if let Some(ref url) = *prev_blob_url.peek() {
                 raster::revoke_blob_url(url);
-            }
-            if let Some(ref cached) = *edge_cache.peek() {
-                raster::revoke_blob_url(&cached.light_url);
-                raster::revoke_blob_url(&cached.dark_url);
             }
         });
     }
@@ -116,43 +121,12 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
 
         StageId::Edges => {
             // Use eagerly cached themed Blob URLs for the Edges stage.
-            // Both light and dark versions are generated when the pipeline
-            // result changes; toggling the theme simply selects the other URL.
-            let staged_ptr = Rc::as_ptr(staged) as usize;
-
-            let needs_regen = edge_cache
-                .peek()
-                .as_ref()
-                .is_none_or(|c| c.staged_ptr != staged_ptr);
-
-            if needs_regen {
-                // Revoke previous cached URLs.
-                if let Some(ref old) = edge_cache.take() {
-                    raster::revoke_blob_url(&old.light_url);
-                    raster::revoke_blob_url(&old.dark_url);
-                }
-
-                match generate_themed_edge_urls(&staged.edges) {
-                    Ok(urls) => {
-                        edge_cache.set(Some(ThemedEdgeUrls {
-                            staged_ptr,
-                            light_url: urls.0,
-                            dark_url: urls.1,
-                        }));
-                    }
-                    Err(e) => {
-                        return rsx! {
-                            p { class: "text-[var(--text-error)] text-sm",
-                                "Failed to render Edges: {e}"
-                            }
-                        };
-                    }
-                }
-            }
-
-            let cache = edge_cache.peek();
+            // Both light and dark versions are generated via use_memo when
+            // the pipeline result changes; toggling the theme simply selects
+            // the other URL.
+            let cached = edge_cache.read();
             #[allow(clippy::option_if_let_else)]
-            match cache.as_ref() {
+            match cached.as_ref() {
                 Some(c) => {
                     let url = if is_dark() {
                         c.dark_url.clone()
@@ -230,32 +204,6 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
             }
         }
     }
-}
-
-/// Eagerly cached themed Blob URLs for the Edges stage.
-///
-/// Both light and dark URLs are generated when a new pipeline result
-/// arrives.  On theme toggle, the component simply selects the other URL
-/// — no re-encoding needed.
-struct ThemedEdgeUrls {
-    /// Pointer identity of the `StagedResult` these URLs were generated from.
-    staged_ptr: usize,
-    /// Blob URL using light-mode preview colors.
-    light_url: String,
-    /// Blob URL using dark-mode preview colors.
-    dark_url: String,
-}
-
-/// Generate both themed Blob URLs for a binary edge image.
-///
-/// Returns `(light_url, dark_url)`.
-fn generate_themed_edge_urls(
-    edges: &mujou_pipeline::GrayImage,
-) -> Result<(String, String), raster::RasterError> {
-    let colors = raster::read_both_preview_colors()?;
-    let light_url = raster::themed_gray_image_to_blob_url(edges, colors.light.bg, colors.light.fg)?;
-    let dark_url = raster::themed_gray_image_to_blob_url(edges, colors.dark.bg, colors.dark.fg)?;
-    Ok((light_url, dark_url))
 }
 
 /// Build SVG path `d` attributes for multiple polylines.

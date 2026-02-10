@@ -42,7 +42,6 @@ impl From<image::ImageError> for RasterError {
 /// Returns [`RasterError::PngEncode`] if PNG encoding fails.
 /// Returns [`RasterError::JsError`] if Blob or URL creation fails.
 pub fn gray_image_to_blob_url(image: &GrayImage) -> Result<String, RasterError> {
-    // 1. Encode GrayImage → PNG bytes.
     let mut png_bytes = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
     encoder.write_image(
@@ -51,21 +50,7 @@ pub fn gray_image_to_blob_url(image: &GrayImage) -> Result<String, RasterError> 
         image.height(),
         image::ExtendedColorType::L8,
     )?;
-
-    // 2. Create a Uint8Array from the PNG bytes.
-    let uint8_array = js_sys::Uint8Array::from(png_bytes.as_slice());
-    let parts = js_sys::Array::new();
-    parts.push(&uint8_array);
-
-    // 3. Create a Blob with image/png MIME type.
-    let opts = BlobPropertyBag::new();
-    opts.set_type("image/png");
-    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts)?;
-
-    // 4. Generate an object URL.
-    let url = web_sys::Url::create_object_url_with_blob(&blob)?;
-
-    Ok(url)
+    png_bytes_to_blob_url(&png_bytes)
 }
 
 /// Encode a binary `GrayImage` as a themed RGB PNG Blob URL.
@@ -111,17 +96,7 @@ pub fn themed_gray_image_to_blob_url(
     let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
     encoder.write_image(&rgb_buf, w, h, image::ExtendedColorType::Rgb8)?;
 
-    // 3. Create Blob URL (same pattern as gray_image_to_blob_url).
-    let uint8_array = js_sys::Uint8Array::from(png_bytes.as_slice());
-    let parts = js_sys::Array::new();
-    parts.push(&uint8_array);
-
-    let opts = BlobPropertyBag::new();
-    opts.set_type("image/png");
-    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts)?;
-
-    let url = web_sys::Url::create_object_url_with_blob(&blob)?;
-    Ok(url)
+    png_bytes_to_blob_url(&png_bytes)
 }
 
 /// Soft-dilate a binary image to approximate 1.25 px stroke width.
@@ -224,8 +199,8 @@ pub fn read_both_preview_colors() -> Result<BothPreviewColors, RasterError> {
         .document_element()
         .ok_or_else(|| RasterError::JsError("no document element".into()))?;
 
-    let current_theme = el.get_attribute("data-theme").unwrap_or_default();
-    let other_theme = if current_theme == "dark" {
+    let current_theme = el.get_attribute("data-theme");
+    let other_theme = if current_theme.as_deref() == Some("dark") {
         "light"
     } else {
         "dark"
@@ -243,10 +218,17 @@ pub fn read_both_preview_colors() -> Result<BothPreviewColors, RasterError> {
     let _ = html.offset_height();
     let other_colors = read_preview_colors();
     // Always restore, even if reading failed.
-    let _ = el.set_attribute("data-theme", &current_theme);
+    match &current_theme {
+        Some(t) => {
+            let _ = el.set_attribute("data-theme", t);
+        }
+        None => {
+            let _ = el.remove_attribute("data-theme");
+        }
+    }
     let other_colors = other_colors?;
 
-    if current_theme == "dark" {
+    if current_theme.as_deref() == Some("dark") {
         Ok(BothPreviewColors {
             light: other_colors,
             dark: current_colors,
@@ -294,6 +276,58 @@ fn parse_css_hex(s: &str) -> Result<Rgb, RasterError> {
             "unexpected hex length: {s:?}"
         ))),
     }
+}
+
+/// Create a Blob URL from raw PNG bytes.
+///
+/// Shared helper used by both [`gray_image_to_blob_url`] and
+/// [`themed_gray_image_to_blob_url`] to avoid duplicating the
+/// `Uint8Array` → `Blob` → object URL pipeline.
+fn png_bytes_to_blob_url(png_bytes: &[u8]) -> Result<String, RasterError> {
+    let uint8_array = js_sys::Uint8Array::from(png_bytes);
+    let parts = js_sys::Array::new();
+    parts.push(&uint8_array);
+
+    let opts = BlobPropertyBag::new();
+    opts.set_type("image/png");
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts)?;
+
+    let url = web_sys::Url::create_object_url_with_blob(&blob)?;
+    Ok(url)
+}
+
+/// Eagerly cached themed Blob URLs for a binary edge image.
+///
+/// Both light and dark URLs are generated when a new pipeline result
+/// arrives.  On theme toggle, the component simply selects the other URL
+/// — no re-encoding needed.
+#[derive(PartialEq, Eq)]
+pub struct ThemedEdgeUrls {
+    /// Pointer identity of the `StagedResult` these URLs were generated from.
+    pub staged_ptr: usize,
+    /// Blob URL using light-mode preview colors.
+    pub light_url: String,
+    /// Blob URL using dark-mode preview colors.
+    pub dark_url: String,
+}
+
+/// Generate both themed Blob URLs for a binary edge image.
+///
+/// Returns a [`ThemedEdgeUrls`] with `staged_ptr` set to 0 — the caller
+/// is responsible for setting the correct pointer identity.
+///
+/// # Errors
+///
+/// Returns [`RasterError`] if CSS color reading or PNG encoding fails.
+pub fn generate_themed_edge_urls(edges: &GrayImage) -> Result<ThemedEdgeUrls, RasterError> {
+    let colors = read_both_preview_colors()?;
+    let light_url = themed_gray_image_to_blob_url(edges, colors.light.bg, colors.light.fg)?;
+    let dark_url = themed_gray_image_to_blob_url(edges, colors.dark.bg, colors.dark.fg)?;
+    Ok(ThemedEdgeUrls {
+        staged_ptr: 0,
+        light_url,
+        dark_url,
+    })
 }
 
 /// Revoke a Blob URL previously created by [`gray_image_to_blob_url`]
