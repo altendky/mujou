@@ -16,6 +16,7 @@ use image::GrayImage;
 /// that overwhelms downstream contour tracing and path optimization.
 /// See <https://github.com/altendky/mujou/issues/44>.
 pub const MIN_THRESHOLD: f32 = 1.0;
+const _: () = assert!(MIN_THRESHOLD > 0.0);
 
 /// Detect edges using the Canny algorithm.
 ///
@@ -158,13 +159,5 @@ mod tests {
         // canny(200, 100) should produce the same result as canny(100, 100)
         // because low gets clamped down to high.
         assert_eq!(edges_inverted, edges_equal);
-    }
-
-    #[test]
-    fn min_threshold_constant_is_positive() {
-        assert!(
-            MIN_THRESHOLD > 0.0,
-            "MIN_THRESHOLD must be positive to prevent degenerate edge maps"
-        );
     }
 }
