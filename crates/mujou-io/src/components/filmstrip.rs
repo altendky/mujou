@@ -3,6 +3,9 @@
 //! Displays a scrollable strip of small previews for each pipeline stage.
 //! Clicking a thumbnail selects that stage for full-size preview and
 //! shows its parameter controls.
+//!
+//! The Edges thumbnail uses themed colors (matching the active light/dark
+//! mode) with both variants pre-computed for instant theme toggles.
 
 use std::rc::Rc;
 
@@ -35,12 +38,68 @@ impl PartialEq for FilmstripProps {
 /// tile is highlighted with a border accent color.
 #[component]
 pub fn Filmstrip(props: FilmstripProps) -> Element {
+    let is_dark: Signal<bool> = use_context();
+    let mut edge_thumb_cache: Signal<Option<ThemedEdgeThumbUrls>> = use_signal(|| None);
+
+    // Revoke cached edge thumbnail URLs on unmount.
+    {
+        let edge_thumb_cache = edge_thumb_cache;
+        use_drop(move || {
+            if let Some(ref cached) = *edge_thumb_cache.peek() {
+                raster::revoke_blob_url(&cached.light_url);
+                raster::revoke_blob_url(&cached.dark_url);
+            }
+        });
+    }
+
+    // Eagerly regenerate edge thumbnail URLs when the pipeline result changes.
+    let staged_ptr = Rc::as_ptr(&props.staged) as usize;
+    let needs_regen = edge_thumb_cache
+        .peek()
+        .as_ref()
+        .is_none_or(|c| c.staged_ptr != staged_ptr);
+
+    if needs_regen {
+        if let Some(ref old) = edge_thumb_cache.take() {
+            raster::revoke_blob_url(&old.light_url);
+            raster::revoke_blob_url(&old.dark_url);
+        }
+
+        if let Ok(colors) = raster::read_both_preview_colors() {
+            let light = raster::themed_gray_image_to_blob_url(
+                &props.staged.edges,
+                colors.light.bg,
+                colors.light.fg,
+            );
+            let dark = raster::themed_gray_image_to_blob_url(
+                &props.staged.edges,
+                colors.dark.bg,
+                colors.dark.fg,
+            );
+            if let (Ok(light_url), Ok(dark_url)) = (light, dark) {
+                edge_thumb_cache.set(Some(ThemedEdgeThumbUrls {
+                    staged_ptr,
+                    light_url,
+                    dark_url,
+                }));
+            }
+        }
+    }
+
+    let edge_thumb_url = edge_thumb_cache.peek().as_ref().map(|c| {
+        if is_dark() {
+            c.dark_url.clone()
+        } else {
+            c.light_url.clone()
+        }
+    });
+
     rsx! {
         div {
             class: "flex flex-nowrap overflow-x-auto gap-2 py-2 scrollbar-thin",
 
             for stage in StageId::ALL {
-                {render_tile(&props.staged, stage, props.selected == stage, &props.on_select)}
+                {render_tile(&props.staged, stage, props.selected == stage, &props.on_select, edge_thumb_url.as_ref())}
             }
         }
     }
@@ -52,6 +111,7 @@ fn render_tile(
     stage: StageId,
     is_selected: bool,
     on_select: &EventHandler<StageId>,
+    edge_thumb_url: Option<&String>,
 ) -> Element {
     let border = if is_selected {
         "border-2 border-[var(--border-accent)]"
@@ -76,7 +136,7 @@ fn render_tile(
 
             // Thumbnail
             div { class: "w-full aspect-square overflow-hidden rounded bg-[var(--preview-bg)]",
-                {render_thumbnail(staged, stage)}
+                {render_thumbnail(staged, stage, edge_thumb_url)}
             }
 
             // Label
@@ -93,13 +153,36 @@ fn render_tile(
 
 /// Render the thumbnail content for a stage tile.
 #[allow(clippy::option_if_let_else)]
-fn render_thumbnail(staged: &StagedResult, stage: StageId) -> Element {
+fn render_thumbnail(
+    staged: &StagedResult,
+    stage: StageId,
+    edge_thumb_url: Option<&String>,
+) -> Element {
     match stage {
-        StageId::Grayscale | StageId::Blur | StageId::Edges => {
+        StageId::Edges => {
+            // Use the pre-computed themed Blob URL for the Edges thumbnail.
+            match edge_thumb_url {
+                Some(url) => {
+                    rsx! {
+                        img {
+                            src: "{url}",
+                            class: "w-full h-full object-cover",
+                            alt: "Edges thumbnail",
+                        }
+                    }
+                }
+                None => rsx! {
+                    div { class: "w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs",
+                        "err"
+                    }
+                },
+            }
+        }
+
+        StageId::Grayscale | StageId::Blur => {
             let image = match stage {
                 StageId::Grayscale => &staged.grayscale,
-                StageId::Blur => &staged.blurred,
-                _ => &staged.edges,
+                _ => &staged.blurred,
             };
 
             match raster::gray_image_to_blob_url(image) {
@@ -175,6 +258,16 @@ fn render_thumbnail(staged: &StagedResult, stage: StageId) -> Element {
             }
         }
     }
+}
+
+/// Eagerly cached themed Blob URLs for the Edges filmstrip thumbnail.
+struct ThemedEdgeThumbUrls {
+    /// Pointer identity of the `StagedResult` these URLs were generated from.
+    staged_ptr: usize,
+    /// Blob URL using light-mode preview colors.
+    light_url: String,
+    /// Blob URL using dark-mode preview colors.
+    dark_url: String,
 }
 
 /// Render a single polyline as an SVG path for a thumbnail.

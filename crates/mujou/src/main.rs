@@ -2,6 +2,8 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use mujou_io::{ExportPanel, FileUpload, Filmstrip, StageControls, StageId, StagePreview};
+use wasm_bindgen::JsCast;
+use wasm_bindgen::closure::Closure;
 
 /// Debounce delay in milliseconds for config changes.
 ///
@@ -25,6 +27,27 @@ fn main() {
 /// export components.
 #[allow(clippy::too_many_lines)]
 fn app() -> Element {
+    // --- Theme state ---
+    // Detect current theme from the DOM and provide a reactive signal
+    // so components can respond to theme changes (e.g. re-color raster
+    // previews).  The JS callback is registered once via use_hook; the
+    // leaked Closure ensures the callback lives for the page lifetime.
+    let is_dark = use_context_provider(|| Signal::new(is_dark_from_dom()));
+    use_hook(move || {
+        let mut is_dark = is_dark;
+        let cb = Closure::<dyn FnMut(String)>::new(move |resolved: String| {
+            is_dark.set(resolved == "dark");
+        });
+        if let Some(window) = web_sys::window() {
+            let _ = js_sys::Reflect::set(
+                &window,
+                &wasm_bindgen::JsValue::from_str("__mujou_theme_changed"),
+                cb.as_ref().unchecked_ref(),
+            );
+        }
+        cb.forget(); // leak — lives for the page lifetime
+    });
+
     // --- Application state ---
     let mut image_bytes = use_signal(|| Some(CHERRY_BLOSSOMS.to_vec()));
     let mut filename = use_signal(|| String::from("cherry-blossoms"));
@@ -282,4 +305,13 @@ fn app() -> Element {
             }
         }
     }
+}
+
+/// Read the current theme from the DOM `data-theme` attribute.
+fn is_dark_from_dom() -> bool {
+    web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.document_element())
+        .and_then(|el| el.get_attribute("data-theme"))
+        .is_some_and(|t| t == "dark")
 }

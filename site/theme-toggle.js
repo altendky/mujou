@@ -41,8 +41,10 @@
 
   function apply(m) {
     mode = m;
-    document.documentElement.setAttribute("data-theme", resolve(m));
+    var resolved = resolve(m);
+    document.documentElement.setAttribute("data-theme", resolved);
     try { localStorage.setItem("theme", m); } catch (e) {}
+    if (window.__mujou_theme_changed) window.__mujou_theme_changed(resolved);
 
     // Update all toggle buttons on the page.
     var buttons = document.querySelectorAll(".theme-toggle");

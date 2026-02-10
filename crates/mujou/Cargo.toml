@@ -13,8 +13,11 @@ categories = ["graphics"]
 [dependencies]
 dioxus.workspace = true
 gloo-timers.workspace = true
+js-sys.workspace = true
 mujou-io.workspace = true
 mujou-pipeline.workspace = true
+wasm-bindgen.workspace = true
+web-sys.workspace = true
 
 [dev-dependencies]
 
