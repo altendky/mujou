@@ -288,10 +288,10 @@ fn render_toggle(
             input {
                 r#type: "checkbox",
                 id: "{id}",
-                checked: "{checked}",
+                checked: checked,
                 class: "w-5 h-5 accent-[var(--btn-primary)]",
                 onchange: move |e| {
-                    on_change(e.value() == "true");
+                    on_change(e.checked());
                 },
             }
         }
