@@ -93,9 +93,6 @@ fn app() -> Element {
         // site/theme.css by build.rs to avoid fragile ../../../ paths.
         style { dangerous_inner_html: include_str!(env!("THEME_CSS_PATH")) }
 
-        // Theme toggle logic — copied from site/theme-toggle.js by build.rs.
-        script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
-
         // Google Fonts — Noto Sans (Latin) and Noto Sans JP for the title
         // wordmark.  See follow-up issue to self-host for offline/privacy.
         link { rel: "preconnect", href: "https://fonts.googleapis.com" }
@@ -112,6 +109,10 @@ fn app() -> Element {
                 class: "theme-toggle",
                 aria_label: "Toggle theme",
             }
+            // Theme toggle logic — must come after the button so the
+            // button is in the DOM when the script's init() runs.
+            // Copied from site/theme-toggle.js by build.rs.
+            script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
 
             // Header
             header { class: "px-6 py-4 border-b border-(--border)",
