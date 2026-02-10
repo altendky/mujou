@@ -55,12 +55,22 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
         raster::generate_themed_edge_urls(&staged.edges, ptr).ok()
     });
 
+    // Eagerly cached Blob URL for the Original (RGBA) thumbnail.
+    // RGBA PNG encoding is ~4× more expensive than grayscale; caching
+    // avoids re-encoding on every filmstrip re-render.
+    let original_thumb_cache = use_memo(move || {
+        let staged = staged_signal();
+        raster::rgba_image_to_blob_url(&staged.original)
+            .ok()
+            .map(raster::CachedBlobUrl::new)
+    });
+
     rsx! {
         div {
             class: "flex flex-nowrap overflow-x-auto gap-2 py-2 scrollbar-thin",
 
             for stage in StageId::ALL {
-                {render_tile(&props.staged, stage, props.selected == stage, &props.on_select, &edge_thumb_cache, is_dark())}
+                {render_tile(&props.staged, stage, props.selected == stage, &props.on_select, &edge_thumb_cache, &original_thumb_cache, is_dark())}
             }
         }
     }
@@ -73,6 +83,7 @@ fn render_tile(
     is_selected: bool,
     on_select: &EventHandler<StageId>,
     edge_thumb_cache: &Memo<Option<raster::ThemedEdgeUrls>>,
+    original_thumb_cache: &Memo<Option<raster::CachedBlobUrl>>,
     is_dark: bool,
 ) -> Element {
     let border = if is_selected {
@@ -98,7 +109,7 @@ fn render_tile(
 
             // Thumbnail
             div { class: "w-full aspect-square overflow-hidden rounded bg-[var(--preview-bg)]",
-                {render_thumbnail(staged, stage, edge_thumb_cache, is_dark)}
+                {render_thumbnail(staged, stage, edge_thumb_cache, original_thumb_cache, is_dark)}
             }
 
             // Label
@@ -114,14 +125,31 @@ fn render_tile(
 }
 
 /// Render the thumbnail content for a stage tile.
-#[allow(clippy::option_if_let_else)]
+#[allow(clippy::option_if_let_else, clippy::too_many_lines)]
 fn render_thumbnail(
     staged: &StagedResult,
     stage: StageId,
     edge_thumb_cache: &Memo<Option<raster::ThemedEdgeUrls>>,
+    original_thumb_cache: &Memo<Option<raster::CachedBlobUrl>>,
     is_dark: bool,
 ) -> Element {
     match stage {
+        StageId::Original => {
+            // Use the eagerly cached Blob URL; the CachedBlobUrl wrapper
+            // revokes it automatically when the memo recomputes.
+            let cached = original_thumb_cache.read();
+            cached.as_ref().map_or_else(render_thumbnail_error, |c| {
+                let url = c.url().to_owned();
+                rsx! {
+                    img {
+                        src: "{url}",
+                        class: "w-full h-full object-cover",
+                        alt: "Original thumbnail",
+                    }
+                }
+            })
+        }
+
         StageId::Edges => {
             // Use the pre-computed themed Blob URL for the Edges thumbnail.
             // The URL is resolved here (not in the component body) so the
@@ -140,11 +168,7 @@ fn render_thumbnail(
                         }
                     }
                 }
-                None => rsx! {
-                    div { class: "w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs",
-                        "err"
-                    }
-                },
+                None => render_thumbnail_error(),
             }
         }
 
@@ -154,25 +178,10 @@ fn render_thumbnail(
                 _ => &staged.blurred,
             };
 
-            match raster::gray_image_to_blob_url(image) {
-                Ok(url) => {
-                    let url_for_error = url.clone();
-                    rsx! {
-                        img {
-                            src: "{url}",
-                            class: "w-full h-full object-cover",
-                            alt: "{stage.label()} thumbnail",
-                            onload: move |_| raster::revoke_blob_url(&url),
-                            onerror: move |_| raster::revoke_blob_url(&url_for_error),
-                        }
-                    }
-                }
-                Err(_) => rsx! {
-                    div { class: "w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs",
-                        "err"
-                    }
-                },
-            }
+            render_raster_thumbnail(
+                raster::gray_image_to_blob_url(image),
+                &format!("{} thumbnail", stage.label()),
+            )
         }
 
         StageId::Contours | StageId::Simplified => {
@@ -225,6 +234,40 @@ fn render_thumbnail(
                     }
                 }
             }
+        }
+    }
+}
+
+/// Render a raster thumbnail from an encoding result.
+///
+/// Handles the common encode → `<img>` with onload/onerror → error
+/// fallback pattern shared by non-memoized raster thumbnails.
+fn render_raster_thumbnail(
+    blob_url_result: Result<String, raster::RasterError>,
+    alt: &str,
+) -> Element {
+    blob_url_result.map_or_else(
+        |_| render_thumbnail_error(),
+        |url| {
+            let url_for_error = url.clone();
+            rsx! {
+                img {
+                    src: "{url}",
+                    class: "w-full h-full object-cover",
+                    alt: "{alt}",
+                    onload: move |_| raster::revoke_blob_url(&url),
+                    onerror: move |_| raster::revoke_blob_url(&url_for_error),
+                }
+            }
+        },
+    )
+}
+
+/// Render the error fallback for a thumbnail that failed to encode.
+fn render_thumbnail_error() -> Element {
+    rsx! {
+        div { class: "w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs",
+            "err"
         }
     }
 }

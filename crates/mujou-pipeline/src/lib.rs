@@ -22,7 +22,7 @@ pub use contour::{ContourTracer, ContourTracerKind};
 pub use join::{PathJoiner, PathJoinerKind};
 pub use types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, ProcessResult,
-    StagedResult,
+    RgbaImage, StagedResult,
 };
 
 /// Run the full image processing pipeline, preserving all intermediate
@@ -53,8 +53,12 @@ pub fn process_staged(
     image_bytes: &[u8],
     config: &PipelineConfig,
 ) -> Result<StagedResult, PipelineError> {
-    // 1. Decode and convert to grayscale.
-    let grayscale_img = grayscale::decode_and_grayscale(image_bytes)?;
+    // 0. Decode the source image.
+    let decoded = grayscale::decode(image_bytes)?;
+    let original = grayscale::to_rgba(&decoded);
+
+    // 1. Convert to grayscale.
+    let grayscale_img = grayscale::to_grayscale(&decoded);
     let dimensions = Dimensions {
         width: grayscale_img.width(),
         height: grayscale_img.height(),
@@ -105,6 +109,7 @@ pub fn process_staged(
     };
 
     Ok(StagedResult {
+        original,
         grayscale: grayscale_img,
         blurred,
         edges,
@@ -302,6 +307,10 @@ mod tests {
     fn process_staged_populates_all_intermediates() {
         let png = sharp_edge_png(40, 40);
         let staged = process_staged(&png, &PipelineConfig::default()).unwrap();
+
+        // Original RGBA has correct dimensions.
+        assert_eq!(staged.original.width(), 40);
+        assert_eq!(staged.original.height(), 40);
 
         // Raster stages have correct dimensions.
         assert_eq!(staged.grayscale.width(), 40);

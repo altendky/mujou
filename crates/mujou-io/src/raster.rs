@@ -4,7 +4,7 @@
 //! encoding to PNG and creating object URLs via the Web API.
 
 use image::ImageEncoder;
-use mujou_pipeline::GrayImage;
+use mujou_pipeline::{GrayImage, RgbaImage};
 use wasm_bindgen::JsValue;
 use web_sys::BlobPropertyBag;
 
@@ -49,6 +49,27 @@ pub fn gray_image_to_blob_url(image: &GrayImage) -> Result<String, RasterError> 
         image.width(),
         image.height(),
         image::ExtendedColorType::L8,
+    )?;
+    png_bytes_to_blob_url(&png_bytes)
+}
+
+/// Encode an `RgbaImage` as a PNG Blob URL for use as an `<img src>`.
+///
+/// The returned URL must be revoked via [`revoke_blob_url`] when no
+/// longer needed to avoid memory leaks.
+///
+/// # Errors
+///
+/// Returns [`RasterError::PngEncode`] if PNG encoding fails.
+/// Returns [`RasterError::JsError`] if Blob or URL creation fails.
+pub fn rgba_image_to_blob_url(image: &RgbaImage) -> Result<String, RasterError> {
+    let mut png_bytes = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
+    encoder.write_image(
+        image.as_raw(),
+        image.width(),
+        image.height(),
+        image::ExtendedColorType::Rgba8,
     )?;
     png_bytes_to_blob_url(&png_bytes)
 }
@@ -342,6 +363,35 @@ pub fn generate_themed_edge_urls(
         light_url,
         dark_url,
     })
+}
+
+/// A single Blob URL that auto-revokes on drop.
+///
+/// Used by `use_memo` caches so the URL is revoked when the memo
+/// recomputes or the component unmounts.
+#[derive(PartialEq, Eq)]
+pub struct CachedBlobUrl {
+    url: String,
+}
+
+impl CachedBlobUrl {
+    /// Wrap a Blob URL for automatic revocation on drop.
+    #[must_use]
+    pub const fn new(url: String) -> Self {
+        Self { url }
+    }
+
+    /// The underlying Blob URL string.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+}
+
+impl Drop for CachedBlobUrl {
+    fn drop(&mut self) {
+        revoke_blob_url(&self.url);
+    }
 }
 
 /// Revoke a Blob URL previously created by [`gray_image_to_blob_url`]

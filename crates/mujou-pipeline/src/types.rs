@@ -7,6 +7,10 @@ use crate::join::PathJoinerKind;
 /// intermediate raster data without depending on `image` directly.
 pub use image::GrayImage;
 
+/// Re-export `RgbaImage` so downstream crates can reference the
+/// original decoded image without depending on `image` directly.
+pub use image::RgbaImage;
+
 /// A 2D point in image coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -204,6 +208,8 @@ pub struct ProcessResult {
 /// equality for diffing, which is more efficient than walking pixel data.
 #[derive(Debug, Clone)]
 pub struct StagedResult {
+    /// Stage 0: original decoded RGBA image (pre-processing).
+    pub original: RgbaImage,
     /// Stage 1: decoded + grayscale image.
     pub grayscale: GrayImage,
     /// Stage 2: Gaussian-blurred image.
