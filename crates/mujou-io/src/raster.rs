@@ -371,8 +371,21 @@ pub fn generate_themed_edge_urls(
 /// recomputes or the component unmounts.
 #[derive(PartialEq, Eq)]
 pub struct CachedBlobUrl {
-    /// The Blob URL string.
-    pub url: String,
+    url: String,
+}
+
+impl CachedBlobUrl {
+    /// Wrap a Blob URL for automatic revocation on drop.
+    #[must_use]
+    pub const fn new(url: String) -> Self {
+        Self { url }
+    }
+
+    /// The underlying Blob URL string.
+    #[must_use]
+    pub fn url(&self) -> &str {
+        &self.url
+    }
 }
 
 impl Drop for CachedBlobUrl {

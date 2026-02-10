@@ -78,7 +78,7 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         let staged = staged_signal();
         raster::rgba_image_to_blob_url(&staged.original)
             .ok()
-            .map(|url| raster::CachedBlobUrl { url })
+            .map(raster::CachedBlobUrl::new)
     });
 
     // Revoke outstanding blob URLs when the component is destroyed.
@@ -119,7 +119,7 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
                     }
                 },
                 |c| {
-                    let url = c.url.clone();
+                    let url = c.url().to_owned();
                     rsx! {
                         img {
                             src: "{url}",

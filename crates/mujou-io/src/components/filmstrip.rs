@@ -62,7 +62,7 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
         let staged = staged_signal();
         raster::rgba_image_to_blob_url(&staged.original)
             .ok()
-            .map(|url| raster::CachedBlobUrl { url })
+            .map(raster::CachedBlobUrl::new)
     });
 
     rsx! {
@@ -139,7 +139,7 @@ fn render_thumbnail(
             // revokes it automatically when the memo recomputes.
             let cached = original_thumb_cache.read();
             cached.as_ref().map_or_else(render_thumbnail_error, |c| {
-                let url = c.url.clone();
+                let url = c.url().to_owned();
                 rsx! {
                     img {
                         src: "{url}",
