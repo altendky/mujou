@@ -128,6 +128,10 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         }
 
         StageId::Edges => {
+            // Clean up any leftover raster blob URL from a previous stage.
+            if let Some(ref prev) = prev_blob_url.take() {
+                raster::revoke_blob_url(prev);
+            }
             // Use eagerly cached themed Blob URLs for the Edges stage.
             // Both light and dark versions are generated via use_memo when
             // the pipeline result changes; toggling the theme simply selects
