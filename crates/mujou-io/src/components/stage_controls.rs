@@ -83,13 +83,15 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         "canny_low",
                         "Canny Low",
                         f64::from(canny_low),
-                        0.0,
+                        1.0,
                         500.0,
                         1.0,
                         move |v: f64| {
                             let mut c = config_low.clone();
                             #[allow(clippy::cast_possible_truncation)]
-                            { c.canny_low = v as f32; }
+                            let v = v as f32;
+                            // Enforce canny_low <= canny_high.
+                            c.canny_low = v.min(c.canny_high);
                             on_change.call(c);
                         },
                     )}
@@ -97,13 +99,15 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         "canny_high",
                         "Canny High",
                         f64::from(canny_high),
-                        0.0,
+                        1.0,
                         500.0,
                         1.0,
                         move |v: f64| {
                             let mut c = config_high.clone();
                             #[allow(clippy::cast_possible_truncation)]
-                            { c.canny_high = v as f32; }
+                            let v = v as f32;
+                            // Enforce canny_high >= canny_low.
+                            c.canny_high = v.max(c.canny_low);
                             on_change.call(c);
                         },
                     )}

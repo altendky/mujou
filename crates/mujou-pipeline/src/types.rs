@@ -106,12 +106,21 @@ pub struct Dimensions {
 /// All parameters have sensible defaults matching the
 /// pipeline specification.
 ///
+/// # Canny threshold invariants
+///
+/// Both `canny_low` and `canny_high` must be at least
+/// [`edge::MIN_THRESHOLD`] (1.0), and `canny_low` must not exceed
+/// `canny_high`. These invariants are enforced at the UI level (slider
+/// ranges and cross-clamping) and as defense-in-depth inside
+/// [`edge::canny`]. See <https://github.com/altendky/mujou/issues/44>.
+///
 /// # Future work
 ///
 /// Fields are currently public with no construction-time validation.
 /// A validated constructor (`try_new`) or builder should be added to
 /// enforce invariants such as `blur_sigma > 0`, `canny_low <= canny_high`,
-/// `0.0 <= mask_diameter <= 1.0`, and `simplify_tolerance >= 0.0`.
+/// `canny_low >= 1.0`, `0.0 <= mask_diameter <= 1.0`, and
+/// `simplify_tolerance >= 0.0`.
 /// Invalid values would return [`PipelineError::InvalidConfig`].
 /// See [open-questions: PipelineConfig validation](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
 #[derive(Debug, Clone, PartialEq)]
@@ -123,10 +132,14 @@ pub struct PipelineConfig {
     /// Canny edge detector low threshold. Pixels with gradient magnitude
     /// between `canny_low` and `canny_high` are edges only if connected
     /// to a strong edge.
+    ///
+    /// Must be at least [`edge::MIN_THRESHOLD`] and at most `canny_high`.
     pub canny_low: f32,
 
     /// Canny edge detector high threshold. Pixels with gradient magnitude
     /// above this value are definite edges.
+    ///
+    /// Must be at least [`edge::MIN_THRESHOLD`] and at least `canny_low`.
     pub canny_high: f32,
 
     /// Which contour tracing algorithm to use.

@@ -386,4 +386,38 @@ mod tests {
         assert_eq!(process_result.polyline, *staged_result.final_polyline());
         assert_eq!(process_result.dimensions, staged_result.dimensions);
     }
+
+    #[test]
+    fn process_with_zero_canny_low_does_not_hang() {
+        // Regression test for https://github.com/altendky/mujou/issues/44
+        // canny_low=0 used to produce a degenerate edge map that caused
+        // the app to hang. The pipeline now clamps it to MIN_THRESHOLD.
+        let png = sharp_edge_png(40, 40);
+        let config = PipelineConfig {
+            canny_low: 0.0,
+            ..PipelineConfig::default()
+        };
+        let result = process(&png, &config);
+        assert!(
+            result.is_ok(),
+            "canny_low=0 should be clamped and produce a valid result, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn process_with_low_above_high_does_not_hang() {
+        // Regression test: canny_low > canny_high should be clamped.
+        let png = sharp_edge_png(40, 40);
+        let config = PipelineConfig {
+            canny_low: 200.0,
+            canny_high: 50.0,
+            ..PipelineConfig::default()
+        };
+        let result = process(&png, &config);
+        // Should either succeed or return NoContours -- not hang.
+        assert!(
+            matches!(result, Ok(_) | Err(PipelineError::NoContours)),
+            "canny_low > canny_high should be clamped, got {result:?}"
+        );
+    }
 }
