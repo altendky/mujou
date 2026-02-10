@@ -77,7 +77,7 @@ mujou/
 │       ├── SUMMARY.md
 │       └── project/
 │           └── *.md
-├── assets/                       # Tailwind CSS, static assets
+├── assets/                       # Static assets (example images)
 ├── Dioxus.toml                   # Dioxus CLI config
 ├── rust-toolchain.toml
 ├── rustfmt.toml
