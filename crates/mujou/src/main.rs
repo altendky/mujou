@@ -29,6 +29,7 @@ fn app() -> Element {
     let mut processing = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
     let mut generation = use_signal(|| 0u64);
+    let mut debounce_generation = use_signal(|| 0u64);
     let mut selected_stage = use_signal(|| StageId::Masked);
 
     // The "committed" config is what the pipeline actually runs with.
@@ -111,15 +112,15 @@ fn app() -> Element {
             return;
         }
 
-        generation += 1;
-        let my_generation = *generation.peek();
+        debounce_generation += 1;
+        let my_generation = *debounce_generation.peek();
 
         spawn(async move {
             gloo_timers::future::TimeoutFuture::new(CONFIG_DEBOUNCE_MS).await;
 
             // Only commit if no newer config change has arrived during
             // the debounce period.
-            if *generation.peek() == my_generation {
+            if *debounce_generation.peek() == my_generation {
                 committed_config.set(cfg);
             }
         });
