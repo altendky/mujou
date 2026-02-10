@@ -54,15 +54,23 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     // replaced <img>) and on unmount/stage-switch.
     let mut prev_blob_url: Signal<Option<String>> = use_signal(|| None);
 
+    // Bridge the Rc prop into the reactive system via a Signal.
+    // Pointer equality avoids deep comparison of GrayImage data
+    // (which does not implement PartialEq).
+    let mut staged_signal = use_signal(|| Rc::clone(&props.staged));
+    if !Rc::ptr_eq(&props.staged, &*staged_signal.peek()) {
+        staged_signal.set(Rc::clone(&props.staged));
+    }
+
     // Eagerly cached themed Blob URLs for the Edges stage.
-    // Computed via use_memo so signal mutations happen outside the render
-    // body, avoiding an extra render cycle on pipeline result changes.
-    let staged_for_memo = Rc::clone(&props.staged);
+    // use_memo subscribes to staged_signal and recomputes when a new
+    // Rc<StagedResult> arrives.
     let edge_cache = use_memo(move || {
-        raster::generate_themed_edge_urls(&staged_for_memo.edges)
+        let staged = staged_signal();
+        raster::generate_themed_edge_urls(&staged.edges)
             .ok()
             .map(|mut urls| {
-                urls.staged_ptr = Rc::as_ptr(&staged_for_memo) as usize;
+                urls.staged_ptr = Rc::as_ptr(&staged) as usize;
                 urls
             })
     });

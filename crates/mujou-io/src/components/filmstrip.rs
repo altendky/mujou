@@ -10,6 +10,7 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use dioxus_signals::Memo;
 use mujou_pipeline::StagedResult;
 
 use crate::raster;
@@ -40,25 +41,23 @@ impl PartialEq for FilmstripProps {
 pub fn Filmstrip(props: FilmstripProps) -> Element {
     let is_dark: Signal<bool> = use_context();
 
+    // Bridge the Rc prop into the reactive system via a Signal.
+    let mut staged_signal = use_signal(|| Rc::clone(&props.staged));
+    if !Rc::ptr_eq(&props.staged, &*staged_signal.peek()) {
+        staged_signal.set(Rc::clone(&props.staged));
+    }
+
     // Eagerly cached themed Blob URLs for the Edges thumbnail.
-    // Computed via use_memo so signal mutations happen outside the render
-    // body, avoiding an extra render cycle on pipeline result changes.
-    let staged_for_memo = Rc::clone(&props.staged);
+    // use_memo subscribes to staged_signal and recomputes when a new
+    // Rc<StagedResult> arrives.
     let edge_thumb_cache = use_memo(move || {
-        raster::generate_themed_edge_urls(&staged_for_memo.edges)
+        let staged = staged_signal();
+        raster::generate_themed_edge_urls(&staged.edges)
             .ok()
             .map(|mut urls| {
-                urls.staged_ptr = Rc::as_ptr(&staged_for_memo) as usize;
+                urls.staged_ptr = Rc::as_ptr(&staged) as usize;
                 urls
             })
-    });
-
-    let edge_thumb_url = edge_thumb_cache.read().as_ref().map(|c| {
-        if is_dark() {
-            c.dark_url.clone()
-        } else {
-            c.light_url.clone()
-        }
     });
 
     rsx! {
@@ -66,7 +65,7 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
             class: "flex flex-nowrap overflow-x-auto gap-2 py-2 scrollbar-thin",
 
             for stage in StageId::ALL {
-                {render_tile(&props.staged, stage, props.selected == stage, &props.on_select, edge_thumb_url.as_ref())}
+                {render_tile(&props.staged, stage, props.selected == stage, &props.on_select, &edge_thumb_cache, is_dark())}
             }
         }
     }
@@ -78,7 +77,8 @@ fn render_tile(
     stage: StageId,
     is_selected: bool,
     on_select: &EventHandler<StageId>,
-    edge_thumb_url: Option<&String>,
+    edge_thumb_cache: &Memo<Option<raster::ThemedEdgeUrls>>,
+    is_dark: bool,
 ) -> Element {
     let border = if is_selected {
         "border-2 border-[var(--border-accent)]"
@@ -103,7 +103,7 @@ fn render_tile(
 
             // Thumbnail
             div { class: "w-full aspect-square overflow-hidden rounded bg-[var(--preview-bg)]",
-                {render_thumbnail(staged, stage, edge_thumb_url)}
+                {render_thumbnail(staged, stage, edge_thumb_cache, is_dark)}
             }
 
             // Label
@@ -123,11 +123,18 @@ fn render_tile(
 fn render_thumbnail(
     staged: &StagedResult,
     stage: StageId,
-    edge_thumb_url: Option<&String>,
+    edge_thumb_cache: &Memo<Option<raster::ThemedEdgeUrls>>,
+    is_dark: bool,
 ) -> Element {
     match stage {
         StageId::Edges => {
             // Use the pre-computed themed Blob URL for the Edges thumbnail.
+            // The URL is resolved here (not in the component body) so the
+            // clone cost is only paid when this tile actually renders.
+            let cached = edge_thumb_cache.read();
+            let edge_thumb_url = cached
+                .as_ref()
+                .map(|c| if is_dark { &c.dark_url } else { &c.light_url });
             match edge_thumb_url {
                 Some(url) => {
                     rsx! {
