@@ -157,6 +157,11 @@ fn copy_site_assets(site_dir: &Path, out_dir: &Path) {
 
 /// Generate `crates/mujou/index.html` with the theme-detect script
 /// inlined in `<head>`.
+///
+/// Note: this writes to `manifest_dir` (the source tree) rather than
+/// `OUT_DIR` because Dioxus CLI expects `index.html` at the crate
+/// root for serving.  The file is gitignored.  This will fail in
+/// read-only source trees (Nix, certain CI sandboxes).
 fn generate_index_html(site_dir: &Path, manifest_dir: &Path) {
     let detect_js = fs::read_to_string(site_dir.join("theme-detect.js"))
         .expect("failed to read site/theme-detect.js");
