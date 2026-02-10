@@ -21,6 +21,10 @@ REPO_URL="https://github.com/altendky/mujou"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--port)
+		if [[ $# -lt 2 ]]; then
+			echo "Error: --port requires a value" >&2
+			exit 1
+		fi
 		PORT="$2"
 		shift 2
 		;;
