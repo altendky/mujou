@@ -260,8 +260,14 @@ fn render_slider(
                 value: "{value}",
                 class: "w-full accent-[var(--btn-primary)]",
                 oninput: move |e| {
-                    if let Ok(v) = e.value().parse::<f64>() {
-                        on_input(v);
+                    match e.value().parse::<f64>() {
+                        Ok(v) => on_input(v),
+                        Err(err) => {
+                            web_sys::console::warn_1(
+                                &format!("slider parse failure: {err:?} from {:?}", e.value())
+                                    .into(),
+                            );
+                        }
                     }
                 },
             }
