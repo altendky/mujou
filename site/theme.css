@@ -7,6 +7,18 @@
  */
 
 :root {
+  /* -- Title / wordmark typography --
+     Shared between the static landing page and the Dioxus app so the
+     "mujou" wordmark and Japanese subtitle render identically in both
+     contexts.  Only *size* should differ (hero vs. in-app header).
+     Font loaded from Google Fonts CDN; see follow-up issue to
+     self-host the .woff2 files for offline/privacy. */
+  --title-font: 'Noto Sans', sans-serif;
+  --title-font-jp: 'Noto Sans JP', 'Noto Sans', sans-serif;
+  --title-weight: 400;
+  --title-spacing: 0.2em;
+  --title-spacing-jp: 0.1em;
+
   /* -- Light palette (default) -- */
   --bg: #fafafa;
   --text: #1a1a1a;
@@ -100,4 +112,18 @@
 .theme-toggle:focus-visible {
   outline: 2px solid var(--border-accent);
   outline-offset: 2px;
+}
+
+/* Title wordmark — reusable classes for the "mujou" brand text.
+   Size is intentionally omitted so each context can set its own. */
+.title-brand {
+  font-family: var(--title-font);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-spacing);
+}
+
+.title-brand-jp {
+  font-family: var(--title-font-jp);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-spacing-jp);
 }

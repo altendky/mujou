@@ -96,6 +96,15 @@ fn app() -> Element {
         // Theme toggle logic — copied from site/theme-toggle.js by build.rs.
         script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
 
+        // Google Fonts — Noto Sans (Latin) and Noto Sans JP for the title
+        // wordmark.  See follow-up issue to self-host for offline/privacy.
+        link { rel: "preconnect", href: "https://fonts.googleapis.com" }
+        link { rel: "preconnect", href: "https://fonts.gstatic.com", crossorigin: "anonymous" }
+        link {
+            rel: "stylesheet",
+            href: "https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Noto+Sans+JP:wght@400&display=swap",
+        }
+
         div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col",
             // Theme toggle (fixed-positioned via shared theme.css;
             // content injected by shared theme-toggle.js)
@@ -106,7 +115,7 @@ fn app() -> Element {
 
             // Header
             header { class: "px-6 py-4 border-b border-(--border)",
-                h1 { class: "text-2xl font-bold", "mujou" }
+                h1 { class: "text-2xl title-brand", "mujou" }
                 p { class: "text-(--muted) text-sm",
                     "Image to vector path converter for sand tables and CNC devices"
                 }
