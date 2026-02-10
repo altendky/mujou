@@ -1,7 +1,8 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use mujou_io::{ExportPanel, FileUpload, Preview};
+use mujou_io::stage::StageId;
+use mujou_io::{ExportPanel, FileUpload, Filmstrip, StageControls, StagePreview};
 
 fn main() {
     dioxus::launch(app);
@@ -10,19 +11,19 @@ fn main() {
 /// Root application component.
 ///
 /// Manages the core application state via Dioxus signals and wires
-/// together the upload, preview, and export components.
+/// together the upload, filmstrip, stage preview, stage controls, and
+/// export components.
 #[allow(clippy::too_many_lines)]
 fn app() -> Element {
     // --- Application state ---
     let mut image_bytes = use_signal(|| Option::<Vec<u8>>::None);
     let mut filename = use_signal(|| String::from("output"));
-    let mut result = use_signal(|| Option::<Rc<mujou_pipeline::ProcessResult>>::None);
+    let mut result = use_signal(|| Option::<Rc<mujou_pipeline::StagedResult>>::None);
     let mut processing = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
     let mut generation = use_signal(|| 0u64);
-
-    // Use default config for now (Phase 4 adds controls).
-    let config = use_signal(mujou_pipeline::PipelineConfig::default);
+    let mut config = use_signal(mujou_pipeline::PipelineConfig::default);
+    let mut selected_stage = use_signal(|| StageId::Masked);
 
     // --- File upload handler ---
     let on_upload = move |(bytes, name): (Vec<u8>, String)| {
@@ -60,7 +61,7 @@ fn app() -> Element {
             // "Processing..." state before we block on the pipeline.
             gloo_timers::future::TimeoutFuture::new(0).await;
 
-            let outcome = mujou_pipeline::process(&bytes, &cfg);
+            let outcome = mujou_pipeline::process_staged(&bytes, &cfg);
 
             // If another run was triggered while we were processing,
             // discard this stale result silently.
@@ -82,6 +83,16 @@ fn app() -> Element {
             processing.set(false);
         });
     });
+
+    // --- Config change handler ---
+    let on_config_change = move |new_config: mujou_pipeline::PipelineConfig| {
+        config.set(new_config);
+    };
+
+    // --- Stage select handler ---
+    let on_stage_select = move |stage: StageId| {
+        selected_stage.set(stage);
+    };
 
     // --- Layout ---
     rsx! {
@@ -124,17 +135,39 @@ fn app() -> Element {
 
             // Main content area
             div { class: "flex-1 flex flex-col lg:flex-row gap-6 p-6",
-                // Left: Preview
+                // Left column: Preview + Filmstrip + Controls
                 div { class: "flex-1 flex flex-col gap-4",
+                    // Stage preview
                     if processing() {
                         div { class: "flex-1 flex items-center justify-center",
                             p { class: "text-(--text-secondary) text-lg animate-pulse",
                                 "Processing..."
                             }
                         }
-                    } else if let Some(ref res) = result() {
-                        Preview {
-                            result: Rc::clone(res),
+                    } else if let Some(ref staged) = result() {
+                        // Full-size stage preview
+                        StagePreview {
+                            staged: Rc::clone(staged),
+                            selected: selected_stage(),
+                        }
+
+                        // Filmstrip
+                        Filmstrip {
+                            staged: Rc::clone(staged),
+                            selected: selected_stage(),
+                            on_select: on_stage_select,
+                        }
+
+                        // Per-stage controls
+                        div { class: "bg-[var(--surface)] rounded p-4",
+                            h3 { class: "text-sm font-semibold text-[var(--text-heading)] mb-2",
+                                "{selected_stage()} Controls"
+                            }
+                            StageControls {
+                                stage: selected_stage(),
+                                config: config(),
+                                on_config_change: on_config_change,
+                            }
                         }
                     } else if image_bytes().is_some() {
                         div { class: "flex-1 flex items-center justify-center",
@@ -156,10 +189,18 @@ fn app() -> Element {
                             p { class: "text-(--text-error) text-sm", "{err}" }
                         }
                     }
+
+                    // Export panel (inline on mobile/tablet)
+                    div { class: "lg:hidden",
+                        ExportPanel {
+                            result: result(),
+                            filename: filename(),
+                        }
+                    }
                 }
 
-                // Right sidebar: Export
-                div { class: "lg:w-72 flex-shrink-0",
+                // Right sidebar: Export (desktop only)
+                div { class: "hidden lg:block lg:w-72 flex-shrink-0",
                     ExportPanel {
                         result: result(),
                         filename: filename(),

@@ -3,6 +3,10 @@
 use crate::contour::ContourTracerKind;
 use crate::join::PathJoinerKind;
 
+/// Re-export `GrayImage` so downstream crates can reference
+/// intermediate raster data without depending on `image` directly.
+pub use image::GrayImage;
+
 /// A 2D point in image coordinates.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Point {
@@ -174,6 +178,44 @@ pub struct ProcessResult {
     /// Export serializers use this to set coordinate spaces
     /// (e.g., SVG `viewBox`, G-code bed scaling).
     pub dimensions: Dimensions,
+}
+
+/// Result of running the pipeline with all intermediate stage outputs preserved.
+///
+/// Each field captures the output of one logical pipeline stage,
+/// enabling the UI to display thumbnails and full-size previews for
+/// every step of the processing chain.
+///
+/// Note: does not derive `PartialEq` because `GrayImage` does not
+/// implement it. When wrapped in `Rc`, Dioxus will use pointer
+/// equality for diffing, which is more efficient than walking pixel data.
+#[derive(Debug, Clone)]
+pub struct StagedResult {
+    /// Stage 1: decoded + grayscale image.
+    pub grayscale: GrayImage,
+    /// Stage 2: Gaussian-blurred image.
+    pub blurred: GrayImage,
+    /// Stages 3+4: Canny edge map (post-inversion when `invert=true`).
+    pub edges: GrayImage,
+    /// Stage 5: traced contour polylines.
+    pub contours: Vec<Polyline>,
+    /// Stage 6: RDP-simplified polylines.
+    pub simplified: Vec<Polyline>,
+    /// Stage 8: joined single continuous path.
+    pub joined: Polyline,
+    /// Stage 9: circular-masked path (`Some` only when `circular_mask=true`).
+    pub masked: Option<Polyline>,
+    /// Source image dimensions in pixels.
+    pub dimensions: Dimensions,
+}
+
+impl StagedResult {
+    /// Returns the final output polyline — masked if masking is enabled,
+    /// otherwise the joined path.
+    #[must_use]
+    pub fn final_polyline(&self) -> &Polyline {
+        self.masked.as_ref().unwrap_or(&self.joined)
+    }
 }
 
 /// Errors that can occur during pipeline processing.

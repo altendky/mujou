@@ -1209,6 +1209,7 @@ name = "mujou-io"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "image",
  "js-sys",
  "mujou-export",
  "mujou-pipeline",
