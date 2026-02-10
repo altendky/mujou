@@ -308,6 +308,10 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let staged = process_staged(&png, &PipelineConfig::default()).unwrap();
 
+        // Original RGBA has correct dimensions.
+        assert_eq!(staged.original.width(), 40);
+        assert_eq!(staged.original.height(), 40);
+
         // Raster stages have correct dimensions.
         assert_eq!(staged.grayscale.width(), 40);
         assert_eq!(staged.grayscale.height(), 40);
