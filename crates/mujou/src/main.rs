@@ -1,7 +1,14 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use mujou_io::{ExportPanel, FileUpload, Preview};
+use mujou_io::{ExportPanel, FileUpload, Filmstrip, StageControls, StageId, StagePreview};
+
+/// Debounce delay in milliseconds for config changes.
+///
+/// After the user stops adjusting a slider/control, the pipeline re-runs
+/// after this delay. Short enough to feel responsive, long enough to avoid
+/// thrashing during continuous slider drags.
+const CONFIG_DEBOUNCE_MS: u32 = 200;
 
 fn main() {
     dioxus::launch(app);
@@ -10,19 +17,28 @@ fn main() {
 /// Root application component.
 ///
 /// Manages the core application state via Dioxus signals and wires
-/// together the upload, preview, and export components.
+/// together the upload, filmstrip, stage preview, stage controls, and
+/// export components.
 #[allow(clippy::too_many_lines)]
 fn app() -> Element {
     // --- Application state ---
     let mut image_bytes = use_signal(|| Option::<Vec<u8>>::None);
     let mut filename = use_signal(|| String::from("output"));
-    let mut result = use_signal(|| Option::<Rc<mujou_pipeline::ProcessResult>>::None);
+    let mut result = use_signal(|| Option::<Rc<mujou_pipeline::StagedResult>>::None);
     let mut processing = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
     let mut generation = use_signal(|| 0u64);
+    let mut debounce_generation = use_signal(|| 0u64);
+    let mut selected_stage = use_signal(|| StageId::Masked);
 
-    // Use default config for now (Phase 4 adds controls).
-    let config = use_signal(mujou_pipeline::PipelineConfig::default);
+    // The "committed" config is what the pipeline actually runs with.
+    // Updated immediately on image upload, debounced on slider changes.
+    let mut committed_config = use_signal(mujou_pipeline::PipelineConfig::default);
+
+    // The "live" config tracks the UI controls in real-time (including
+    // mid-drag slider positions). This drives the displayed values in
+    // StageControls without triggering pipeline re-runs.
+    let mut live_config = use_signal(mujou_pipeline::PipelineConfig::default);
 
     // --- File upload handler ---
     let on_upload = move |(bytes, name): (Vec<u8>, String)| {
@@ -38,14 +54,14 @@ fn app() -> Element {
     };
 
     // --- Pipeline processing effect ---
-    // Re-runs whenever image_bytes or config changes.
-    // Spawns an async task so the "Processing..." indicator renders
-    // before the heavy synchronous pipeline work blocks the thread.
+    // Re-runs whenever image_bytes or committed_config changes.
+    // Spawns an async task so the UI remains responsive while the
+    // heavy synchronous pipeline work runs.
     use_effect(move || {
         let Some(bytes) = image_bytes() else {
             return;
         };
-        let cfg = config();
+        let cfg = committed_config();
 
         // Increment generation so any in-flight task from a prior
         // trigger knows it is stale and should discard its result.
@@ -57,10 +73,10 @@ fn app() -> Element {
 
         spawn(async move {
             // Yield to the browser event loop so it can paint the
-            // "Processing..." state before we block on the pipeline.
+            // processing indicator before we block on the pipeline.
             gloo_timers::future::TimeoutFuture::new(0).await;
 
-            let outcome = mujou_pipeline::process(&bytes, &cfg);
+            let outcome = mujou_pipeline::process_staged(&bytes, &cfg);
 
             // If another run was triggered while we were processing,
             // discard this stale result silently.
@@ -82,6 +98,42 @@ fn app() -> Element {
             processing.set(false);
         });
     });
+
+    // --- Debounced config commit effect ---
+    // When live_config changes (e.g. slider drag), wait for the debounce
+    // period before committing. This avoids re-running the pipeline on
+    // every micro-movement of a slider.
+    use_effect(move || {
+        let cfg = live_config();
+
+        // Skip debounce if configs already match (e.g. initial render).
+        if cfg == committed_config.peek().clone() {
+            return;
+        }
+
+        debounce_generation += 1;
+        let my_generation = *debounce_generation.peek();
+
+        spawn(async move {
+            gloo_timers::future::TimeoutFuture::new(CONFIG_DEBOUNCE_MS).await;
+
+            // Only commit if no newer config change has arrived during
+            // the debounce period.
+            if *debounce_generation.peek() == my_generation {
+                committed_config.set(cfg);
+            }
+        });
+    });
+
+    // --- Config change handler ---
+    let on_config_change = move |new_config: mujou_pipeline::PipelineConfig| {
+        live_config.set(new_config);
+    };
+
+    // --- Stage select handler ---
+    let on_stage_select = move |stage: StageId| {
+        selected_stage.set(stage);
+    };
 
     // --- Layout ---
     rsx! {
@@ -124,17 +176,60 @@ fn app() -> Element {
 
             // Main content area
             div { class: "flex-1 flex flex-col lg:flex-row gap-6 p-6",
-                // Left: Preview
+                // Left column: Preview + Filmstrip + Controls
                 div { class: "flex-1 flex flex-col gap-4",
-                    if processing() {
+
+                    // Show results (stale or fresh) when available.
+                    // The processing indicator overlays rather than replaces.
+                    if let Some(ref staged) = result() {
+                        // Stage preview with processing overlay
+                        div { class: "relative",
+                            // Preview content (stays visible during re-processing)
+                            div {
+                                class: if processing() { "opacity-50 transition-opacity" } else { "transition-opacity" },
+
+                                StagePreview {
+                                    staged: Rc::clone(staged),
+                                    selected: selected_stage(),
+                                }
+                            }
+
+                            // Processing indicator overlay
+                            if processing() {
+                                div { class: "absolute inset-0 flex items-center justify-center",
+                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-2 shadow",
+                                        p { class: "text-(--text-secondary) text-sm animate-pulse",
+                                            "Processing..."
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Filmstrip (always visible)
+                        Filmstrip {
+                            staged: Rc::clone(staged),
+                            selected: selected_stage(),
+                            on_select: on_stage_select,
+                        }
+
+                        // Per-stage controls (always visible, never destroyed)
+                        div { class: "bg-[var(--surface)] rounded p-4",
+                            h3 { class: "text-sm font-semibold text-[var(--text-heading)] mb-2",
+                                "{selected_stage()} Controls"
+                            }
+                            StageControls {
+                                stage: selected_stage(),
+                                config: live_config(),
+                                on_config_change: on_config_change,
+                            }
+                        }
+                    } else if processing() {
+                        // First-time processing (no previous result to show)
                         div { class: "flex-1 flex items-center justify-center",
                             p { class: "text-(--text-secondary) text-lg animate-pulse",
                                 "Processing..."
                             }
-                        }
-                    } else if let Some(ref res) = result() {
-                        Preview {
-                            result: Rc::clone(res),
                         }
                     } else if image_bytes().is_some() {
                         div { class: "flex-1 flex items-center justify-center",
@@ -156,10 +251,18 @@ fn app() -> Element {
                             p { class: "text-(--text-error) text-sm", "{err}" }
                         }
                     }
+
+                    // Export panel (inline on mobile/tablet)
+                    div { class: "lg:hidden",
+                        ExportPanel {
+                            result: result(),
+                            filename: filename(),
+                        }
+                    }
                 }
 
-                // Right sidebar: Export
-                div { class: "lg:w-72 flex-shrink-0",
+                // Right sidebar: Export (desktop only)
+                div { class: "hidden lg:block lg:w-72 flex-shrink-0",
                     ExportPanel {
                         result: result(),
                         filename: filename(),

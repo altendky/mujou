@@ -12,6 +12,7 @@ categories = ["wasm"]
 
 [dependencies]
 dioxus.workspace = true
+image.workspace = true
 mujou-pipeline.workspace = true
 mujou-export.workspace = true
 web-sys.workspace = true

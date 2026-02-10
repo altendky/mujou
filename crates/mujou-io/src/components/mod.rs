@@ -1,11 +1,18 @@
 //! Dioxus UI components for mujou.
 //!
-//! Provides the file upload zone, SVG preview canvas, and export panel.
+//! Provides the file upload zone, SVG preview canvas, export panel,
+//! filmstrip stage navigation, per-stage controls, and stage preview.
 
 mod export;
+mod filmstrip;
 mod preview;
+mod stage_controls;
+mod stage_preview;
 mod upload;
 
 pub use export::ExportPanel;
+pub use filmstrip::Filmstrip;
 pub use preview::Preview;
+pub use stage_controls::StageControls;
+pub use stage_preview::StagePreview;
 pub use upload::FileUpload;

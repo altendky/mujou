@@ -50,7 +50,7 @@ pub fn Preview(props: PreviewProps) -> Element {
 /// Uses `M` for the first point and `L` for subsequent points.
 /// Coordinates are formatted to 1 decimal place (matching the export
 /// serializer).
-fn build_path_data(polyline: &Polyline) -> String {
+pub fn build_path_data(polyline: &Polyline) -> String {
     let points = polyline.points();
     if points.len() < 2 {
         return String::new();
