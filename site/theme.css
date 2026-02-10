@@ -30,6 +30,8 @@
   --text-error: #dc2626;
   --error-bg: rgba(220, 38, 38, 0.1);
   --error-border: #f87171;
+  /* Preview canvas colors are intentionally theme-independent —
+     the drawing surface stays constant regardless of UI theme. */
   --preview-bg: #fff;
   --preview-stroke: #000;
 }
@@ -57,6 +59,7 @@
   --text-error: #f87171;
   --error-bg: rgba(127, 29, 29, 0.5);
   --error-border: #b91c1c;
+  /* Same as light — see comment above. */
   --preview-bg: #fff;
   --preview-stroke: #000;
 }
