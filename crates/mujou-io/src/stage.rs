@@ -85,3 +85,23 @@ impl fmt::Display for StageId {
         f.write_str(self.label())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_contains_every_variant() {
+        // If you add a variant to StageId, update ALL and this count.
+        assert_eq!(
+            StageId::ALL.len(),
+            7,
+            "StageId::ALL length must match variant count"
+        );
+        // Verify no duplicates.
+        let mut seen = std::collections::HashSet::new();
+        for stage in StageId::ALL {
+            assert!(seen.insert(stage), "Duplicate stage in ALL: {stage}");
+        }
+    }
+}
