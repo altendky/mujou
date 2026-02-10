@@ -324,18 +324,21 @@ impl Drop for ThemedEdgeUrls {
 
 /// Generate both themed Blob URLs for a binary edge image.
 ///
-/// Returns a [`ThemedEdgeUrls`] with `staged_ptr` set to 0 — the caller
-/// is responsible for setting the correct pointer identity.
+/// `staged_ptr` is the pointer identity of the `StagedResult` these
+/// URLs are generated from, used for cache invalidation.
 ///
 /// # Errors
 ///
 /// Returns [`RasterError`] if CSS color reading or PNG encoding fails.
-pub fn generate_themed_edge_urls(edges: &GrayImage) -> Result<ThemedEdgeUrls, RasterError> {
+pub fn generate_themed_edge_urls(
+    edges: &GrayImage,
+    staged_ptr: usize,
+) -> Result<ThemedEdgeUrls, RasterError> {
     let colors = read_both_preview_colors()?;
     let light_url = themed_gray_image_to_blob_url(edges, colors.light.bg, colors.light.fg)?;
     let dark_url = themed_gray_image_to_blob_url(edges, colors.dark.bg, colors.dark.fg)?;
     Ok(ThemedEdgeUrls {
-        staged_ptr: 0,
+        staged_ptr,
         light_url,
         dark_url,
     })

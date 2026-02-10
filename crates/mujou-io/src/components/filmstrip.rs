@@ -51,12 +51,8 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
     // Rc<StagedResult> arrives.
     let edge_thumb_cache = use_memo(move || {
         let staged = staged_signal();
-        raster::generate_themed_edge_urls(&staged.edges)
-            .ok()
-            .map(|mut urls| {
-                urls.staged_ptr = Rc::as_ptr(&staged) as usize;
-                urls
-            })
+        let ptr = Rc::as_ptr(&staged) as usize;
+        raster::generate_themed_edge_urls(&staged.edges, ptr).ok()
     });
 
     rsx! {
