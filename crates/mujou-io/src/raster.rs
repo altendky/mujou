@@ -55,7 +55,7 @@ pub fn gray_image_to_blob_url(image: &GrayImage) -> Result<String, RasterError> 
     // 2. Create a Uint8Array from the PNG bytes.
     let uint8_array = js_sys::Uint8Array::from(png_bytes.as_slice());
     let parts = js_sys::Array::new();
-    parts.push(&uint8_array.buffer());
+    parts.push(&uint8_array);
 
     // 3. Create a Blob with image/png MIME type.
     let opts = BlobPropertyBag::new();
