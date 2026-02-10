@@ -3,18 +3,29 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use mujou_pipeline::ProcessResult;
+use mujou_pipeline::StagedResult;
 
 use crate::download;
 
 /// Props for the [`ExportPanel`] component.
-#[derive(Props, Clone, PartialEq)]
+#[derive(Props, Clone)]
 pub struct ExportPanelProps {
-    /// The pipeline result to export. `None` disables all buttons.
-    /// Wrapped in `Rc` to avoid cloning the full polyline on each render.
-    result: Option<Rc<ProcessResult>>,
+    /// The staged pipeline result to export. `None` disables all buttons.
+    /// Wrapped in `Rc` to avoid cloning intermediate data on each render.
+    result: Option<Rc<StagedResult>>,
     /// Base filename (without extension) for downloads.
     filename: String,
+}
+
+impl PartialEq for ExportPanelProps {
+    fn eq(&self, other: &Self) -> bool {
+        let results_eq = match (&self.result, &other.result) {
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        results_eq && self.filename == other.filename
+    }
 }
 
 /// Export panel with download buttons for each output format.
@@ -39,7 +50,8 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
         let filename = props.filename;
         move |_| {
             if let Some(ref res) = result {
-                let svg = mujou_export::to_svg(std::slice::from_ref(&res.polyline), res.dimensions);
+                let polyline = res.final_polyline();
+                let svg = mujou_export::to_svg(std::slice::from_ref(polyline), res.dimensions);
                 let download_name = format!("{filename}.svg");
                 if let Err(e) = download::trigger_download(&svg, &download_name, "image/svg+xml") {
                     export_error.set(Some(format!("Download failed: {e}")));
