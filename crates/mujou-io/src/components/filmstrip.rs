@@ -103,14 +103,18 @@ fn render_thumbnail(staged: &StagedResult, stage: StageId) -> Element {
             };
 
             match raster::gray_image_to_blob_url(image) {
-                Ok(url) => rsx! {
-                    img {
-                        src: "{url}",
-                        class: "w-full h-full object-cover",
-                        alt: "{stage.label()} thumbnail",
-                        onload: move |_| raster::revoke_blob_url(&url),
+                Ok(url) => {
+                    let url_for_error = url.clone();
+                    rsx! {
+                        img {
+                            src: "{url}",
+                            class: "w-full h-full object-cover",
+                            alt: "{stage.label()} thumbnail",
+                            onload: move |_| raster::revoke_blob_url(&url),
+                            onerror: move |_| raster::revoke_blob_url(&url_for_error),
+                        }
                     }
-                },
+                }
                 Err(_) => rsx! {
                     div { class: "w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs",
                         "err"

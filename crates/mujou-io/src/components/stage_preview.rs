@@ -38,6 +38,29 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     let w = staged.dimensions.width;
     let h = staged.dimensions.height;
 
+    // Track the current blob URL so we can revoke it on re-render
+    // (handles rapid re-renders where onload/onerror never fires on the
+    // replaced <img>) and on unmount/stage-switch.
+    let mut prev_blob_url: Signal<Option<String>> = use_signal(|| None);
+
+    // Revoke outstanding blob URL when the component is destroyed.
+    {
+        let prev_blob_url = prev_blob_url;
+        use_drop(move || {
+            if let Some(ref url) = *prev_blob_url.peek() {
+                raster::revoke_blob_url(url);
+            }
+        });
+    }
+
+    // If switching away from a raster stage, clean up any outstanding
+    // blob URL that may not have been revoked via onload/onerror.
+    if !selected.is_raster()
+        && let Some(ref prev) = prev_blob_url.take()
+    {
+        raster::revoke_blob_url(prev);
+    }
+
     match selected {
         StageId::Grayscale | StageId::Blur | StageId::Edges => {
             let image = match selected {
@@ -46,15 +69,25 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
                 _ => &staged.edges,
             };
 
+            // Revoke the previous blob URL before creating a new one.
+            if let Some(ref prev) = prev_blob_url.take() {
+                raster::revoke_blob_url(prev);
+            }
+
             match raster::gray_image_to_blob_url(image) {
-                Ok(url) => rsx! {
-                    img {
-                        src: "{url}",
-                        class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
-                        alt: "{selected} stage preview",
-                        onload: move |_| raster::revoke_blob_url(&url),
+                Ok(url) => {
+                    prev_blob_url.set(Some(url.clone()));
+                    let url_for_error = url.clone();
+                    rsx! {
+                        img {
+                            src: "{url}",
+                            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
+                            alt: "{selected} stage preview",
+                            onload: move |_| raster::revoke_blob_url(&url),
+                            onerror: move |_| raster::revoke_blob_url(&url_for_error),
+                        }
                     }
-                },
+                }
                 Err(e) => rsx! {
                     p { class: "text-[var(--text-error)] text-sm",
                         "Failed to render {selected}: {e}"
