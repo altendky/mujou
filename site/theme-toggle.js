@@ -42,7 +42,7 @@
   function apply(m) {
     mode = m;
     document.documentElement.setAttribute("data-theme", resolve(m));
-    localStorage.setItem("theme", m);
+    try { localStorage.setItem("theme", m); } catch (e) {}
 
     // Update all toggle buttons on the page.
     var buttons = document.querySelectorAll(".theme-toggle");
