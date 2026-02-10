@@ -55,6 +55,17 @@ pub fn invert_edge_map(edges: &GrayImage) -> GrayImage {
 mod tests {
     use super::*;
 
+    /// 20x20 image with a sharp vertical boundary at x = 10.
+    fn sharp_edge_image() -> GrayImage {
+        GrayImage::from_fn(20, 20, |x, _y| {
+            if x < 10 {
+                image::Luma([0])
+            } else {
+                image::Luma([255])
+            }
+        })
+    }
+
     #[test]
     fn blank_image_produces_no_edges() {
         let img = GrayImage::from_fn(20, 20, |_, _| image::Luma([128]));
@@ -68,14 +79,7 @@ mod tests {
 
     #[test]
     fn sharp_edge_detected() {
-        // Create a 20x20 image with a sharp vertical boundary at x=10.
-        let img = GrayImage::from_fn(20, 20, |x, _y| {
-            if x < 10 {
-                image::Luma([0])
-            } else {
-                image::Luma([255])
-            }
-        });
+        let img = sharp_edge_image();
         let edges = canny(&img, 50.0, 150.0);
         // There should be at least some edge pixels near x=10.
         let edge_count: u32 = edges.pixels().map(|p| u32::from(p.0[0] > 0)).sum();
@@ -128,15 +132,7 @@ mod tests {
 
     #[test]
     fn zero_low_threshold_is_clamped_to_min() {
-        // With low=0.0, the clamping should prevent a degenerate edge map.
-        // Use the same sharp-edge image so we know edges exist.
-        let img = GrayImage::from_fn(20, 20, |x, _y| {
-            if x < 10 {
-                image::Luma([0])
-            } else {
-                image::Luma([255])
-            }
-        });
+        let img = sharp_edge_image();
         let edges_zero = canny(&img, 0.0, 150.0);
         let edges_min = canny(&img, MIN_THRESHOLD, 150.0);
         // canny(0.0, ...) should produce the same result as canny(MIN_THRESHOLD, ...)
@@ -146,14 +142,7 @@ mod tests {
 
     #[test]
     fn low_above_high_is_clamped() {
-        // If low > high, low should be clamped down to high.
-        let img = GrayImage::from_fn(20, 20, |x, _y| {
-            if x < 10 {
-                image::Luma([0])
-            } else {
-                image::Luma([255])
-            }
-        });
+        let img = sharp_edge_image();
         let edges_inverted = canny(&img, 200.0, 100.0);
         let edges_equal = canny(&img, 100.0, 100.0);
         // canny(200, 100) should produce the same result as canny(100, 100)
