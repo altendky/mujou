@@ -14,6 +14,8 @@ use std::fmt;
 ///   visually indistinguishable from simplification
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum StageId {
+    /// Stage 0: original source image (RGBA, pre-processing).
+    Original,
     /// Stage 1: decode + grayscale conversion.
     Grayscale,
     /// Stage 2: Gaussian blur.
@@ -32,7 +34,8 @@ pub enum StageId {
 
 impl StageId {
     /// All stages in pipeline order, for iterating the filmstrip.
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
+        Self::Original,
         Self::Grayscale,
         Self::Blur,
         Self::Edges,
@@ -46,6 +49,7 @@ impl StageId {
     #[must_use]
     pub const fn label(self) -> &'static str {
         match self {
+            Self::Original => "Original",
             Self::Grayscale => "Grayscale",
             Self::Blur => "Blur",
             Self::Edges => "Edges",
@@ -60,6 +64,7 @@ impl StageId {
     #[must_use]
     pub const fn abbreviation(self) -> &'static str {
         match self {
+            Self::Original => "O",
             Self::Grayscale => "G",
             Self::Blur => "B",
             Self::Edges => "E",
@@ -70,13 +75,16 @@ impl StageId {
         }
     }
 
-    /// Whether this stage produces raster (`GrayImage`) output.
+    /// Whether this stage produces raster image output.
     ///
     /// Raster stages are displayed as `<img>` elements via Blob URLs.
     /// Vector stages are displayed as inline SVG.
     #[must_use]
     pub const fn is_raster(self) -> bool {
-        matches!(self, Self::Grayscale | Self::Blur | Self::Edges)
+        matches!(
+            self,
+            Self::Original | Self::Grayscale | Self::Blur | Self::Edges
+        )
     }
 }
 
@@ -95,7 +103,7 @@ mod tests {
         // If you add a variant to StageId, update ALL and this count.
         assert_eq!(
             StageId::ALL.len(),
-            7,
+            8,
             "StageId::ALL length must match variant count"
         );
         // Verify no duplicates.

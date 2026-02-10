@@ -24,6 +24,7 @@ pub struct StageControlsProps {
 /// Renders parameter controls for the currently selected pipeline stage.
 ///
 /// Each stage shows only its relevant controls:
+/// - **Original**: no controls
 /// - **Grayscale**: no controls
 /// - **Blur**: blur sigma slider
 /// - **Edges**: Canny low/high sliders, invert toggle
@@ -38,7 +39,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
     let on_change = props.on_config_change;
 
     match props.stage {
-        StageId::Grayscale => {
+        StageId::Original | StageId::Grayscale => {
             rsx! {
                 p { class: "text-sm text-[var(--text-secondary)] italic",
                     "No adjustable parameters for this stage."

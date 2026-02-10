@@ -90,6 +90,34 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     }
 
     match selected {
+        StageId::Original => {
+            // Revoke the previous blob URL before creating a new one.
+            if let Some(ref prev) = prev_blob_url.take() {
+                raster::revoke_blob_url(prev);
+            }
+
+            match raster::rgba_image_to_blob_url(&staged.original) {
+                Ok(url) => {
+                    prev_blob_url.set(Some(url.clone()));
+                    let url_for_error = url.clone();
+                    rsx! {
+                        img {
+                            src: "{url}",
+                            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
+                            alt: "Original stage preview",
+                            onload: move |_| raster::revoke_blob_url(&url),
+                            onerror: move |_| raster::revoke_blob_url(&url_for_error),
+                        }
+                    }
+                }
+                Err(e) => rsx! {
+                    p { class: "text-[var(--text-error)] text-sm",
+                        "Failed to render Original: {e}"
+                    }
+                },
+            }
+        }
+
         StageId::Grayscale | StageId::Blur => {
             let image = match selected {
                 StageId::Grayscale => &staged.grayscale,

@@ -4,7 +4,7 @@
 //! encoding to PNG and creating object URLs via the Web API.
 
 use image::ImageEncoder;
-use mujou_pipeline::GrayImage;
+use mujou_pipeline::{GrayImage, RgbaImage};
 use wasm_bindgen::JsValue;
 use web_sys::BlobPropertyBag;
 
@@ -49,6 +49,27 @@ pub fn gray_image_to_blob_url(image: &GrayImage) -> Result<String, RasterError> 
         image.width(),
         image.height(),
         image::ExtendedColorType::L8,
+    )?;
+    png_bytes_to_blob_url(&png_bytes)
+}
+
+/// Encode an `RgbaImage` as a PNG Blob URL for use as an `<img src>`.
+///
+/// The returned URL must be revoked via [`revoke_blob_url`] when no
+/// longer needed to avoid memory leaks.
+///
+/// # Errors
+///
+/// Returns [`RasterError::PngEncode`] if PNG encoding fails.
+/// Returns [`RasterError::JsError`] if Blob or URL creation fails.
+pub fn rgba_image_to_blob_url(image: &RgbaImage) -> Result<String, RasterError> {
+    let mut png_bytes = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut png_bytes);
+    encoder.write_image(
+        image.as_raw(),
+        image.width(),
+        image.height(),
+        image::ExtendedColorType::Rgba8,
     )?;
     png_bytes_to_blob_url(&png_bytes)
 }

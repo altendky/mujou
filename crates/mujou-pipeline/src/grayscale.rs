@@ -5,9 +5,42 @@
 //!
 //! This is the first step in the pipeline: raw bytes in, `GrayImage` out.
 
-use image::GrayImage;
+use image::{DynamicImage, GrayImage, RgbaImage};
 
 use crate::types::PipelineError;
+
+/// Decode raw image bytes into a [`DynamicImage`].
+///
+/// Supports PNG, JPEG, BMP, and WebP formats (whatever the `image` crate
+/// can decode).
+///
+/// # Errors
+///
+/// Returns [`PipelineError::EmptyInput`] if `bytes` is empty.
+/// Returns [`PipelineError::ImageDecode`] if the image format is
+/// unrecognized or the data is corrupt.
+pub fn decode(bytes: &[u8]) -> Result<DynamicImage, PipelineError> {
+    if bytes.is_empty() {
+        return Err(PipelineError::EmptyInput);
+    }
+
+    Ok(image::load_from_memory(bytes)?)
+}
+
+/// Convert a decoded image to RGBA.
+#[must_use]
+pub fn to_rgba(img: &DynamicImage) -> RgbaImage {
+    img.to_rgba8()
+}
+
+/// Convert a decoded image to grayscale.
+///
+/// The standard luminance formula is used for RGB-to-gray
+/// conversion: `0.299*R + 0.587*G + 0.114*B`.
+#[must_use]
+pub fn to_grayscale(img: &DynamicImage) -> GrayImage {
+    img.to_luma8()
+}
 
 /// Decode raw image bytes and convert to grayscale.
 ///
@@ -22,12 +55,8 @@ use crate::types::PipelineError;
 /// unrecognized or the data is corrupt.
 #[must_use = "returns the decoded grayscale image"]
 pub fn decode_and_grayscale(bytes: &[u8]) -> Result<GrayImage, PipelineError> {
-    if bytes.is_empty() {
-        return Err(PipelineError::EmptyInput);
-    }
-
-    let img = image::load_from_memory(bytes)?;
-    Ok(img.to_luma8())
+    let img = decode(bytes)?;
+    Ok(to_grayscale(&img))
 }
 
 #[cfg(test)]

@@ -114,7 +114,7 @@ fn render_tile(
 }
 
 /// Render the thumbnail content for a stage tile.
-#[allow(clippy::option_if_let_else)]
+#[allow(clippy::option_if_let_else, clippy::too_many_lines)]
 fn render_thumbnail(
     staged: &StagedResult,
     stage: StageId,
@@ -122,6 +122,26 @@ fn render_thumbnail(
     is_dark: bool,
 ) -> Element {
     match stage {
+        StageId::Original => match raster::rgba_image_to_blob_url(&staged.original) {
+            Ok(url) => {
+                let url_for_error = url.clone();
+                rsx! {
+                    img {
+                        src: "{url}",
+                        class: "w-full h-full object-cover",
+                        alt: "Original thumbnail",
+                        onload: move |_| raster::revoke_blob_url(&url),
+                        onerror: move |_| raster::revoke_blob_url(&url_for_error),
+                    }
+                }
+            }
+            Err(_) => rsx! {
+                div { class: "w-full h-full flex items-center justify-center text-[var(--text-disabled)] text-xs",
+                    "err"
+                }
+            },
+        },
+
         StageId::Edges => {
             // Use the pre-computed themed Blob URL for the Edges thumbnail.
             // The URL is resolved here (not in the component body) so the
