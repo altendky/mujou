@@ -9,6 +9,14 @@
 
 use image::GrayImage;
 
+/// Minimum allowed Canny threshold.
+///
+/// A low threshold of zero causes every pixel with any gradient to be
+/// treated as a potential edge, producing an extremely dense edge map
+/// that overwhelms downstream contour tracing and path optimization.
+/// See <https://github.com/altendky/mujou/issues/44>.
+pub const MIN_THRESHOLD: f32 = 1.0;
+
 /// Detect edges using the Canny algorithm.
 ///
 /// Returns a binary image: 255 for edge pixels, 0 for non-edge.
@@ -18,10 +26,16 @@ use image::GrayImage;
 /// above `high_threshold` are definite edges; those between `low_threshold`
 /// and `high_threshold` are edges only if connected to a definite edge.
 ///
+/// Both thresholds are clamped to a minimum of [`MIN_THRESHOLD`] and
+/// `low_threshold` is clamped to be at most `high_threshold`. This
+/// prevents degenerate edge maps that would hang the application.
+///
 /// This is step 4 in the pipeline, between Gaussian blur and contour tracing.
 #[must_use = "returns the binary edge map"]
 pub fn canny(image: &GrayImage, low_threshold: f32, high_threshold: f32) -> GrayImage {
-    imageproc::edges::canny(image, low_threshold, high_threshold)
+    let high = high_threshold.max(MIN_THRESHOLD);
+    let low = low_threshold.max(MIN_THRESHOLD).min(high);
+    imageproc::edges::canny(image, low, high)
 }
 
 /// Invert a binary edge map (bitwise NOT).
@@ -109,5 +123,48 @@ mod tests {
         img.put_pixel(2, 2, image::Luma([255]));
         let double_inverted = invert_edge_map(&invert_edge_map(&img));
         assert_eq!(img, double_inverted);
+    }
+
+    #[test]
+    fn zero_low_threshold_is_clamped_to_min() {
+        // With low=0.0, the clamping should prevent a degenerate edge map.
+        // Use the same sharp-edge image so we know edges exist.
+        let img = GrayImage::from_fn(20, 20, |x, _y| {
+            if x < 10 {
+                image::Luma([0])
+            } else {
+                image::Luma([255])
+            }
+        });
+        let edges_zero = canny(&img, 0.0, 150.0);
+        let edges_min = canny(&img, MIN_THRESHOLD, 150.0);
+        // canny(0.0, ...) should produce the same result as canny(MIN_THRESHOLD, ...)
+        // because 0.0 gets clamped up to MIN_THRESHOLD.
+        assert_eq!(edges_zero, edges_min);
+    }
+
+    #[test]
+    fn low_above_high_is_clamped() {
+        // If low > high, low should be clamped down to high.
+        let img = GrayImage::from_fn(20, 20, |x, _y| {
+            if x < 10 {
+                image::Luma([0])
+            } else {
+                image::Luma([255])
+            }
+        });
+        let edges_inverted = canny(&img, 200.0, 100.0);
+        let edges_equal = canny(&img, 100.0, 100.0);
+        // canny(200, 100) should produce the same result as canny(100, 100)
+        // because low gets clamped down to high.
+        assert_eq!(edges_inverted, edges_equal);
+    }
+
+    #[test]
+    fn min_threshold_constant_is_positive() {
+        assert!(
+            MIN_THRESHOLD > 0.0,
+            "MIN_THRESHOLD must be positive to prevent degenerate edge maps"
+        );
     }
 }
