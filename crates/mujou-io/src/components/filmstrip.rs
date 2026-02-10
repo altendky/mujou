@@ -4,7 +4,6 @@
 //! Clicking a thumbnail selects that stage for full-size preview and
 //! shows its parameter controls.
 
-use std::fmt::Write;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
@@ -176,14 +175,9 @@ fn render_thumbnail(staged: &StagedResult, stage: StageId) -> Element {
 
 /// Render a single polyline as an SVG path for a thumbnail.
 fn render_thumbnail_path(polyline: &mujou_pipeline::Polyline) -> Element {
-    let points = polyline.points();
-    if points.len() < 2 {
+    let d = super::preview::build_path_data(polyline);
+    if d.is_empty() {
         return rsx! {};
-    }
-    let mut d = String::new();
-    for (i, p) in points.iter().enumerate() {
-        let cmd = if i == 0 { "M" } else { "L" };
-        let _ = write!(d, "{cmd} {:.1} {:.1} ", p.x, p.y);
     }
 
     rsx! {

@@ -3,7 +3,6 @@
 //! Dispatches between raster `<img>` display (for grayscale/blur/edges)
 //! and inline SVG display (for vector stages).
 
-use std::fmt::Write;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
@@ -126,16 +125,8 @@ fn build_multi_path_data(polylines: &[mujou_pipeline::Polyline]) -> Vec<String> 
     polylines
         .iter()
         .filter_map(|pl| {
-            let points = pl.points();
-            if points.len() < 2 {
-                return None;
-            }
-            let mut d = String::new();
-            for (i, p) in points.iter().enumerate() {
-                let cmd = if i == 0 { "M" } else { "L" };
-                let _ = write!(d, "{cmd} {:.1} {:.1} ", p.x, p.y);
-            }
-            Some(d)
+            let d = build_path_data(pl);
+            if d.is_empty() { None } else { Some(d) }
         })
         .collect()
 }
