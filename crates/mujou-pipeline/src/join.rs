@@ -258,6 +258,10 @@ fn arc_length_sample_indices(contour: &Polyline, resolution: f64) -> Vec<usize> 
 
 /// Compute the axis-aligned bounding box of all points across contours.
 fn contour_bounding_box(contours: &[&Polyline]) -> (f64, f64, f64, f64) {
+    debug_assert!(
+        contours.iter().any(|c| !c.is_empty()),
+        "contour_bounding_box requires at least one non-empty contour"
+    );
     let mut min_x = f64::INFINITY;
     let mut min_y = f64::INFINITY;
     let mut max_x = f64::NEG_INFINITY;
