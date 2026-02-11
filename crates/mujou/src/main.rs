@@ -148,13 +148,10 @@ fn app() -> Element {
             #[allow(clippy::cast_precision_loss)]
             let outcome = worker.run(&bytes, &cfg, my_generation as f64).await;
 
-            // Stop the timer.
-            timer_running.set(false);
-            elapsed_ms.set(js_sys::Date::now() - start);
-
             // If another run was triggered while we were processing,
             // discard this stale result silently.
             if *generation.peek() != my_generation {
+                timer_running.set(false);
                 return;
             }
 
@@ -169,7 +166,14 @@ fn app() -> Element {
                 }
             }
 
+            // Stop the timer and processing overlay together.
+            // The timer keeps running through result.set() above so the
+            // elapsed time reflects the total user-perceived duration
+            // (worker processing + Dioxus re-render), not just the
+            // worker processing time.
+            elapsed_ms.set(js_sys::Date::now() - start);
             processing.set(false);
+            timer_running.set(false);
         });
     });
 

@@ -195,6 +195,32 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
         worker_crate.join("Cargo.toml").display()
     );
 
+    let js_path = worker_pkg_dir.join("mujou_worker.js");
+    let wasm_path = worker_pkg_dir.join("mujou_worker_bg.wasm");
+
+    // Skip the wasm-pack build if the output already exists and is
+    // newer than all worker source files.  This is critical for dev
+    // speed: build.rs re-runs whenever *any* registered file changes
+    // (including Tailwind-scanned .rs files in mujou/mujou-io), but
+    // the worker only needs rebuilding when its own source changes.
+    // Without this check, wasm-pack (10-30s) runs on every save.
+    if wasm_path.exists() && js_path.exists() {
+        let wasm_mtime = fs::metadata(&wasm_path).and_then(|m| m.modified()).ok();
+        if let Some(wasm_mtime) = wasm_mtime {
+            let worker_stale = is_any_newer_than(&worker_crate.join("src"), wasm_mtime)
+                || fs::metadata(worker_crate.join("Cargo.toml"))
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|t| t > wasm_mtime);
+
+            if !worker_stale {
+                // Worker output is up to date — skip the expensive build.
+                println!("cargo:rustc-env=WORKER_JS_PATH={}", js_path.display());
+                println!("cargo:rustc-env=WORKER_WASM_PATH={}", wasm_path.display());
+                return;
+            }
+        }
+    }
+
     let status = Command::new("wasm-pack")
         .args([
             "build",
@@ -221,9 +247,6 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
         "`wasm-pack build` for mujou-worker exited with {status}"
     );
 
-    let js_path = worker_pkg_dir.join("mujou_worker.js");
-    let wasm_path = worker_pkg_dir.join("mujou_worker_bg.wasm");
-
     assert!(
         js_path.exists(),
         "expected worker JS at {}",
@@ -237,6 +260,34 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
 
     println!("cargo:rustc-env=WORKER_JS_PATH={}", js_path.display());
     println!("cargo:rustc-env=WORKER_WASM_PATH={}", wasm_path.display());
+}
+
+/// Check if any file under `dir` has a modification time newer than
+/// `reference`.  Used to skip expensive build steps when output is
+/// already up to date.
+fn is_any_newer_than(dir: &Path, reference: std::time::SystemTime) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            if is_any_newer_than(&path, reference) {
+                return true;
+            }
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext == "rs" || ext == "toml")
+            && fs::metadata(&path)
+                .and_then(|m| m.modified())
+                .is_ok_and(|t| t > reference)
+        {
+            return true;
+        }
+    }
+
+    false
 }
 
 /// Generate `crates/mujou/index.html` with the theme-detect script
