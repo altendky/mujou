@@ -182,11 +182,23 @@ fn post_success_response(
     };
 
     // Encode all raster stages to PNG.
-    let original_png = encode_rgba_png(&staged.original);
-    let grayscale_png = encode_gray_png(&staged.grayscale);
-    let blurred_png = encode_gray_png(&staged.blurred);
-    let edges_light_png = encode_themed_edge_png(&staged.edges, light_bg, light_fg);
-    let edges_dark_png = encode_themed_edge_png(&staged.edges, dark_bg, dark_fg);
+    macro_rules! encode_or_error {
+        ($expr:expr) => {
+            match $expr {
+                Ok(bytes) => bytes,
+                Err(msg) => {
+                    post_error_response(generation, &msg);
+                    return;
+                }
+            }
+        };
+    }
+    let original_png = encode_or_error!(encode_rgba_png(&staged.original));
+    let grayscale_png = encode_or_error!(encode_gray_png(&staged.grayscale));
+    let blurred_png = encode_or_error!(encode_gray_png(&staged.blurred));
+    let edges_light_png =
+        encode_or_error!(encode_themed_edge_png(&staged.edges, light_bg, light_fg));
+    let edges_dark_png = encode_or_error!(encode_themed_edge_png(&staged.edges, dark_bg, dark_fg));
 
     let response = js_sys::Object::new();
     let set = |key: &str, val: &JsValue| {
@@ -229,37 +241,40 @@ fn post_success_response(
 }
 
 /// Encode an RGBA image as PNG bytes.
-fn encode_rgba_png(image: &mujou_pipeline::RgbaImage) -> Vec<u8> {
+fn encode_rgba_png(image: &mujou_pipeline::RgbaImage) -> Result<Vec<u8>, String> {
     let mut buf = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut buf);
-    // If encoding fails, return empty vec; main thread will show error.
-    let _ = encoder.write_image(
-        image.as_raw(),
-        image.width(),
-        image.height(),
-        image::ExtendedColorType::Rgba8,
-    );
-    buf
+    encoder
+        .write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .map_err(|e| format!("RGBA PNG encode failed: {e}"))?;
+    Ok(buf)
 }
 
 /// Encode a grayscale image as PNG bytes.
-fn encode_gray_png(image: &GrayImage) -> Vec<u8> {
+fn encode_gray_png(image: &GrayImage) -> Result<Vec<u8>, String> {
     let mut buf = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut buf);
-    let _ = encoder.write_image(
-        image.as_raw(),
-        image.width(),
-        image.height(),
-        image::ExtendedColorType::L8,
-    );
-    buf
+    encoder
+        .write_image(
+            image.as_raw(),
+            image.width(),
+            image.height(),
+            image::ExtendedColorType::L8,
+        )
+        .map_err(|e| format!("grayscale PNG encode failed: {e}"))?;
+    Ok(buf)
 }
 
 /// Encode a binary edge image as a themed RGB PNG.
 ///
 /// Applies soft dilation for visibility at small sizes, then maps
 /// pixel values to the given foreground/background colors.
-fn encode_themed_edge_png(image: &GrayImage, bg: [u8; 3], fg: [u8; 3]) -> Vec<u8> {
+fn encode_themed_edge_png(image: &GrayImage, bg: [u8; 3], fg: [u8; 3]) -> Result<Vec<u8>, String> {
     // Soft-dilate edge pixels so thin lines survive smooth downscaling.
     let dilated = dilate_soft(image);
 
@@ -278,8 +293,10 @@ fn encode_themed_edge_png(image: &GrayImage, bg: [u8; 3], fg: [u8; 3]) -> Vec<u8
     // Encode RGB buffer → PNG bytes.
     let mut buf = Vec::new();
     let encoder = image::codecs::png::PngEncoder::new(&mut buf);
-    let _ = encoder.write_image(&rgb_buf, w, h, image::ExtendedColorType::Rgb8);
-    buf
+    encoder
+        .write_image(&rgb_buf, w, h, image::ExtendedColorType::Rgb8)
+        .map_err(|e| format!("themed edge PNG encode failed: {e}"))?;
+    Ok(buf)
 }
 
 /// Soft-dilate a binary image to approximate 1.25 px stroke width.
