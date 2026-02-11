@@ -80,6 +80,11 @@ fn app() -> Element {
     // Elapsed time tracking for the processing indicator.
     let mut elapsed_ms = use_signal(|| 0.0_f64);
 
+    // Start timestamp for the current processing run. Shared between the
+    // spawn (which sets it) and the render-complete effect (which reads
+    // it for the final elapsed snapshot).
+    let mut processing_start = use_signal(|| Option::<f64>::None);
+
     // The "committed" config is what the pipeline actually runs with.
     // Updated immediately on image upload, debounced on slider changes.
     let mut committed_config = use_signal(mujou_pipeline::PipelineConfig::default);
@@ -121,24 +126,27 @@ fn app() -> Element {
         processing.set(true);
         error.set(None);
         elapsed_ms.set(0.0);
+        let start = js_sys::Date::now();
+        processing_start.set(Some(start));
 
         let worker = Rc::clone(&worker_for_effect);
         spawn(async move {
-            let start = js_sys::Date::now();
-
             // Spawn a timer task that updates elapsed_ms every 100ms.
             // This lives alongside the worker call — both are async
             // tasks on the single-threaded WASM executor, interleaving
             // via the event loop.
-            let timer_running = Rc::new(std::cell::Cell::new(true));
-            let timer_flag = Rc::clone(&timer_running);
+            //
+            // The timer watches `processing_start` rather than a local
+            // flag so it naturally stops when the post-render effect
+            // clears the processing state (including after memo
+            // recomputation).
             spawn(async move {
-                while timer_flag.get() {
+                loop {
                     gloo_timers::future::TimeoutFuture::new(ELAPSED_UPDATE_MS).await;
-                    if !timer_flag.get() {
-                        break;
+                    match *processing_start.peek() {
+                        Some(s) => elapsed_ms.set(js_sys::Date::now() - s),
+                        None => break,
                     }
-                    elapsed_ms.set(js_sys::Date::now() - start);
                 }
             });
 
@@ -149,32 +157,56 @@ fn app() -> Element {
             let outcome = worker.run(&bytes, &cfg, my_generation as f64).await;
 
             // If another run was triggered while we were processing,
-            // discard this stale result silently.
+            // discard this stale result silently. The new run already
+            // reset processing_start, so the timer will track the new
+            // run's start time.
             if *generation.peek() != my_generation {
-                timer_running.set(false);
                 return;
             }
 
             match outcome {
                 Ok(res) => {
+                    // Setting result triggers a re-render. The use_memo
+                    // caches in Filmstrip/StagePreview fire synchronously
+                    // during that render (PNG encoding). The timer keeps
+                    // running through the render so elapsed time includes
+                    // the full user-perceived duration. A use_effect on
+                    // `result` fires *after* the render completes and
+                    // stops the timer + hides the overlay.
                     result.set(Some(Rc::new(res)));
                     error.set(None);
                 }
                 Err(e) => {
                     error.set(Some(format!("{e}")));
-                    // Keep the previous result visible if one exists.
+                    // No result change, so the post-render effect won't
+                    // fire — stop timer and overlay here directly.
+                    elapsed_ms.set(js_sys::Date::now() - start);
+                    processing.set(false);
+                    processing_start.set(None);
                 }
             }
-
-            // Stop the timer and processing overlay together.
-            // The timer keeps running through result.set() above so the
-            // elapsed time reflects the total user-perceived duration
-            // (worker processing + Dioxus re-render), not just the
-            // worker processing time.
-            elapsed_ms.set(js_sys::Date::now() - start);
-            processing.set(false);
-            timer_running.set(false);
         });
+    });
+
+    // --- Post-render completion effect ---
+    // This effect subscribes to `result` and runs *after* the Dioxus
+    // render pass completes — including the synchronous use_memo PNG
+    // encoding in Filmstrip and StagePreview. This ensures the elapsed
+    // timer captures the full user-perceived duration (worker processing
+    // + data transfer + deserialization + PNG encoding for previews),
+    // not just the worker time.
+    use_effect(move || {
+        // Subscribe to result so this effect runs after renders
+        // triggered by result changes.
+        let _subscribe = result();
+
+        // Only act if we are actively processing (processing_start is set).
+        let start = *processing_start.peek();
+        if let Some(s) = start {
+            elapsed_ms.set(js_sys::Date::now() - s);
+            processing.set(false);
+            processing_start.set(None);
+        }
     });
 
     // --- Debounced config commit effect ---
@@ -208,6 +240,7 @@ fn app() -> Element {
     let on_cancel = move |_| {
         worker_for_cancel.cancel();
         processing.set(false);
+        processing_start.set(None);
     };
 
     // --- Config change handler ---
