@@ -227,20 +227,30 @@ pub struct StagedResult {
     pub contours: Vec<Polyline>,
     /// Stage 6: RDP-simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Stage 8: joined single continuous path.
+    /// Stage 7: circular-masked polylines (`Some` only when `circular_mask=true`).
+    ///
+    /// Contains the simplified polylines after clipping to the circular mask
+    /// boundary. Polylines entirely outside the mask are discarded; those
+    /// crossing the boundary are split at the intersection.
+    pub masked: Option<Vec<Polyline>>,
+    /// Stage 8: joined single continuous path (always the final output).
+    ///
+    /// When masking is enabled, this is the join of the masked polylines.
+    /// When disabled, this is the join of the simplified polylines.
     pub joined: Polyline,
-    /// Stage 9: circular-masked path (`Some` only when `circular_mask=true`).
-    pub masked: Option<Polyline>,
     /// Source image dimensions in pixels.
     pub dimensions: Dimensions,
 }
 
 impl StagedResult {
-    /// Returns the final output polyline — masked if masking is enabled,
-    /// otherwise the joined path.
+    /// Returns the final output polyline — always the joined path.
+    ///
+    /// Since masking now happens before joining, `joined` always contains
+    /// the final single continuous path regardless of whether a circular
+    /// mask was applied.
     #[must_use]
-    pub fn final_polyline(&self) -> &Polyline {
-        self.masked.as_ref().unwrap_or(&self.joined)
+    pub const fn final_polyline(&self) -> &Polyline {
+        &self.joined
     }
 }
 
@@ -256,8 +266,8 @@ struct StagedResultProxy {
     edges: (u32, u32, Vec<u8>),
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
+    masked: Option<Vec<Polyline>>,
     joined: Polyline,
-    masked: Option<Polyline>,
     dimensions: Dimensions,
 }
 
@@ -286,8 +296,8 @@ impl Serialize for StagedResult {
             ),
             contours: self.contours.clone(),
             simplified: self.simplified.clone(),
-            joined: self.joined.clone(),
             masked: self.masked.clone(),
+            joined: self.joined.clone(),
             dimensions: self.dimensions,
         };
         proxy.serialize(serializer)
@@ -315,8 +325,8 @@ impl<'de> Deserialize<'de> for StagedResult {
             edges,
             contours: proxy.contours,
             simplified: proxy.simplified,
-            joined: proxy.joined,
             masked: proxy.masked,
+            joined: proxy.joined,
             dimensions: proxy.dimensions,
         })
     }
@@ -625,8 +635,8 @@ mod tests {
                 Point::new(0.0, 0.0),
                 Point::new(1.0, 1.0),
             ])],
-            joined: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
             masked: None,
+            joined: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
             dimensions: Dimensions {
                 width: 2,
                 height: 2,
@@ -649,8 +659,8 @@ mod tests {
         // Verify vector data survived.
         assert_eq!(staged.contours, deserialized.contours);
         assert_eq!(staged.simplified, deserialized.simplified);
-        assert_eq!(staged.joined, deserialized.joined);
         assert_eq!(staged.masked, deserialized.masked);
+        assert_eq!(staged.joined, deserialized.joined);
         assert_eq!(staged.dimensions, deserialized.dimensions);
     }
 
@@ -689,8 +699,8 @@ mod tests {
             edges: GrayImage::from_pixel(1, 1, image::Luma([0])),
             contours: vec![],
             simplified: vec![],
-            joined: Polyline::new(vec![]),
             masked: None,
+            joined: Polyline::new(vec![]),
             dimensions: Dimensions {
                 width: 1,
                 height: 1,

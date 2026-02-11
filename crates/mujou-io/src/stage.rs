@@ -26,10 +26,10 @@ pub enum StageId {
     Contours,
     /// Stage 6: RDP simplification.
     Simplified,
+    /// Stage 7: circular mask.
+    Masked,
     /// Stage 8: path joining.
     Path,
-    /// Stage 9: circular mask.
-    Masked,
 }
 
 impl StageId {
@@ -41,8 +41,8 @@ impl StageId {
         Self::Edges,
         Self::Contours,
         Self::Simplified,
-        Self::Path,
         Self::Masked,
+        Self::Path,
     ];
 
     /// Full display label for the stage.

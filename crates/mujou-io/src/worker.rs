@@ -25,8 +25,8 @@ use crate::raster;
 struct VectorResult {
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
+    masked: Option<Vec<Polyline>>,
     joined: Polyline,
-    masked: Option<Polyline>,
     dimensions: Dimensions,
 }
 
@@ -50,20 +50,23 @@ pub struct WorkerResult {
     pub contours: Vec<Polyline>,
     /// Simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Joined single polyline.
+    /// Masked polylines (if circular mask was applied, before joining).
+    pub masked: Option<Vec<Polyline>>,
+    /// Joined single polyline (always the final output).
     pub joined: Polyline,
-    /// Masked polyline (if circular mask was applied).
-    pub masked: Option<Polyline>,
     /// Image dimensions.
     pub dimensions: Dimensions,
 }
 
 impl WorkerResult {
-    /// The final output polyline: masked if a circular mask was applied,
-    /// otherwise the joined path.
+    /// The final output polyline — always the joined path.
+    ///
+    /// Since masking now happens before joining, `joined` always contains
+    /// the final single continuous path regardless of whether a circular
+    /// mask was applied.
     #[must_use]
-    pub fn final_polyline(&self) -> &Polyline {
-        self.masked.as_ref().unwrap_or(&self.joined)
+    pub const fn final_polyline(&self) -> &Polyline {
+        &self.joined
     }
 }
 
@@ -314,8 +317,8 @@ fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
         edges_dark_url,
         contours: vector.contours,
         simplified: vector.simplified,
-        joined: vector.joined,
         masked: vector.masked,
+        joined: vector.joined,
         dimensions: vector.dimensions,
     })
 }

@@ -5,7 +5,7 @@
 //! and line segments that cross the boundary are split at the intersection
 //! point on the circle.
 //!
-//! This is step 9 in the pipeline (optional), applied after path joining.
+//! This is step 7 in the pipeline (optional), applied before path joining.
 
 use crate::types::{Point, Polyline};
 

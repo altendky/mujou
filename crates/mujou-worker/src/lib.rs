@@ -24,8 +24,8 @@ use wasm_bindgen::prelude::*;
 pub struct VectorResult {
     pub contours: Vec<Polyline>,
     pub simplified: Vec<Polyline>,
+    pub masked: Option<Vec<Polyline>>,
     pub joined: Polyline,
-    pub masked: Option<Polyline>,
     pub dimensions: Dimensions,
 }
 
@@ -170,8 +170,8 @@ fn post_success_response(
     let vector = VectorResult {
         contours: staged.contours.clone(),
         simplified: staged.simplified.clone(),
-        joined: staged.joined.clone(),
         masked: staged.masked.clone(),
+        joined: staged.joined.clone(),
         dimensions: staged.dimensions,
     };
 
