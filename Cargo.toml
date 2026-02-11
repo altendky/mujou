@@ -28,14 +28,21 @@ web-sys = { version = "0.3", features = [
     "BlobPropertyBag",
     "console",
     "CssStyleDeclaration",
+    "DedicatedWorkerGlobalScope",
     "Document",
     "Element",
+    "ErrorEvent",
     "HtmlAnchorElement",
     "HtmlElement",
+    "MessageEvent",
     "Url",
     "Window",
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
 ] }
 wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
 

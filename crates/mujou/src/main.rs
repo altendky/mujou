@@ -1,7 +1,9 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use mujou_io::{ExportPanel, FileUpload, Filmstrip, StageControls, StageId, StagePreview};
+use mujou_io::{
+    ExportPanel, FileUpload, Filmstrip, PipelineWorker, StageControls, StageId, StagePreview,
+};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
@@ -12,9 +14,21 @@ use wasm_bindgen::closure::Closure;
 /// thrashing during continuous slider drags.
 const CONFIG_DEBOUNCE_MS: u32 = 200;
 
+/// Interval in milliseconds for updating the elapsed time display
+/// during processing.
+const ELAPSED_UPDATE_MS: u32 = 100;
+
 /// Cherry blossoms example image bundled at compile time so the app
 /// can show example output immediately on first load.
 static CHERRY_BLOSSOMS: &[u8] = include_bytes!(env!("CHERRY_BLOSSOMS_PATH"));
+
+/// Worker JS glue — compiled from `crates/mujou-worker/` by `build.rs`
+/// via `wasm-pack build --target no-modules`.
+static WORKER_JS: &str = include_str!(env!("WORKER_JS_PATH"));
+
+/// Worker WASM binary — compiled from `crates/mujou-worker/` by
+/// `build.rs` via `wasm-pack build --target no-modules`.
+static WORKER_WASM: &[u8] = include_bytes!(env!("WORKER_WASM_PATH"));
 
 fn main() {
     dioxus::launch(app);
@@ -48,6 +62,11 @@ fn app() -> Element {
         cb.forget(); // leak — lives for the page lifetime
     });
 
+    // --- Pipeline worker ---
+    // Created once at app startup. The worker runs mujou-pipeline in a
+    // dedicated web worker thread so the main thread stays responsive.
+    let worker = use_hook(|| Rc::new(PipelineWorker::new(WORKER_JS, WORKER_WASM)));
+
     // --- Application state ---
     let mut image_bytes = use_signal(|| Some(CHERRY_BLOSSOMS.to_vec()));
     let mut filename = use_signal(|| String::from("cherry-blossoms"));
@@ -57,6 +76,10 @@ fn app() -> Element {
     let mut generation = use_signal(|| 0u64);
     let mut debounce_generation = use_signal(|| 0u64);
     let mut selected_stage = use_signal(|| StageId::Masked);
+
+    // Elapsed time tracking for the processing indicator.
+    let mut processing_start_ms = use_signal(|| 0.0_f64);
+    let mut elapsed_ms = use_signal(|| 0.0_f64);
 
     // The "committed" config is what the pipeline actually runs with.
     // Updated immediately on image upload, debounced on slider changes.
@@ -82,8 +105,9 @@ fn app() -> Element {
 
     // --- Pipeline processing effect ---
     // Re-runs whenever image_bytes or committed_config changes.
-    // Spawns an async task so the UI remains responsive while the
-    // heavy synchronous pipeline work runs.
+    // Sends the work to the web worker so the main thread stays free
+    // for UI updates, animations, and cancel button clicks.
+    let worker_for_effect = Rc::clone(&worker);
     use_effect(move || {
         let Some(bytes) = image_bytes() else {
             return;
@@ -97,13 +121,16 @@ fn app() -> Element {
 
         processing.set(true);
         error.set(None);
+        processing_start_ms.set(js_sys::Date::now());
+        elapsed_ms.set(0.0);
 
+        let worker = Rc::clone(&worker_for_effect);
         spawn(async move {
-            // Yield to the browser event loop so it can paint the
-            // processing indicator before we block on the pipeline.
-            gloo_timers::future::TimeoutFuture::new(0).await;
-
-            let outcome = mujou_pipeline::process_staged(&bytes, &cfg);
+            // Run the pipeline in the web worker — this .await yields
+            // to the browser event loop so animations and cancel clicks
+            // keep working.
+            #[allow(clippy::cast_precision_loss)]
+            let outcome = worker.run(&bytes, &cfg, my_generation as f64).await;
 
             // If another run was triggered while we were processing,
             // discard this stale result silently.
@@ -123,6 +150,27 @@ fn app() -> Element {
             }
 
             processing.set(false);
+        });
+    });
+
+    // --- Elapsed time update effect ---
+    // While processing, update the elapsed time display every 100ms.
+    use_effect(move || {
+        if !processing() {
+            return;
+        }
+
+        let start = *processing_start_ms.peek();
+        spawn(async move {
+            loop {
+                gloo_timers::future::TimeoutFuture::new(ELAPSED_UPDATE_MS).await;
+
+                if !*processing.peek() {
+                    break;
+                }
+
+                elapsed_ms.set(js_sys::Date::now() - start);
+            }
         });
     });
 
@@ -151,6 +199,13 @@ fn app() -> Element {
             }
         });
     });
+
+    // --- Cancel handler ---
+    let worker_for_cancel = Rc::clone(&worker);
+    let on_cancel = move |_| {
+        worker_for_cancel.cancel();
+        processing.set(false);
+    };
 
     // --- Config change handler ---
     let on_config_change = move |new_config: mujou_pipeline::PipelineConfig| {
@@ -224,9 +279,14 @@ fn app() -> Element {
                             // Processing indicator overlay
                             if processing() {
                                 div { class: "absolute inset-0 flex items-center justify-center",
-                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-2 shadow",
+                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2",
                                         p { class: "text-(--text-secondary) text-sm animate-pulse",
-                                            "Processing..."
+                                            "Processing... ({format_elapsed(elapsed_ms())})"
+                                        }
+                                        button {
+                                            class: "text-xs px-3 py-1 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
+                                            onclick: on_cancel,
+                                            "Cancel"
                                         }
                                     }
                                 }
@@ -254,8 +314,15 @@ fn app() -> Element {
                     } else if processing() {
                         // First-time processing (no previous result to show)
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-(--text-secondary) text-lg animate-pulse",
-                                "Processing..."
+                            div { class: "flex flex-col items-center gap-3",
+                                p { class: "text-(--text-secondary) text-lg animate-pulse",
+                                    "Processing... ({format_elapsed(elapsed_ms())})"
+                                }
+                                button {
+                                    class: "text-sm px-4 py-1.5 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
+                                    onclick: on_cancel,
+                                    "Cancel"
+                                }
                             }
                         }
                     } else if image_bytes().is_some() {
@@ -305,6 +372,14 @@ fn app() -> Element {
             }
         }
     }
+}
+
+/// Format elapsed milliseconds as a human-readable duration string.
+///
+/// Examples: "0.0s", "1.2s", "12.3s"
+fn format_elapsed(ms: f64) -> String {
+    let seconds = ms / 1000.0;
+    format!("{seconds:.1}s")
 }
 
 /// Read the current theme from the DOM `data-theme` attribute.

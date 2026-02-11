@@ -1,5 +1,7 @@
 //! Shared types for the mujou image processing pipeline.
 
+use serde::{Deserialize, Serialize};
+
 use crate::contour::ContourTracerKind;
 use crate::join::PathJoinerKind;
 
@@ -12,7 +14,7 @@ pub use image::GrayImage;
 pub use image::RgbaImage;
 
 /// A 2D point in image coordinates.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Point {
     /// Horizontal position (pixels from left edge).
     pub x: f64,
@@ -45,7 +47,7 @@ impl Point {
 }
 
 /// A sequence of connected points forming a path segment.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Polyline(Vec<Point>);
 
 impl Polyline {
@@ -93,7 +95,7 @@ impl Polyline {
 }
 
 /// Image dimensions in pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dimensions {
     /// Width in pixels.
     pub width: u32,
@@ -123,7 +125,7 @@ pub struct Dimensions {
 /// `simplify_tolerance >= 0.0`.
 /// Invalid values would return [`PipelineError::InvalidConfig`].
 /// See [open-questions: PipelineConfig validation](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PipelineConfig {
     /// Gaussian blur kernel sigma. Higher values produce more smoothing
     /// before edge detection.
@@ -185,7 +187,7 @@ impl Default for PipelineConfig {
 ///
 /// Contains the traced polyline and metadata about the source image
 /// needed by downstream consumers (e.g., export serializers).
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProcessResult {
     /// The single continuous path produced by the pipeline.
     pub polyline: Polyline,
@@ -206,6 +208,11 @@ pub struct ProcessResult {
 /// Note: does not derive `PartialEq` because `GrayImage` does not
 /// implement it. When wrapped in `Rc`, Dioxus will use pointer
 /// equality for diffing, which is more efficient than walking pixel data.
+///
+/// Uses custom `Serialize`/`Deserialize` implementations because
+/// `GrayImage` and `RgbaImage` (from the `image` crate) do not
+/// implement serde traits. Raster images are serialized as
+/// `(width, height, raw_pixels)` tuples.
 #[derive(Debug, Clone)]
 pub struct StagedResult {
     /// Stage 0: original decoded RGBA image (pre-processing).
@@ -237,7 +244,89 @@ impl StagedResult {
     }
 }
 
+/// Serde-compatible proxy for `StagedResult`.
+///
+/// Raster images are represented as `(width, height, raw_pixel_bytes)`
+/// tuples since `image::ImageBuffer` does not implement serde traits.
+#[derive(Serialize, Deserialize)]
+struct StagedResultProxy {
+    original: (u32, u32, Vec<u8>),
+    grayscale: (u32, u32, Vec<u8>),
+    blurred: (u32, u32, Vec<u8>),
+    edges: (u32, u32, Vec<u8>),
+    contours: Vec<Polyline>,
+    simplified: Vec<Polyline>,
+    joined: Polyline,
+    masked: Option<Polyline>,
+    dimensions: Dimensions,
+}
+
+impl Serialize for StagedResult {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let proxy = StagedResultProxy {
+            original: (
+                self.original.width(),
+                self.original.height(),
+                self.original.as_raw().clone(),
+            ),
+            grayscale: (
+                self.grayscale.width(),
+                self.grayscale.height(),
+                self.grayscale.as_raw().clone(),
+            ),
+            blurred: (
+                self.blurred.width(),
+                self.blurred.height(),
+                self.blurred.as_raw().clone(),
+            ),
+            edges: (
+                self.edges.width(),
+                self.edges.height(),
+                self.edges.as_raw().clone(),
+            ),
+            contours: self.contours.clone(),
+            simplified: self.simplified.clone(),
+            joined: self.joined.clone(),
+            masked: self.masked.clone(),
+            dimensions: self.dimensions,
+        };
+        proxy.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for StagedResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let proxy = StagedResultProxy::deserialize(deserializer)?;
+
+        let original = RgbaImage::from_raw(proxy.original.0, proxy.original.1, proxy.original.2)
+            .ok_or_else(|| serde::de::Error::custom("invalid RGBA image dimensions"))?;
+        let grayscale =
+            GrayImage::from_raw(proxy.grayscale.0, proxy.grayscale.1, proxy.grayscale.2)
+                .ok_or_else(|| serde::de::Error::custom("invalid grayscale image dimensions"))?;
+        let blurred = GrayImage::from_raw(proxy.blurred.0, proxy.blurred.1, proxy.blurred.2)
+            .ok_or_else(|| serde::de::Error::custom("invalid blurred image dimensions"))?;
+        let edges = GrayImage::from_raw(proxy.edges.0, proxy.edges.1, proxy.edges.2)
+            .ok_or_else(|| serde::de::Error::custom("invalid edges image dimensions"))?;
+
+        Ok(Self {
+            original,
+            grayscale,
+            blurred,
+            edges,
+            contours: proxy.contours,
+            simplified: proxy.simplified,
+            joined: proxy.joined,
+            masked: proxy.masked,
+            dimensions: proxy.dimensions,
+        })
+    }
+}
+
 /// Errors that can occur during pipeline processing.
+///
+/// Uses custom `Serialize`/`Deserialize` because `image::ImageError`
+/// does not implement serde traits. The `ImageDecode` variant is
+/// serialized as its `Display` string.
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineError {
     /// Failed to decode the input image.
@@ -255,6 +344,49 @@ pub enum PipelineError {
     /// Edge detection produced no contours.
     #[error("no contours found in the image")]
     NoContours,
+}
+
+/// Serde-compatible proxy for `PipelineError`.
+///
+/// `image::ImageError` does not implement serde, so the `ImageDecode`
+/// variant stores its `Display` string instead. A deserialized
+/// `ImageDecode` will have a generic error message (the original typed
+/// error cannot be reconstructed), but the message is preserved.
+#[derive(Serialize, Deserialize)]
+enum PipelineErrorProxy {
+    ImageDecode(String),
+    EmptyInput,
+    InvalidConfig(String),
+    NoContours,
+}
+
+impl Serialize for PipelineError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let proxy = match self {
+            Self::ImageDecode(e) => PipelineErrorProxy::ImageDecode(e.to_string()),
+            Self::EmptyInput => PipelineErrorProxy::EmptyInput,
+            Self::InvalidConfig(s) => PipelineErrorProxy::InvalidConfig(s.clone()),
+            Self::NoContours => PipelineErrorProxy::NoContours,
+        };
+        proxy.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for PipelineError {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let proxy = PipelineErrorProxy::deserialize(deserializer)?;
+        Ok(match proxy {
+            PipelineErrorProxy::ImageDecode(msg) => {
+                // Reconstruct as an InvalidConfig wrapping the message since
+                // we cannot reconstruct the original image::ImageError.
+                // Use a custom error that preserves the original message.
+                Self::InvalidConfig(format!("image decode error: {msg}"))
+            }
+            PipelineErrorProxy::EmptyInput => Self::EmptyInput,
+            PipelineErrorProxy::InvalidConfig(s) => Self::InvalidConfig(s),
+            PipelineErrorProxy::NoContours => Self::NoContours,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -409,5 +541,173 @@ mod tests {
     fn error_no_contours_display() {
         let err = PipelineError::NoContours;
         assert_eq!(err.to_string(), "no contours found in the image");
+    }
+
+    // --- Serde round-trip tests ---
+
+    #[test]
+    fn point_serde_round_trip() {
+        let p = Point::new(3.14, -2.71);
+        let json = serde_json::to_string(&p).unwrap();
+        let deserialized: Point = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, deserialized);
+    }
+
+    #[test]
+    fn polyline_serde_round_trip() {
+        let pl = Polyline::new(vec![
+            Point::new(0.0, 0.0),
+            Point::new(1.5, 2.5),
+            Point::new(3.0, 0.0),
+        ]);
+        let json = serde_json::to_string(&pl).unwrap();
+        let deserialized: Polyline = serde_json::from_str(&json).unwrap();
+        assert_eq!(pl, deserialized);
+    }
+
+    #[test]
+    fn dimensions_serde_round_trip() {
+        let d = Dimensions {
+            width: 640,
+            height: 480,
+        };
+        let json = serde_json::to_string(&d).unwrap();
+        let deserialized: Dimensions = serde_json::from_str(&json).unwrap();
+        assert_eq!(d, deserialized);
+    }
+
+    #[test]
+    fn pipeline_config_serde_round_trip() {
+        let config = PipelineConfig {
+            blur_sigma: 2.0,
+            canny_low: 30.0,
+            canny_high: 120.0,
+            contour_tracer: ContourTracerKind::BorderFollowing,
+            simplify_tolerance: 1.5,
+            path_joiner: PathJoinerKind::Retrace,
+            circular_mask: true,
+            mask_diameter: 0.85,
+            invert: true,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let deserialized: PipelineConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(config, deserialized);
+    }
+
+    #[test]
+    fn process_result_serde_round_trip() {
+        let pr = ProcessResult {
+            polyline: Polyline::new(vec![Point::new(1.0, 2.0), Point::new(3.0, 4.0)]),
+            dimensions: Dimensions {
+                width: 100,
+                height: 200,
+            },
+        };
+        let json = serde_json::to_string(&pr).unwrap();
+        let deserialized: ProcessResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(pr, deserialized);
+    }
+
+    #[test]
+    fn staged_result_serde_round_trip() {
+        // Create a minimal StagedResult with small images.
+        let staged = StagedResult {
+            original: RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255])),
+            grayscale: GrayImage::from_pixel(2, 2, image::Luma([50])),
+            blurred: GrayImage::from_pixel(2, 2, image::Luma([45])),
+            edges: GrayImage::from_pixel(2, 2, image::Luma([255])),
+            contours: vec![Polyline::new(vec![
+                Point::new(0.0, 0.0),
+                Point::new(1.0, 1.0),
+            ])],
+            simplified: vec![Polyline::new(vec![
+                Point::new(0.0, 0.0),
+                Point::new(1.0, 1.0),
+            ])],
+            joined: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
+            masked: None,
+            dimensions: Dimensions {
+                width: 2,
+                height: 2,
+            },
+        };
+
+        let json = serde_json::to_string(&staged).unwrap();
+        let deserialized: StagedResult = serde_json::from_str(&json).unwrap();
+
+        // Verify raster images survived the round trip.
+        assert_eq!(
+            staged.original.dimensions(),
+            deserialized.original.dimensions()
+        );
+        assert_eq!(staged.original.as_raw(), deserialized.original.as_raw());
+        assert_eq!(staged.grayscale.as_raw(), deserialized.grayscale.as_raw());
+        assert_eq!(staged.blurred.as_raw(), deserialized.blurred.as_raw());
+        assert_eq!(staged.edges.as_raw(), deserialized.edges.as_raw());
+
+        // Verify vector data survived.
+        assert_eq!(staged.contours, deserialized.contours);
+        assert_eq!(staged.simplified, deserialized.simplified);
+        assert_eq!(staged.joined, deserialized.joined);
+        assert_eq!(staged.masked, deserialized.masked);
+        assert_eq!(staged.dimensions, deserialized.dimensions);
+    }
+
+    #[test]
+    fn pipeline_error_serde_round_trip_empty_input() {
+        let err = PipelineError::EmptyInput;
+        let json = serde_json::to_string(&err).unwrap();
+        let deserialized: PipelineError = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineError::EmptyInput));
+    }
+
+    #[test]
+    fn pipeline_error_serde_round_trip_no_contours() {
+        let err = PipelineError::NoContours;
+        let json = serde_json::to_string(&err).unwrap();
+        let deserialized: PipelineError = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineError::NoContours));
+    }
+
+    #[test]
+    fn pipeline_error_serde_round_trip_invalid_config() {
+        let err = PipelineError::InvalidConfig("bad value".to_string());
+        let json = serde_json::to_string(&err).unwrap();
+        let deserialized: PipelineError = serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, PipelineError::InvalidConfig(ref s) if s == "bad value"));
+    }
+
+    #[test]
+    fn pipeline_result_ok_serde_round_trip() {
+        // Test that Result<StagedResult, PipelineError> can be serialized
+        // and deserialized — this is the type that crosses the worker boundary.
+        let staged = StagedResult {
+            original: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
+            grayscale: GrayImage::from_pixel(1, 1, image::Luma([0])),
+            blurred: GrayImage::from_pixel(1, 1, image::Luma([0])),
+            edges: GrayImage::from_pixel(1, 1, image::Luma([0])),
+            contours: vec![],
+            simplified: vec![],
+            joined: Polyline::new(vec![]),
+            masked: None,
+            dimensions: Dimensions {
+                width: 1,
+                height: 1,
+            },
+        };
+        let result: Result<StagedResult, PipelineError> = Ok(staged);
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: Result<StagedResult, PipelineError> =
+            serde_json::from_str(&json).unwrap();
+        assert!(deserialized.is_ok());
+    }
+
+    #[test]
+    fn pipeline_result_err_serde_round_trip() {
+        let result: Result<StagedResult, PipelineError> = Err(PipelineError::NoContours);
+        let json = serde_json::to_string(&result).unwrap();
+        let deserialized: Result<StagedResult, PipelineError> =
+            serde_json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, Err(PipelineError::NoContours)));
     }
 }

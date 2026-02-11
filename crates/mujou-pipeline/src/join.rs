@@ -5,6 +5,8 @@
 //! [`PathJoiner`] trait for pluggable joining strategies and the
 //! [`PathJoinerKind`] enum for runtime selection.
 
+use serde::{Deserialize, Serialize};
+
 use crate::types::Polyline;
 
 /// Selects which path joining strategy to use.
@@ -12,7 +14,7 @@ use crate::types::Polyline;
 /// MVP ships with [`StraightLine`](Self::StraightLine) only.
 /// Additional variants (retrace, edge-aware routing, spiral) can be added
 /// without changing the `PipelineConfig` struct.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PathJoinerKind {
     /// Connect the end of each contour to the start of the next with a
     /// straight line segment.

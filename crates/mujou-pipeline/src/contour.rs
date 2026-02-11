@@ -12,6 +12,7 @@
 //! with no I/O dependencies.
 
 use image::GrayImage;
+use serde::{Deserialize, Serialize};
 
 use crate::types::{Point, Polyline};
 
@@ -20,7 +21,7 @@ use crate::types::{Point, Polyline};
 /// MVP ships with [`BorderFollowing`](Self::BorderFollowing) only.
 /// Additional variants (e.g. marching squares) can be added without
 /// changing the `PipelineConfig` struct.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ContourTracerKind {
     /// Suzuki-Abe border following via `imageproc::contours::find_contours`.
     ///
