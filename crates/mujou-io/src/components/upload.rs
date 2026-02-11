@@ -2,6 +2,8 @@
 
 use dioxus::html::{FileData, HasFileData};
 use dioxus::prelude::*;
+use wasm_bindgen::JsCast;
+use wasm_bindgen::closure::Closure;
 
 /// Allowed file extensions for image uploads.
 const ALLOWED_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "bmp", "webp"];
@@ -30,9 +32,11 @@ pub struct FileUploadProps {
 /// images. When a file is selected (via the picker or drag-and-drop),
 /// reads the bytes and fires `on_upload` with `(bytes, filename)`.
 ///
-/// Uses a `dragenter`/`dragleave` counter to handle the classic
-/// child-element event bubbling problem where entering a child fires
-/// `dragleave` on the parent.
+/// Drag detection uses window-level `dragenter`/`dragleave`/`dragover`
+/// listeners registered via `use_effect` so the overlay can start
+/// invisible (`pointer-events: none`) without blocking the events
+/// needed to reveal it. A counter tracks enter/leave depth to handle
+/// the classic child-element event bubbling problem.
 #[component]
 pub fn FileUpload(props: FileUploadProps) -> Element {
     // Counter for dragenter/dragleave balancing. Entering a child
@@ -42,6 +46,44 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
     let mut error = use_signal(|| Option::<String>::None);
 
     let dragging = drag_counter() > 0;
+
+    // Detect file drags at the window level. The overlay starts with
+    // `pointer-events: none` so it cannot receive drag events itself;
+    // window listeners bootstrap the drag_counter that reveals it.
+    // The closures are leaked (`.forget()`) — they live for the page
+    // lifetime, matching the app's single-page architecture.
+    use_hook(move || {
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+
+        let enter_cb =
+            Closure::<dyn FnMut(web_sys::DragEvent)>::new(move |evt: web_sys::DragEvent| {
+                evt.prevent_default();
+                drag_counter += 1;
+            });
+        let leave_cb =
+            Closure::<dyn FnMut(web_sys::DragEvent)>::new(move |_: web_sys::DragEvent| {
+                // Clamp to zero to prevent negative drift from browser
+                // quirks where dragleave fires without matching dragenter.
+                drag_counter.set((drag_counter() - 1).max(0));
+            });
+        let over_cb =
+            Closure::<dyn FnMut(web_sys::DragEvent)>::new(move |evt: web_sys::DragEvent| {
+                evt.prevent_default();
+            });
+
+        let _ =
+            window.add_event_listener_with_callback("dragenter", enter_cb.as_ref().unchecked_ref());
+        let _ =
+            window.add_event_listener_with_callback("dragleave", leave_cb.as_ref().unchecked_ref());
+        let _ =
+            window.add_event_listener_with_callback("dragover", over_cb.as_ref().unchecked_ref());
+
+        enter_cb.forget();
+        leave_cb.forget();
+        over_cb.forget();
+    });
 
     // Validate, read, and forward the first file from a list.
     //
@@ -98,22 +140,16 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
             }
         }
 
-        // Full-page drag overlay sentinel.
-        // Always in the DOM but invisible and non-interactive until a
-        // file is dragged over the window.
+        // Full-page drag overlay.
+        // Invisible and non-interactive until window-level dragenter
+        // listeners (registered above) set drag_counter > 0. Once
+        // visible, the overlay handles ondrop and ondragover directly.
         div {
             class: "fixed inset-0 z-50 transition-opacity duration-200",
-            class: if dragging { "opacity-100 pointer-events-auto" } else { "opacity-0 pointer-events-none" },
+            class: if dragging { "opacity-100" } else { "opacity-0 pointer-events-none" },
 
-            ondragenter: move |evt| {
-                evt.prevent_default();
-                drag_counter += 1;
-            },
             ondragover: move |evt| {
                 evt.prevent_default();
-            },
-            ondragleave: move |_| {
-                drag_counter -= 1;
             },
             ondrop: handle_drop,
 
