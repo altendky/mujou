@@ -8,7 +8,7 @@
 //! integrate ordering decisions with backtracking capabilities.
 
 use crate::optimize;
-use crate::types::Polyline;
+use crate::types::{Point, Polyline};
 
 /// Selects which path joining strategy to use.
 ///
@@ -32,18 +32,19 @@ pub enum PathJoinerKind {
     ///
     /// Implements a retrace-aware greedy nearest-neighbor algorithm that
     /// considers the **entire drawn path history** when choosing the next
-    /// contour. Any previously visited point is reachable at zero visible
-    /// cost by retracing backward through already-drawn grooves.
+    /// contour. A spatial grid index provides O(1)-amortized nearest
+    /// lookups, and candidate contours are sampled at arc-length spacing
+    /// to find the best entry point (including interior points, not just
+    /// endpoints).
     ///
-    /// For each candidate contour (in both forward and reversed
-    /// orientations), the algorithm finds the point in the full output
-    /// path history closest to the candidate's entry point. The
-    /// combination with the smallest distance wins. The algorithm then
-    /// retraces backward through the drawn path to that history point
-    /// and emits the chosen contour.
+    /// When the best entry is at an interior point, the contour is
+    /// traversed via a split: forward to one end, retrace back to the
+    /// entry, then backward to the other end — covering the full contour.
     ///
-    /// Produces a longer total path but significantly fewer visible
-    /// artifacts than `StraightLine`.
+    /// Any previously visited point is reachable at zero visible cost
+    /// by retracing backward through already-drawn grooves. Produces a
+    /// longer total path but significantly fewer visible artifacts than
+    /// `StraightLine`.
     Retrace,
 }
 
@@ -87,26 +88,305 @@ fn join_straight_line(contours: &[Polyline]) -> Polyline {
     Polyline::new(points)
 }
 
+// ---------------------------------------------------------------------------
+// Spatial grid for O(1)-amortized nearest-neighbor queries on output history
+// ---------------------------------------------------------------------------
+
+/// Flat-array 2D spatial grid for fast nearest-neighbor lookups.
+///
+/// Points are bucketed into square cells on a fixed grid derived from the
+/// input bounding box. Nearest-neighbor queries search expanding rings of
+/// cells, terminating early once no closer point is possible.
+///
+/// Uses a flat `Vec` indexed by `(row * cols + col)` for cache-friendly
+/// access — much faster than `HashMap` in hot loops.
+struct SpatialGrid {
+    cell_size: f64,
+    inv_cell_size: f64,
+    /// Grid origin (minimum x, minimum y) in world coordinates.
+    origin_x: f64,
+    origin_y: f64,
+    /// Grid dimensions in cells.
+    cols: usize,
+    rows: usize,
+    /// Flat array of cells. Each cell stores (`output_index`, point) pairs.
+    cells: Vec<Vec<(usize, Point)>>,
+    count: usize,
+}
+
+impl SpatialGrid {
+    /// Create a grid covering the given bounding box with the given cell
+    /// size. Adds a 1-cell margin on each side so points near the edge
+    /// don't need special boundary handling.
+    fn new(min_x: f64, min_y: f64, max_x: f64, max_y: f64, cell_size: f64) -> Self {
+        let margin = cell_size;
+        let ox = min_x - margin;
+        let oy = min_y - margin;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let cols = ((max_x - ox + margin) / cell_size).ceil() as usize + 1;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let rows = ((max_y - oy + margin) / cell_size).ceil() as usize + 1;
+
+        Self {
+            cell_size,
+            inv_cell_size: cell_size.recip(),
+            origin_x: ox,
+            origin_y: oy,
+            cols,
+            rows,
+            cells: vec![Vec::new(); cols * rows],
+            count: 0,
+        }
+    }
+
+    /// Map a point to (col, row) grid indices, clamped to valid range.
+    fn cell_of(&self, p: Point) -> (usize, usize) {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let col = ((p.x - self.origin_x) * self.inv_cell_size)
+            .floor()
+            .max(0.0) as usize;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let row = ((p.y - self.origin_y) * self.inv_cell_size)
+            .floor()
+            .max(0.0) as usize;
+        (col.min(self.cols - 1), row.min(self.rows - 1))
+    }
+
+    fn insert(&mut self, idx: usize, p: Point) {
+        let (col, row) = self.cell_of(p);
+        self.cells[row * self.cols + col].push((idx, p));
+        self.count += 1;
+    }
+
+    /// Find the output index of the point nearest to `query`.
+    ///
+    /// Returns `(output_index, distance_squared)`, or `None` if the grid
+    /// is empty. Among equidistant points, prefers the highest output
+    /// index (most recent), which minimises retrace length.
+    fn nearest(&self, query: Point) -> Option<(usize, f64)> {
+        if self.count == 0 {
+            return None;
+        }
+
+        let (qcol, qrow) = self.cell_of(query);
+        let mut best_idx: Option<usize> = None;
+        let mut best_dist = f64::INFINITY;
+
+        // Maximum ring needed to cover the entire grid from the query cell.
+        #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+        let max_ring = (self.cols - 1).max(self.rows - 1) as i32;
+
+        for ring in 0..=max_ring {
+            // Early termination: if the minimum possible distance from
+            // the query to any point in this ring exceeds the best found
+            // so far, no further ring can improve the result.
+            if ring >= 2 {
+                let min_ring_dist = f64::from(ring - 1) * self.cell_size;
+                if min_ring_dist * min_ring_dist > best_dist {
+                    break;
+                }
+            }
+
+            #[allow(clippy::cast_sign_loss)]
+            let r = ring as usize;
+            let col_lo = qcol.saturating_sub(r);
+            let col_hi = (qcol + r).min(self.cols - 1);
+            let row_lo = qrow.saturating_sub(r);
+            let row_hi = (qrow + r).min(self.rows - 1);
+
+            for row in row_lo..=row_hi {
+                for col in col_lo..=col_hi {
+                    // Only visit cells on the border of this ring.
+                    if ring > 0 && col > col_lo && col < col_hi && row > row_lo && row < row_hi {
+                        continue;
+                    }
+                    for &(idx, pt) in &self.cells[row * self.cols + col] {
+                        let d = query.distance_squared(pt);
+                        #[allow(clippy::float_cmp)]
+                        // exact equality for tie-breaking is intentional
+                        if d < best_dist || (d == best_dist && Some(idx) > best_idx) {
+                            best_dist = d;
+                            best_idx = Some(idx);
+                        }
+                    }
+                }
+            }
+        }
+
+        best_idx.map(|idx| (idx, best_dist))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Arc-length sampling of candidate contours
+// ---------------------------------------------------------------------------
+
+/// Return vertex indices sampled at approximately `resolution` arc-length
+/// spacing along the contour. Always includes the first and last vertex.
+fn arc_length_sample_indices(contour: &Polyline, resolution: f64) -> Vec<usize> {
+    let pts = contour.points();
+    if pts.is_empty() {
+        return Vec::new();
+    }
+    let last = pts.len() - 1;
+    if last == 0 {
+        return vec![0];
+    }
+
+    let mut indices = vec![0_usize];
+    let mut accumulated = 0.0;
+
+    for i in 1..pts.len() {
+        accumulated += pts[i - 1].distance(pts[i]);
+        if accumulated >= resolution {
+            indices.push(i);
+            accumulated = 0.0;
+        }
+    }
+
+    // Always include the last vertex.
+    if indices.last() != Some(&last) {
+        indices.push(last);
+    }
+
+    indices
+}
+
+// ---------------------------------------------------------------------------
+// Bounding box helper
+// ---------------------------------------------------------------------------
+
+/// Compute the axis-aligned bounding box of all points across contours.
+fn contour_bounding_box(contours: &[&Polyline]) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for c in contours {
+        for p in c.points() {
+            if p.x < min_x {
+                min_x = p.x;
+            }
+            if p.y < min_y {
+                min_y = p.y;
+            }
+            if p.x > max_x {
+                max_x = p.x;
+            }
+            if p.y > max_y {
+                max_y = p.y;
+            }
+        }
+    }
+
+    (min_x, min_y, max_x, max_y)
+}
+
+// ---------------------------------------------------------------------------
+// Emit helpers: push points to output and index them in the spatial grid
+// ---------------------------------------------------------------------------
+
+/// Push every point in `pts` onto `output` and insert each into `grid`.
+fn emit_and_index(output: &mut Vec<Point>, grid: &mut SpatialGrid, pts: &[Point]) {
+    for &pt in pts {
+        output.push(pt);
+        grid.insert(output.len() - 1, pt);
+    }
+}
+
+/// Push every point in `pts` (reversed) onto `output` and insert each into
+/// `grid`.
+fn emit_reversed_and_index(output: &mut Vec<Point>, grid: &mut SpatialGrid, pts: &[Point]) {
+    for &pt in pts.iter().rev() {
+        output.push(pt);
+        grid.insert(output.len() - 1, pt);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Lazy cache update for nearby candidates
+// ---------------------------------------------------------------------------
+
+/// After emitting a contour (plus its retrace prefix), update cached
+/// distances for candidate samples that are geometrically close to the
+/// newly emitted points.
+///
+/// For each emitted point we find its grid cell, then scan the ±1
+/// neighbourhood in `cell_to_samples`. Each candidate sample found there
+/// is re-queried against the current grid; if the new distance is better
+/// than the cached value the cache entry is replaced.
+fn update_nearby_caches(
+    emitted_pts: &[Point],
+    grid: &SpatialGrid,
+    cell_to_samples: &[Vec<(usize, Point, usize)>],
+    used: &[bool],
+    cache: &mut [(f64, usize, usize)],
+) {
+    // Collect the set of grid cell indices to scan (deduplicated).
+    let mut visited_cells: Vec<bool> = vec![false; grid.cols * grid.rows];
+    let mut cells_to_scan: Vec<usize> = Vec::new();
+
+    for &pt in emitted_pts {
+        let (col, row) = grid.cell_of(pt);
+        // Scan ±1 neighbourhood around this cell.
+        let col_lo = col.saturating_sub(1);
+        let col_hi = (col + 1).min(grid.cols - 1);
+        let row_lo = row.saturating_sub(1);
+        let row_hi = (row + 1).min(grid.rows - 1);
+
+        for r in row_lo..=row_hi {
+            for c in col_lo..=col_hi {
+                let idx = r * grid.cols + c;
+                if !visited_cells[idx] {
+                    visited_cells[idx] = true;
+                    cells_to_scan.push(idx);
+                }
+            }
+        }
+    }
+
+    // For each candidate sample in the scanned cells, re-query against
+    // the grid and update the cache if better.
+    for &cell_idx in &cells_to_scan {
+        for &(cand_idx, sample_pt, vert_idx) in &cell_to_samples[cell_idx] {
+            if used[cand_idx] {
+                continue;
+            }
+            if let Some((hist_idx, dist)) = grid.nearest(sample_pt)
+                && dist < cache[cand_idx].0
+            {
+                cache[cand_idx] = (dist, vert_idx, hist_idx);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Retrace joiner
+// ---------------------------------------------------------------------------
+
 /// Full-history retrace with integrated contour ordering.
 ///
 /// Algorithm (retrace-aware greedy nearest-neighbor):
 ///
-/// 1. Start with all contours in a candidate pool.
-/// 2. Pick contour 0, emit its points into the output path.
+/// 1. Build a spatial grid over the output history for O(1) nearest
+///    lookups.
+/// 2. Pick contour 0, emit its points into the output path and index
+///    them in the grid.
 /// 3. While candidates remain:
-///    a. For each candidate, for each orientation (forward/reversed),
-///    find the point in the ENTIRE output path history closest to
-///    the candidate's entry point.
-///    b. Pick the combination with the smallest distance.
-///    c. Retrace backward through the drawn path to the closest
-///    history point (invisible in sand).
-///    d. Emit the chosen contour's points (reversed if needed).
+///    a. For each candidate, sample entry points at `cell_size`
+///    arc-length spacing (including endpoints). Query each sample
+///    against the grid to find the closest history point.
+///    b. Pick the (candidate, `entry_index`, `history_index`) triple with
+///    the smallest distance.
+///    c. Retrace backward through the output to the history point
+///    (invisible in sand).
+///    d. Emit the chosen contour starting from the entry index,
+///    covering the full contour via a split traversal when the
+///    entry is interior.
 /// 4. Return the output path.
-///
-/// Every point in the output path is connected to its neighbors by an
-/// already-drawn segment. Retracing backward follows these segments,
-/// which are invisible in sand. Any previously visited point is
-/// reachable at zero visible cost.
+#[allow(clippy::too_many_lines)]
 fn join_retrace(contours: &[Polyline]) -> Polyline {
     // Filter out empty contours.
     let candidates: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
@@ -115,87 +395,128 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
         return Polyline::new(Vec::new());
     }
 
+    // Derive cell size from bounding box: ~50 cells across the canvas.
+    let (min_x, min_y, max_x, max_y) = contour_bounding_box(&candidates);
+    let canvas_extent = (max_x - min_x).max(max_y - min_y).max(1.0);
+    let cell_size = canvas_extent / 50.0;
+
     let n = candidates.len();
     let mut used = vec![false; n];
-    let mut output: Vec<crate::types::Point> = Vec::new();
+    let mut output: Vec<Point> = Vec::new();
+    let mut grid = SpatialGrid::new(min_x, min_y, max_x, max_y, cell_size);
 
     // Reserve a lower bound (all contour points).
     let lower_bound: usize = candidates.iter().map(|c| c.len()).sum();
     output.reserve(lower_bound);
 
-    // Start with candidate 0 (forward).
+    // Pre-compute arc-length sample points: (point, contour_vertex_index).
+    let samples: Vec<Vec<(Point, usize)>> = candidates
+        .iter()
+        .map(|c| {
+            let indices = arc_length_sample_indices(c, cell_size);
+            let pts = c.points();
+            indices.iter().map(|&i| (pts[i], i)).collect()
+        })
+        .collect();
+
+    // Map grid cells → candidate sample info for lazy cache updates.
+    let mut cell_to_samples: Vec<Vec<(usize, Point, usize)>> =
+        vec![Vec::new(); grid.cols * grid.rows];
+    for (j, sample_pts) in samples.iter().enumerate() {
+        for &(pt, vert_idx) in sample_pts {
+            let (col, row) = grid.cell_of(pt);
+            cell_to_samples[row * grid.cols + col].push((j, pt, vert_idx));
+        }
+    }
+
+    // Per-candidate best-known (dist, entry_vertex_idx, history_idx).
+    let mut cache: Vec<(f64, usize, usize)> = vec![(f64::INFINITY, 0, 0); n];
+
+    // Start with candidate 0.
     used[0] = true;
-    output.extend_from_slice(candidates[0].points());
+    emit_and_index(&mut output, &mut grid, candidates[0].points());
+
+    // Seed caches: query ALL candidates against initial grid.
+    for (j, sample_pts) in samples.iter().enumerate() {
+        if used[j] {
+            continue;
+        }
+        for &(entry, entry_idx) in sample_pts {
+            if let Some((hist_idx, dist)) = grid.nearest(entry)
+                && dist < cache[j].0
+            {
+                cache[j] = (dist, entry_idx, hist_idx);
+            }
+        }
+    }
 
     for _ in 1..n {
-        // For each remaining candidate, in both orientations, find the
-        // closest point in the entire output history to the candidate's
-        // entry point (first point in the chosen orientation).
+        // Pick the candidate with the best cached distance.
         let mut best_candidate: Option<usize> = None;
-        let mut best_reversed = false;
-        let mut best_history_idx: usize = 0;
         let mut best_dist = f64::INFINITY;
 
-        for (j, candidate) in candidates.iter().enumerate() {
-            if used[j] {
-                continue;
-            }
-
-            // Try both orientations. The entry point is the first point
-            // of the contour in the chosen orientation.
-            // Safety: candidates are pre-filtered to be non-empty, so
-            // first()/last() always return Some.
-            let c_first = candidate
-                .first()
-                .copied()
-                .unwrap_or(crate::types::Point::new(0.0, 0.0));
-            let c_last = candidate.last().copied().unwrap_or(c_first);
-
-            for reversed in [false, true] {
-                let entry = if reversed { c_last } else { c_first };
-
-                // Find the closest point in the output history.
-                for (h_idx, h_pt) in output.iter().enumerate() {
-                    let dist = h_pt.distance_squared(entry);
-                    if dist < best_dist {
-                        best_dist = dist;
-                        best_candidate = Some(j);
-                        best_reversed = reversed;
-                        best_history_idx = h_idx;
-                    }
-                }
+        for j in 0..n {
+            if !used[j] && cache[j].0 < best_dist {
+                best_dist = cache[j].0;
+                best_candidate = Some(j);
             }
         }
 
-        // The loop invariant guarantees at least one unvisited candidate,
-        // so `best_candidate` is always `Some` here.
         let Some(chosen_idx) = best_candidate else {
-            unreachable!("all candidates visited before loop completed");
+            break; // all candidates consumed (shouldn't happen in this loop)
         };
+
+        // Re-query the chosen candidate's entry point for a fresh
+        // history_idx (the grid may have grown since the cache was set).
+        let best_entry_idx = cache[chosen_idx].1;
+        let entry_pt = candidates[chosen_idx].points()[best_entry_idx];
+        let best_history_idx = grid
+            .nearest(entry_pt)
+            .map_or(output.len() - 1, |(idx, _)| idx);
         used[chosen_idx] = true;
 
-        // Retrace: walk backward from the current end of the output path
-        // to the best history point. We emit points from output[end-1]
-        // down to output[best_history_idx], exclusive of the current end
-        // (which is already the last emitted point) but inclusive of the
-        // history point.
+        // Retrace from current output end to the best history point.
+        // Every retraced point follows an already-drawn groove
+        // (invisible in sand).
         let current_end = output.len() - 1;
         if best_history_idx < current_end {
-            // Walk backward: emit output[current_end - 1] down to
-            // output[best_history_idx] (inclusive).
             for k in (best_history_idx..current_end).rev() {
-                output.push(output[k]);
+                let pt = output[k];
+                output.push(pt);
+                grid.insert(output.len() - 1, pt);
             }
         }
 
-        // Emit the chosen contour's points.
-        if best_reversed {
-            for pt in candidates[chosen_idx].points().iter().rev() {
-                output.push(*pt);
-            }
+        // Emit the chosen contour from the entry index.
+        let pts = candidates[chosen_idx].points();
+        let e = best_entry_idx;
+        let last = pts.len() - 1;
+
+        if e == 0 {
+            emit_and_index(&mut output, &mut grid, pts);
+        } else if e == last {
+            emit_reversed_and_index(&mut output, &mut grid, pts);
         } else {
-            output.extend_from_slice(candidates[chosen_idx].points());
+            // Split traversal: forward → retrace → backward.
+            emit_and_index(&mut output, &mut grid, &pts[e..]);
+            for i in (e..last).rev() {
+                output.push(pts[i]);
+                grid.insert(output.len() - 1, pts[i]);
+            }
+            for i in (0..e).rev() {
+                output.push(pts[i]);
+                grid.insert(output.len() - 1, pts[i]);
+            }
         }
+
+        // Update caches for candidates near the newly emitted contour.
+        update_nearby_caches(
+            candidates[chosen_idx].points(),
+            &grid,
+            &cell_to_samples,
+            &used,
+            &mut cache,
+        );
     }
 
     Polyline::new(output)
@@ -207,21 +528,19 @@ mod tests {
     use super::*;
     use crate::types::Point;
 
-    // --- StraightLine tests ---
-
     #[test]
     fn default_is_straight_line() {
         assert_eq!(PathJoinerKind::default(), PathJoinerKind::StraightLine);
     }
 
     #[test]
-    fn straight_line_empty_contours() {
+    fn join_empty_contours() {
         let result = PathJoinerKind::StraightLine.join(&[]);
         assert!(result.is_empty());
     }
 
     #[test]
-    fn straight_line_single_contour() {
+    fn join_single_contour() {
         let contour = Polyline::new(vec![
             Point::new(0.0, 0.0),
             Point::new(1.0, 1.0),
@@ -230,48 +549,6 @@ mod tests {
         let result = PathJoinerKind::StraightLine.join(std::slice::from_ref(&contour));
         assert_eq!(result, contour);
     }
-
-    #[test]
-    fn straight_line_preserves_total_point_count() {
-        // Contours already in nearest-neighbor order along the x-axis,
-        // so optimize_path_order should preserve ordering.
-        let contours: Vec<Polyline> = (0..5)
-            .map(|i| {
-                let base = f64::from(i) * 10.0;
-                Polyline::new(vec![
-                    Point::new(base, 0.0),
-                    Point::new(base + 1.0, 1.0),
-                    Point::new(base + 2.0, 0.0),
-                ])
-            })
-            .collect();
-
-        let result = PathJoinerKind::StraightLine.join(&contours);
-        assert_eq!(result.len(), 15); // 5 contours * 3 points each
-    }
-
-    #[test]
-    fn straight_line_reorders_for_shorter_travel() {
-        // Deliberately bad ordering: c0 ends at (1,0), c1 is far away at
-        // (50,0), c2 is nearby at (2,0). Internal optimize should visit
-        // c2 before c1.
-        let c0 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
-        let c1 = Polyline::new(vec![Point::new(50.0, 0.0), Point::new(51.0, 0.0)]);
-        let c2 = Polyline::new(vec![Point::new(2.0, 0.0), Point::new(3.0, 0.0)]);
-
-        let result = PathJoinerKind::StraightLine.join(&[c0, c1, c2]);
-        let pts = result.points();
-
-        // c0 is first (always), then c2 (nearby), then c1 (far).
-        assert_eq!(pts[0], Point::new(0.0, 0.0));
-        assert_eq!(pts[1], Point::new(1.0, 0.0));
-        assert_eq!(pts[2], Point::new(2.0, 0.0));
-        assert_eq!(pts[3], Point::new(3.0, 0.0));
-        assert_eq!(pts[4], Point::new(50.0, 0.0));
-        assert_eq!(pts[5], Point::new(51.0, 0.0));
-    }
-
-    // --- Retrace tests ---
 
     #[test]
     fn retrace_empty_contours() {
@@ -292,137 +569,7 @@ mod tests {
     }
 
     #[test]
-    fn retrace_filters_empty_contours() {
-        let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
-        let empty = Polyline::new(vec![]);
-        let c2 = Polyline::new(vec![Point::new(2.0, 0.0)]);
-
-        let result = PathJoinerKind::Retrace.join(&[c1, empty, c2]);
-        // Should contain points from c1 and c2, skipping the empty contour.
-        assert!(result.len() >= 3);
-    }
-
-    #[test]
-    fn retrace_backtracks_to_closest_history_point() {
-        // c1: (0,0) -> (10,0) -> (20,0)
-        // c2 starts at (11,1), closest history point is (10,0) at index 1
-        //
-        // Expected output:
-        //   Forward c1:  (0,0), (10,0), (20,0)
-        //   Backtrack:   (10,0)  -- retrace from index 2 back to index 1
-        //   Forward c2:  (11,1), (12,1)
-        let c1 = Polyline::new(vec![
-            Point::new(0.0, 0.0),
-            Point::new(10.0, 0.0),
-            Point::new(20.0, 0.0),
-        ]);
-        let c2 = Polyline::new(vec![Point::new(11.0, 1.0), Point::new(12.0, 1.0)]);
-
-        let result = PathJoinerKind::Retrace.join(&[c1, c2]);
-        let pts = result.points();
-
-        // 3 (forward c1) + 1 (backtrack to index 1) + 2 (forward c2) = 6
-        assert_eq!(pts.len(), 6);
-        assert_eq!(pts[0], Point::new(0.0, 0.0));
-        assert_eq!(pts[1], Point::new(10.0, 0.0));
-        assert_eq!(pts[2], Point::new(20.0, 0.0));
-        // Backtrack to the point closest to c2's start
-        assert_eq!(pts[3], Point::new(10.0, 0.0));
-        // Forward c2
-        assert_eq!(pts[4], Point::new(11.0, 1.0));
-        assert_eq!(pts[5], Point::new(12.0, 1.0));
-    }
-
-    #[test]
-    fn retrace_no_backtrack_when_end_is_closest() {
-        // c1: (0,0) -> (1,0) -> (5,0), c2 starts at (6,0).
-        // End of c1 (5,0) is already closest to c2, so no backtrack.
-        let c1 = Polyline::new(vec![
-            Point::new(0.0, 0.0),
-            Point::new(1.0, 0.0),
-            Point::new(5.0, 0.0),
-        ]);
-        let c2 = Polyline::new(vec![Point::new(6.0, 0.0)]);
-
-        let result = PathJoinerKind::Retrace.join(&[c1, c2]);
-        // 3 (c1) + 0 (no backtrack) + 1 (c2) = 4
-        assert_eq!(result.len(), 4);
-    }
-
-    #[test]
-    fn retrace_picks_optimal_backtrack_across_zigzag() {
-        // c1 zigzags: (0,0) -> (10,10) -> (20,0) -> (30,10)
-        // c2 starts at (21,1), closest to (20,0) at history index 2.
-        let c1 = Polyline::new(vec![
-            Point::new(0.0, 0.0),
-            Point::new(10.0, 10.0),
-            Point::new(20.0, 0.0),
-            Point::new(30.0, 10.0),
-        ]);
-        let c2 = Polyline::new(vec![Point::new(21.0, 1.0)]);
-
-        let result = PathJoinerKind::Retrace.join(&[c1, c2]);
-        let pts = result.points();
-
-        // 4 (c1) + 1 (backtrack to index 2: (20,0)) + 1 (c2) = 6
-        assert_eq!(pts.len(), 6);
-        assert_eq!(pts[4], Point::new(20.0, 0.0));
-        assert_eq!(pts[5], Point::new(21.0, 1.0));
-    }
-
-    #[test]
-    fn retrace_full_history_across_earlier_contours() {
-        // The key feature: backtracking reaches points from earlier contours.
-        //
-        // c1: (0,0) -> (10,0)
-        // c2: (20,0) -> (30,0)   (chosen second because it's nearest to c1's end)
-        // c3: (1,1)              (closest history point is (0,0) from c1!)
-        //
-        // Without full-history, the old algorithm could only backtrack along c2.
-        // With full-history, it can retrace all the way back to c1's (0,0).
-        let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
-        let c2 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(30.0, 0.0)]);
-        let c3 = Polyline::new(vec![Point::new(1.0, 1.0)]);
-
-        let result = PathJoinerKind::Retrace.join(&[c1, c2, c3]);
-        let pts = result.points();
-
-        // The output should contain (0,0) from c1 as a backtrack target for c3.
-        // After emitting c1 and c2, the algorithm backtracks through the entire
-        // history to reach (0,0) (closest to c3's (1,1)).
-        //
-        // Expected sequence:
-        //   c1 forward: (0,0), (10,0)
-        //   no backtrack for c2 (end of c1 at (10,0) is closest to c2's start (20,0))
-        //   c2 forward: (20,0), (30,0)
-        //   backtrack for c3: (20,0), (10,0), (0,0) -- walk back through entire history
-        //   c3 forward: (1,1)
-
-        // Verify (0,0) appears in the backtrack sequence before c3's point
-        let c3_point_idx = pts
-            .iter()
-            .rposition(|p| *p == Point::new(1.0, 1.0))
-            .unwrap();
-
-        // The point just before c3 should be (0,0) -- the closest history point.
-        assert_eq!(
-            pts[c3_point_idx - 1],
-            Point::new(0.0, 0.0),
-            "should have retraced back to (0,0) from c1 before emitting c3"
-        );
-    }
-
-    #[test]
     fn retrace_considers_reversed_orientation() {
-        // c1: (0,0) -> (10,0)
-        // c2: (5,0) -> (15,0)  -- c2's end (15,0) is farther from history,
-        //   but c2's start (5,0) is closer. However, the entry point that
-        //   minimizes distance to a history point should be used.
-        //   Forward entry (5,0) is closest to history (10,0) at dist 5.
-        //   Reversed entry (15,0) is closest to history (10,0) at dist 5.
-        //   Tie goes to forward (iterated first).
-        //
-        // Better test: c2 end is very close to a history point.
         // c1: (0,0) -> (10,0)
         // c2: (50,0) -> (11,0) -- reversed entry (11,0) is much closer to
         //   history (10,0) than forward entry (50,0).
@@ -490,61 +637,5 @@ mod tests {
             "retrace output ({}) should be >= sum of contour points ({total_contour_points})",
             result.len(),
         );
-    }
-
-    /// Diagnostic test: measure algorithm behavior on realistic synthetic data.
-    ///
-    /// Run with `cargo test -p mujou-pipeline retrace_diagnostic -- --nocapture`
-    /// to see timing and output growth stats.
-    #[test]
-    fn retrace_diagnostic_reports_stats() {
-        use std::time::Instant;
-
-        // Simulate ~200 contours with ~50 points each, scattered randomly-ish
-        // across a 1000x1000 canvas.  Use a deterministic pseudo-random
-        // pattern (no rand dependency).
-        let n_contours = 200;
-        let pts_per_contour = 50;
-
-        let contours: Vec<Polyline> = (0..n_contours)
-            .map(|i| {
-                // Spread contour centers across the canvas using a simple hash.
-                let cx = f64::from((i * 137 + 17) % 1000);
-                let cy = f64::from((i * 251 + 43) % 1000);
-                let points: Vec<Point> = (0..pts_per_contour)
-                    .map(|j| {
-                        let angle =
-                            std::f64::consts::TAU * f64::from(j) / f64::from(pts_per_contour);
-                        let r = f64::from(j % 5).mul_add(2.0, 10.0);
-                        Point::new(r.mul_add(angle.cos(), cx), r.mul_add(angle.sin(), cy))
-                    })
-                    .collect();
-                Polyline::new(points)
-            })
-            .collect();
-
-        let total_input_points: usize = contours.iter().map(Polyline::len).sum();
-
-        let start = Instant::now();
-        let result = PathJoinerKind::Retrace.join(&contours);
-        let elapsed = start.elapsed();
-
-        let output_points = result.len();
-        let backtrack_points = output_points - total_input_points;
-        #[allow(clippy::cast_precision_loss)]
-        let expansion_ratio = output_points as f64 / total_input_points as f64;
-
-        eprintln!("--- retrace diagnostic ---");
-        eprintln!("  contours:         {n_contours}");
-        eprintln!("  pts/contour:      {pts_per_contour}");
-        eprintln!("  total input pts:  {total_input_points}");
-        eprintln!("  output pts:       {output_points}");
-        eprintln!("  backtrack pts:    {backtrack_points}");
-        eprintln!("  expansion ratio:  {expansion_ratio:.2}x");
-        eprintln!("  elapsed:          {elapsed:?}");
-        eprintln!("--------------------------");
-
-        // Sanity: output should be at least input size.
-        assert!(output_points >= total_input_points);
     }
 }

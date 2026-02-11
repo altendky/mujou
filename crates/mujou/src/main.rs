@@ -103,13 +103,7 @@ fn app() -> Element {
             // processing indicator before we block on the pipeline.
             gloo_timers::future::TimeoutFuture::new(0).await;
 
-            let outcome = {
-                let t0 = js_sys::Date::now();
-                let res = mujou_pipeline::process_staged(&bytes, &cfg);
-                let elapsed = js_sys::Date::now() - t0;
-                web_sys::console::log_1(&format!("[mujou] pipeline total: {elapsed:.0}ms").into());
-                res
-            };
+            let outcome = mujou_pipeline::process_staged(&bytes, &cfg);
 
             // If another run was triggered while we were processing,
             // discard this stale result silently.
