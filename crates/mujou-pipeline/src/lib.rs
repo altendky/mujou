@@ -2,7 +2,7 @@
 //!
 //! Converts raster images into vector polylines through:
 //! grayscale -> blur -> edge detection -> contour tracing ->
-//! simplification -> optimization -> joining -> optional mask.
+//! simplification -> ordering + joining -> optional mask.
 //!
 //! This crate has **no I/O dependencies** -- it operates on in-memory
 //! byte slices and returns structured data. All browser/filesystem
@@ -40,9 +40,9 @@ pub use types::{
 /// 4. Optional edge map inversion
 /// 5. Contour tracing (pluggable strategy)
 /// 6. Path simplification (Ramer-Douglas-Peucker)
-/// 7. Path optimization (nearest-neighbor reordering)
-/// 8. Path joining into single continuous path (pluggable strategy)
-/// 9. Optional circular mask
+/// 7. Path ordering + joining into single continuous path (pluggable strategy;
+///    each joiner handles its own ordering internally)
+/// 8. Optional circular mask
 ///
 /// # Errors
 ///
@@ -86,13 +86,14 @@ pub fn process_staged(
     // 6. Path simplification (RDP).
     let simplified = simplify::simplify_paths(&contours, config.simplify_tolerance);
 
-    // 7. Path optimization (nearest-neighbor reordering).
-    let optimized = optimize::optimize_path_order(&simplified);
+    // 7. Path ordering + joining into a single continuous path.
+    //
+    // Each PathJoinerKind variant handles its own ordering internally:
+    // - StraightLine delegates to optimize_path_order() then concatenates.
+    // - Retrace uses an integrated retrace-aware greedy nearest-neighbor.
+    let joined = config.path_joiner.join(&simplified);
 
-    // 8. Path joining into a single continuous path.
-    let joined = config.path_joiner.join(&optimized);
-
-    // 9. Optional circular mask.
+    // 8. Optional circular mask.
     let masked = if config.circular_mask {
         let center = Point::new(
             f64::from(dimensions.width) / 2.0,

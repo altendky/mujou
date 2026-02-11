@@ -80,44 +80,39 @@ Otherwise, intermediate points are dropped.
 
 **User parameter:** `simplify_tolerance` (f64, default: 2.0 pixels)
 
-### 7. Path Optimization
-
-Minimize travel distance between disconnected contours.
-On a sand table, travel between contours draws visible lines, so minimizing this improves output quality.
-
-**Strategy: Nearest-neighbor TSP on contours**
-
-1. For each pair of contours, compute four distances: start-to-start, start-to-end, end-to-start, end-to-end.
-   Use the minimum.
-2. Starting from contour 0, greedily visit the nearest unvisited contour.
-3. For each contour, choose the direction (forward or reversed) that minimizes the gap from the previous contour's endpoint.
-
-This is a greedy heuristic, not optimal.
-2-opt improvement is a potential future enhancement.
-
-### 8. Path Joining
+### 7. Path Ordering + Joining
 
 Sand tables cannot lift the ball -- every movement draws a visible line.
 The output must be a **single continuous path**, not a set of disconnected contours.
-This step flattens the ordered `Vec<Polyline>` from step 7 into one continuous `Polyline` by inserting connecting segments between each contour.
+This step receives **unordered** contours from simplification and produces a single continuous `Polyline`. Each joining strategy handles its own ordering internally, which allows strategies like Retrace to integrate ordering decisions with backtracking capabilities.
 
 This is a [pluggable algorithm strategy](principles.md#pluggable-algorithm-strategies) -- the user selects which joining method to use.
 
-**User parameter:** `path_joiner` (impl `PathJoiner`, default: `StraightLineJoin`)
+**User parameter:** `path_joiner` (impl `PathJoiner`, default: `StraightLine`)
 
-#### StraightLine (MVP)
+#### StraightLine
 
-Connect the end of each contour to the start of the next with a straight line segment.
+Nearest-neighbor ordering followed by straight-line concatenation. Internally calls `optimize_path_order()` (greedy nearest-neighbor TSP on contour endpoints), then connects the end of each contour to the start of the next with a straight line segment.
 
-**Tradeoffs:** Simplest (~10 lines). Produces visible straight scratches between features. Scratch length is minimized by the path optimization in step 7 but not eliminated.
+**Tradeoffs:** Simplest strategy. Produces visible straight scratches between features. Scratch length is minimized by the internal path optimization but not eliminated.
 
-#### Retrace (future)
+#### Retrace
 
-Retrace backward along the previous contour before jumping to the next.
-The retraced segment follows an already-drawn groove, so it is invisible in sand.
-The remaining straight-line jump starts from a point closer to the next contour.
+Full-history retrace with integrated contour ordering. Implements a retrace-aware greedy nearest-neighbor algorithm:
 
-**Tradeoffs:** Longer total path length but less visible artifact. Requires computing the optimal backtrack distance.
+1. Start with all contours in a candidate pool.
+2. Pick contour 0, emit its points into the output path.
+3. While candidates remain:
+   a. For each candidate, for each orientation (forward/reversed), find the point in the **entire output path history** closest to the candidate's entry point.
+   b. Pick the combination with the smallest distance.
+   c. Retrace backward through the drawn path to the closest history point (these segments follow already-drawn grooves -- invisible in sand).
+   d. Emit the chosen contour's points (reversed if needed).
+
+Any previously visited point is reachable at zero visible cost. This means the algorithm can exploit proximity to points visited many contours ago, which the separate optimize-then-join approach cannot.
+
+**Performance:** Brute-force O(N^2 x M) where N = contour count, M = avg points per contour. For typical images (~200 contours, ~50 pts each) this is ~2x10^8 distance computations. Spatial indexing can be added later for complex images.
+
+**Tradeoffs:** Longer total path length but significantly fewer visible artifacts. Integrated ordering eliminates the structural limitation where optimization ignores backtracking capability.
 
 #### EdgeAwareRouting (future)
 
@@ -132,7 +127,7 @@ Spirals are the natural visual language of polar sand tables.
 
 **Tradeoffs:** Only applicable to polar output formats. Requires theta-rho space path planning.
 
-### 9. Circular Mask (Optional)
+### 8. Circular Mask (Optional)
 
 For round sand tables (Sisyphus, Oasis Mini), clip all polylines to a circle centered on the image.
 Points outside the circle are removed.
@@ -143,7 +138,7 @@ Polylines that cross the circle boundary are split at the intersection.
 - `circular_mask` (bool, default: false)
 - `mask_diameter` (f64, fraction of image width, default: 1.0)
 
-### 10. Invert (Optional)
+### 9. Invert (Optional)
 
 By default, edges (high contrast boundaries) are traced.
 Inversion swaps the binary edge map so dark regions are traced instead of light-to-dark transitions.

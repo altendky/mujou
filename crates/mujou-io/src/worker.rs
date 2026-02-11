@@ -14,8 +14,8 @@ use std::rc::Rc;
 
 use mujou_pipeline::{Dimensions, PipelineConfig, PipelineError, Polyline};
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen::prelude::*;
 
 use crate::raster;
 
@@ -171,11 +171,10 @@ impl PipelineWorker {
                 let data = event.data();
 
                 // Extract the generation to verify this response matches our request.
-                let resp_generation =
-                    js_sys::Reflect::get(&data, &JsValue::from_str("generation"))
-                        .ok()
-                        .and_then(|v| v.as_f64())
-                        .unwrap_or(-1.0);
+                let resp_generation = js_sys::Reflect::get(&data, &JsValue::from_str("generation"))
+                    .ok()
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(-1.0);
 
                 if (resp_generation - generation).abs() > f64::EPSILON {
                     // Stale response — ignore it.
@@ -392,9 +391,8 @@ wasm_bindgen("{wasm_url}")
     js_blob_parts.push(&JsValue::from_str(&wrapper_js));
     let js_blob_opts = web_sys::BlobPropertyBag::new();
     js_blob_opts.set_type("application/javascript");
-    let js_blob =
-        web_sys::Blob::new_with_str_sequence_and_options(&js_blob_parts, &js_blob_opts)
-            .expect_throw("failed to create JS Blob");
+    let js_blob = web_sys::Blob::new_with_str_sequence_and_options(&js_blob_parts, &js_blob_opts)
+        .expect_throw("failed to create JS Blob");
     let js_url = web_sys::Url::create_object_url_with_blob(&js_blob)
         .expect_throw("failed to create JS Blob URL");
 
