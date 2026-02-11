@@ -25,7 +25,7 @@ jobs:
       - name: Install wasm-pack
         uses: taiki-e/install-action@v2
         with:
-          tool: wasm-pack
+          tool: wasm-pack@0.14.0
 
       - name: Install Dioxus CLI
         uses: taiki-e/install-action@v2
