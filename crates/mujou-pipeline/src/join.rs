@@ -180,6 +180,9 @@ impl SpatialGrid {
             // Early termination: if the minimum possible distance from
             // the query to any point in this ring exceeds the best found
             // so far, no further ring can improve the result.
+            // Rings 0-1 always searched: the query can lie anywhere inside
+            // its cell, so the (ring-1)*cell_size lower bound is only
+            // meaningful from ring 2 onward.
             if ring >= 2 {
                 let min_ring_dist = f64::from(ring - 1) * self.cell_size;
                 if min_ring_dist * min_ring_dist > best_dist {
@@ -484,9 +487,10 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
         // history_idx (the grid may have grown since the cache was set).
         let best_entry_idx = cache[chosen_idx].1;
         let entry_pt = candidates[chosen_idx].points()[best_entry_idx];
-        let best_history_idx = grid
-            .nearest(entry_pt)
-            .map_or(output.len() - 1, |(idx, _)| idx);
+        // Safety: the grid is non-empty — candidate 0 was already emitted.
+        let Some((best_history_idx, _)) = grid.nearest(entry_pt) else {
+            unreachable!("grid is non-empty after initial emission")
+        };
         used[chosen_idx] = true;
 
         // Retrace from current output end to the best history point.
@@ -653,6 +657,55 @@ mod tests {
             result.len() >= total_contour_points,
             "retrace output ({}) should be >= sum of contour points ({total_contour_points})",
             result.len(),
+        );
+    }
+
+    #[test]
+    fn retrace_interior_entry_split_traversal() {
+        // c0: short contour near origin to seed history.
+        let c0 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
+
+        // c1: long contour along y=10 from (-50, 10) to (50, 10) with
+        // 101 evenly spaced vertices (spacing = 1.0). The bounding box
+        // spans x: [-50, 50], y: [0, 10] → canvas_extent = 100,
+        // cell_size = 100/50 = 2.0. arc_length_sample_indices produces
+        // samples every 2 vertices, including interior points.
+        //
+        // The sample at index 50 = (0, 10) is closest to history point
+        // (0, 0) at distance 10.0 — an interior vertex — triggering the
+        // split traversal branch.
+        let c1 = Polyline::new(
+            (0..101)
+                .map(|i| Point::new(f64::from(i) - 50.0, 10.0))
+                .collect(),
+        );
+
+        let result = PathJoinerKind::Retrace.join(&[c0.clone(), c1.clone()]);
+        let output_pts = result.points();
+
+        // All of c1's points must appear in the output.
+        let c1_set: std::collections::HashSet<_> = c1
+            .points()
+            .iter()
+            .map(|p| (p.x.to_bits(), p.y.to_bits()))
+            .collect();
+        let output_set: std::collections::HashSet<_> = output_pts
+            .iter()
+            .map(|p| (p.x.to_bits(), p.y.to_bits()))
+            .collect();
+        assert!(
+            c1_set.is_subset(&output_set),
+            "all of c1's points should appear in the output"
+        );
+
+        // Split traversal retraces within c1 (forward to one end,
+        // back to entry, backward to other end), producing more output
+        // points than c0.len() + c1.len().
+        assert!(
+            result.len() > c0.len() + c1.len(),
+            "split traversal should produce extra retrace points: got {} but expected > {}",
+            result.len(),
+            c0.len() + c1.len(),
         );
     }
 }
