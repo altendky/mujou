@@ -198,9 +198,12 @@ fn post_success_response(
     let original_png = encode_or_error!(encode_rgba_png(&staged.original));
     let grayscale_png = encode_or_error!(encode_gray_png(&staged.grayscale));
     let blurred_png = encode_or_error!(encode_gray_png(&staged.blurred));
-    let edges_light_png =
-        encode_or_error!(encode_themed_edge_png(&staged.edges, light_bg, light_fg));
-    let edges_dark_png = encode_or_error!(encode_themed_edge_png(&staged.edges, dark_bg, dark_fg));
+    // Dilate once — both themes use the same dilated edge image.
+    let dilated_edges = dilate_soft(&staged.edges);
+    let edges_light_png = encode_themed_edge_png(&dilated_edges, light_bg, light_fg);
+    let edges_light_png = encode_or_error!(edges_light_png);
+    let edges_dark_png = encode_themed_edge_png(&dilated_edges, dark_bg, dark_fg);
+    let edges_dark_png = encode_or_error!(edges_dark_png);
 
     let response = js_sys::Object::new();
     let set = |key: &str, val: &JsValue| {
@@ -272,14 +275,17 @@ fn encode_gray_png(image: &GrayImage) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-/// Encode a binary edge image as a themed RGB PNG.
+/// Encode a pre-dilated edge image as a themed RGB PNG.
 ///
-/// Applies soft dilation for visibility at small sizes, then maps
-/// pixel values to the given foreground/background colors.
-fn encode_themed_edge_png(image: &GrayImage, bg: [u8; 3], fg: [u8; 3]) -> Result<Vec<u8>, String> {
-    // Soft-dilate edge pixels so thin lines survive smooth downscaling.
-    let dilated = dilate_soft(image);
-
+/// Maps pixel values to the given foreground/background colors and
+/// encodes the result as a PNG.  The caller is responsible for
+/// running [`dilate_soft`] first — this avoids redundant dilation
+/// when the same edge image is themed for both light and dark modes.
+fn encode_themed_edge_png(
+    dilated: &GrayImage,
+    bg: [u8; 3],
+    fg: [u8; 3],
+) -> Result<Vec<u8>, String> {
     // Map grayscale pixels to RGB using bg/fg colors.
     let (w, h) = (dilated.width(), dilated.height());
     let mut rgb_buf = Vec::with_capacity((w * h * 3) as usize);
