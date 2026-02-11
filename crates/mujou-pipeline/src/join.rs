@@ -334,10 +334,12 @@ fn update_nearby_caches(
     cell_to_samples: &[Vec<(usize, Point, usize)>],
     used: &[bool],
     cache: &mut [(f64, usize, usize)],
+    visited_cells: &mut [bool],
+    cells_to_scan: &mut Vec<usize>,
 ) {
-    // Collect the set of grid cell indices to scan (deduplicated).
-    let mut visited_cells: Vec<bool> = vec![false; grid.cols * grid.rows];
-    let mut cells_to_scan: Vec<usize> = Vec::new();
+    // Reset reusable buffers.
+    visited_cells.fill(false);
+    cells_to_scan.clear();
 
     for &pt in emitted_pts {
         let (col, row) = grid.cell_of(pt);
@@ -360,7 +362,7 @@ fn update_nearby_caches(
 
     // For each candidate sample in the scanned cells, re-query against
     // the grid and update the cache if better.
-    for &cell_idx in &cells_to_scan {
+    for &cell_idx in cells_to_scan.iter() {
         for &(cand_idx, sample_pt, vert_idx) in &cell_to_samples[cell_idx] {
             if used[cand_idx] {
                 continue;
@@ -467,6 +469,11 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
         }
     }
 
+    // Reusable buffers for update_nearby_caches (hoisted to avoid
+    // per-iteration heap allocation).
+    let mut visited_cells: Vec<bool> = vec![false; grid.cols * grid.rows];
+    let mut cells_to_scan: Vec<usize> = Vec::new();
+
     for _ in 1..n {
         // Pick the candidate with the best cached distance.
         let mut best_candidate: Option<usize> = None;
@@ -537,6 +544,8 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
             &cell_to_samples,
             &used,
             &mut cache,
+            &mut visited_cells,
+            &mut cells_to_scan,
         );
     }
 
