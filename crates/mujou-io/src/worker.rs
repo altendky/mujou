@@ -227,14 +227,35 @@ fn create_worker(worker_js: &str, worker_wasm: &[u8]) -> web_sys::Worker {
         web_sys::Url::create_object_url_with_blob(&wasm_blob).expect_throw("failed to create WASM Blob URL");
 
     // Create a wrapper script that:
-    // 1. Defines the wasm_bindgen JS glue
-    // 2. Calls wasm_bindgen(wasm_url) to initialize
+    // 1. Queues any messages that arrive before WASM is ready
+    // 2. Defines the wasm_bindgen JS glue
+    // 3. Calls wasm_bindgen(wasm_url) to initialize
+    // 4. After init, replays queued messages through the real handler
+    //
+    // This prevents a race condition: the main thread may postMessage
+    // before the worker's WASM module has finished loading and
+    // worker_main() has set up the real onmessage handler.
     let wrapper_js = format!(
         r#"// Worker wrapper — loads embedded wasm_bindgen glue and WASM blob.
+
+// Queue messages that arrive before WASM init completes.
+var _msgQueue = [];
+self.onmessage = function(e) {{ _msgQueue.push(e); }};
+
 {worker_js}
 
 // Initialize the WASM module from the embedded blob URL.
+// worker_main() (the #[wasm_bindgen(start)] function) runs during
+// instantiation and sets the real onmessage handler on self.
 wasm_bindgen("{wasm_url}")
+    .then(function() {{
+        // Replay any messages that arrived before initialization.
+        var q = _msgQueue;
+        _msgQueue = null;
+        for (var i = 0; i < q.length; i++) {{
+            self.onmessage(q[i]);
+        }}
+    }})
     .catch(function(e) {{ console.error("Worker WASM init failed:", e); }});
 "#
     );
