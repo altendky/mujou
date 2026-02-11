@@ -116,6 +116,14 @@ impl PipelineWorker {
     /// - The config cannot be serialized
     /// - The worker fails to respond (e.g. was terminated)
     /// - The result cannot be deserialized
+    ///
+    /// # Concurrent calls
+    ///
+    /// Only one `run()` should be in-flight at a time. A second call
+    /// while the first is awaiting will replace the worker's message
+    /// handler, causing the first call's future to hang indefinitely.
+    /// Use [`cancel()`](Self::cancel) to abort a previous run before
+    /// starting a new one.
     #[allow(clippy::future_not_send)] // WASM is single-threaded; Send is not needed
     pub async fn run(
         &self,
