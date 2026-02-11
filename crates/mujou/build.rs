@@ -221,6 +221,11 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
         }
     }
 
+    // Clear flags that the host `cargo` (or tools like cargo-llvm-cov)
+    // inject into the environment.  These flags target the *host*
+    // toolchain and are incompatible with the wasm32-unknown-unknown
+    // target that wasm-pack compiles for (e.g. `-C instrument-coverage`
+    // requires `profiler_builtins`, which isn't available for wasm32).
     let status = Command::new("wasm-pack")
         .args([
             "build",
@@ -231,6 +236,8 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
             "--out-dir",
             &worker_pkg_dir.to_string_lossy(),
         ])
+        .env_remove("RUSTFLAGS")
+        .env_remove("CARGO_ENCODED_RUSTFLAGS")
         .status()
         .unwrap_or_else(|e| {
             panic!(
