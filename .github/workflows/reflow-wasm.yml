@@ -22,6 +22,11 @@ jobs:
         with:
           target: wasm32-unknown-unknown
 
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
       - name: Install Dioxus CLI
         uses: taiki-e/install-action@v2
         with:

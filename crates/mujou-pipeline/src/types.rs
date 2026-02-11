@@ -390,6 +390,7 @@ impl<'de> Deserialize<'de> for PipelineError {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -547,7 +548,7 @@ mod tests {
 
     #[test]
     fn point_serde_round_trip() {
-        let p = Point::new(3.14, -2.71);
+        let p = Point::new(3.25, -2.71);
         let json = serde_json::to_string(&p).unwrap();
         let deserialized: Point = serde_json::from_str(&json).unwrap();
         assert_eq!(p, deserialized);
