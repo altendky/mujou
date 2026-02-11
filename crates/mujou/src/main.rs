@@ -3,6 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use mujou_io::{
     ExportPanel, FileUpload, Filmstrip, PipelineWorker, StageControls, StageId, StagePreview,
+    WorkerResult,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -70,7 +71,7 @@ fn app() -> Element {
     // --- Application state ---
     let mut image_bytes = use_signal(|| Some(CHERRY_BLOSSOMS.to_vec()));
     let mut filename = use_signal(|| String::from("cherry-blossoms"));
-    let mut result = use_signal(|| Option::<Rc<mujou_pipeline::StagedResult>>::None);
+    let mut result = use_signal(|| Option::<Rc<WorkerResult>>::None);
     let mut processing = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
     let mut generation = use_signal(|| 0u64);
@@ -136,10 +137,8 @@ fn app() -> Element {
             // tasks on the single-threaded WASM executor, interleaving
             // via the event loop.
             //
-            // The timer watches `processing_start` rather than a local
-            // flag so it naturally stops when the post-render effect
-            // clears the processing state (including after memo
-            // recomputation).
+            // The timer watches `processing_start` and stops when it is
+            // cleared (either by completion, cancellation, or a new run).
             spawn(async move {
                 loop {
                     gloo_timers::future::TimeoutFuture::new(ELAPSED_UPDATE_MS).await;
@@ -152,7 +151,8 @@ fn app() -> Element {
 
             // Run the pipeline in the web worker — this .await yields
             // to the browser event loop so animations and cancel clicks
-            // keep working.
+            // keep working. PNG encoding also happens in the worker, so
+            // the returned WorkerResult has ready-to-use Blob URLs.
             #[allow(clippy::cast_precision_loss)]
             let outcome = worker.run(&bytes, &cfg, my_generation as f64).await;
 
@@ -164,49 +164,23 @@ fn app() -> Element {
                 return;
             }
 
+            // Record final elapsed time and hide the overlay. Since
+            // PNG encoding happened in the worker, result.set() only
+            // triggers a lightweight re-render (no main-thread encoding).
+            elapsed_ms.set(js_sys::Date::now() - start);
+            processing.set(false);
+            processing_start.set(None);
+
             match outcome {
                 Ok(res) => {
-                    // Setting result triggers a re-render. The use_memo
-                    // caches in Filmstrip/StagePreview fire synchronously
-                    // during that render (PNG encoding). The timer keeps
-                    // running through the render so elapsed time includes
-                    // the full user-perceived duration. A use_effect on
-                    // `result` fires *after* the render completes and
-                    // stops the timer + hides the overlay.
                     result.set(Some(Rc::new(res)));
                     error.set(None);
                 }
                 Err(e) => {
                     error.set(Some(format!("{e}")));
-                    // No result change, so the post-render effect won't
-                    // fire — stop timer and overlay here directly.
-                    elapsed_ms.set(js_sys::Date::now() - start);
-                    processing.set(false);
-                    processing_start.set(None);
                 }
             }
         });
-    });
-
-    // --- Post-render completion effect ---
-    // This effect subscribes to `result` and runs *after* the Dioxus
-    // render pass completes — including the synchronous use_memo PNG
-    // encoding in Filmstrip and StagePreview. This ensures the elapsed
-    // timer captures the full user-perceived duration (worker processing
-    // + data transfer + deserialization + PNG encoding for previews),
-    // not just the worker time.
-    use_effect(move || {
-        // Subscribe to result so this effect runs after renders
-        // triggered by result changes.
-        let _subscribe = result();
-
-        // Only act if we are actively processing (processing_start is set).
-        let start = *processing_start.peek();
-        if let Some(s) = start {
-            elapsed_ms.set(js_sys::Date::now() - s);
-            processing.set(false);
-            processing_start.set(None);
-        }
     });
 
     // --- Debounced config commit effect ---
@@ -299,7 +273,7 @@ fn app() -> Element {
 
                     // Show results (stale or fresh) when available.
                     // The processing indicator overlays rather than replaces.
-                    if let Some(ref staged) = result() {
+                    if let Some(ref worker_result) = result() {
                         // Stage preview with processing overlay
                         div { class: "relative",
                             // Preview content (stays visible during re-processing)
@@ -307,7 +281,7 @@ fn app() -> Element {
                                 class: if processing() { "opacity-50 transition-opacity" } else { "transition-opacity" },
 
                                 StagePreview {
-                                    staged: Rc::clone(staged),
+                                    result: Rc::clone(worker_result),
                                     selected: selected_stage(),
                                 }
                             }
@@ -331,7 +305,7 @@ fn app() -> Element {
 
                         // Filmstrip (always visible)
                         Filmstrip {
-                            staged: Rc::clone(staged),
+                            result: Rc::clone(worker_result),
                             selected: selected_stage(),
                             on_select: on_stage_select,
                         }

@@ -14,6 +14,7 @@ categories = ["wasm"]
 crate-type = ["cdylib"]
 
 [dependencies]
+image.workspace = true
 mujou-pipeline.workspace = true
 serde.workspace = true
 serde_json.workspace = true

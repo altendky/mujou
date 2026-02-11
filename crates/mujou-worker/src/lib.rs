@@ -1,25 +1,25 @@
 //! Web worker entry point for mujou pipeline processing.
 //!
 //! This crate compiles to a standalone WASM module that runs inside a
-//! `Worker`. It receives image bytes and a `PipelineConfig` via
-//! `postMessage`, calls `mujou_pipeline::process_staged`, and posts
-//! the result back.
+//! `Worker`. It receives image bytes, a `PipelineConfig`, and theme
+//! colors via `postMessage`, runs `mujou_pipeline::process_staged`,
+//! encodes all raster stages to PNG, and posts the results back.
 //!
-//! Raster images (original, grayscale, blurred, edges) are sent as raw
-//! `Uint8Array` buffers to avoid the massive overhead of JSON-encoding
-//! megabytes of pixel data as number arrays. Vector data (polylines,
-//! dimensions) is sent as a small JSON string.
+//! PNG encoding happens here (off the main thread) so the browser's
+//! main thread only needs to create Blob URLs from the pre-encoded
+//! bytes — a near-instant operation.
 //!
-//! Running the pipeline in a worker keeps the browser's main thread
-//! free for UI updates, animations, and user interaction.
+//! Vector data (polylines, dimensions) is sent as a small JSON string.
+//! Raster data is sent as pre-encoded PNG `Uint8Array` buffers.
 
-use mujou_pipeline::{Dimensions, Polyline, StagedResult};
+use image::ImageEncoder;
+use mujou_pipeline::{Dimensions, GrayImage, Polyline, StagedResult};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 /// The vector (non-raster) portion of a `StagedResult`, serialized as
-/// JSON. Raster images are sent separately as raw `Uint8Array` buffers.
+/// JSON. Raster images are sent separately as pre-encoded PNG buffers.
 #[derive(Serialize, Deserialize)]
 pub struct VectorResult {
     pub contours: Vec<Polyline>,
@@ -33,16 +33,18 @@ pub struct VectorResult {
 /// - `imageBytes`: `Uint8Array` containing the raw image file bytes
 /// - `configJson`: `String` containing JSON-serialized `PipelineConfig`
 /// - `generation`: `f64` generation counter (passed through to response)
+/// - `lightBg`, `lightFg`: `String` — hex RGB for light theme (e.g. "f5f5f5,1a1a1a")
+/// - `darkBg`, `darkFg`: `String` — hex RGB for dark theme
 ///
 /// On success the worker responds with a JS object containing:
 /// - `generation`: `f64` matching the request generation
 /// - `ok`: `true`
 /// - `vectorJson`: `String` — JSON-serialized `VectorResult`
-/// - `originalWidth`, `originalHeight`: `f64` — RGBA image dimensions
-/// - `originalPixels`: `Uint8Array` — raw RGBA pixel data
-/// - `grayscaleWidth`, `grayscaleHeight`, `grayscalePixels`
-/// - `blurredWidth`, `blurredHeight`, `blurredPixels`
-/// - `edgesWidth`, `edgesHeight`, `edgesPixels`
+/// - `originalPng`: `Uint8Array` — pre-encoded RGBA PNG
+/// - `grayscalePng`: `Uint8Array` — pre-encoded grayscale PNG
+/// - `blurredPng`: `Uint8Array` — pre-encoded grayscale PNG
+/// - `edgesLightPng`: `Uint8Array` — themed edge PNG (light mode)
+/// - `edgesDarkPng`: `Uint8Array` — themed edge PNG (dark mode)
 ///
 /// On error the worker responds with:
 /// - `generation`: `f64`
@@ -71,9 +73,13 @@ pub fn worker_main() {
 
 /// Handle an incoming message from the main thread.
 ///
-/// Extracts the image bytes and config, runs the pipeline, and posts
-/// the result back.
-#[allow(clippy::expect_used, clippy::needless_pass_by_value)]
+/// Extracts the image bytes, config, and theme colors, runs the
+/// pipeline, encodes PNGs, and posts the result back.
+#[allow(
+    clippy::expect_used,
+    clippy::needless_pass_by_value,
+    clippy::similar_names
+)]
 fn handle_message(event: web_sys::MessageEvent) {
     let data = event.data();
 
@@ -98,6 +104,10 @@ fn handle_message(event: web_sys::MessageEvent) {
         .as_f64()
         .expect_throw("generation is not a number");
 
+    // Extract theme colors for edge image rendering.
+    let (light_bg, light_fg) = (get_rgb(&data, "lightBg"), get_rgb(&data, "lightFg"));
+    let (dark_bg, dark_fg) = (get_rgb(&data, "darkBg"), get_rgb(&data, "darkFg"));
+
     // Deserialize the pipeline config.
     let config: mujou_pipeline::PipelineConfig = match serde_json::from_str(&config_json) {
         Ok(c) => c,
@@ -111,7 +121,9 @@ fn handle_message(event: web_sys::MessageEvent) {
     let outcome = mujou_pipeline::process_staged(&image_bytes, &config);
 
     match outcome {
-        Ok(staged) => post_success_response(generation, &staged),
+        Ok(staged) => {
+            post_success_response(generation, &staged, light_bg, light_fg, dark_bg, dark_fg);
+        }
         Err(e) => {
             let error_json = serde_json::to_string(&e)
                 .unwrap_or_else(|ser_err| format!("\"serialization error: {ser_err}\""));
@@ -120,12 +132,39 @@ fn handle_message(event: web_sys::MessageEvent) {
     }
 }
 
+/// Extract an RGB color triple from a JS object field.
+///
+/// The field contains a hex string like `"f5f5f5"` (no `#` prefix).
+/// Returns `[0, 0, 0]` if the field is missing or malformed.
+#[allow(clippy::cast_possible_truncation)]
+fn get_rgb(data: &JsValue, key: &str) -> [u8; 3] {
+    let hex = js_sys::Reflect::get(data, &JsValue::from_str(key))
+        .ok()
+        .and_then(|v| v.as_string())
+        .unwrap_or_default();
+    if hex.len() != 6 {
+        return [0, 0, 0];
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
+    let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
+    let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
+    [r, g, b]
+}
+
 /// Post a successful pipeline result back to the main thread.
 ///
-/// Raster images are sent as raw `Uint8Array` buffers (zero JSON
-/// overhead). Vector data is sent as a small JSON string.
+/// All raster images are pre-encoded as PNG bytes so the main thread
+/// only needs to create Blob URLs (near-instant).
 #[allow(clippy::expect_used)]
-fn post_success_response(generation: f64, staged: &StagedResult) {
+#[allow(clippy::similar_names)]
+fn post_success_response(
+    generation: f64,
+    staged: &StagedResult,
+    light_bg: [u8; 3],
+    light_fg: [u8; 3],
+    dark_bg: [u8; 3],
+    dark_fg: [u8; 3],
+) {
     let vector = VectorResult {
         contours: staged.contours.clone(),
         simplified: staged.simplified.clone(),
@@ -142,6 +181,13 @@ fn post_success_response(generation: f64, staged: &StagedResult) {
         }
     };
 
+    // Encode all raster stages to PNG.
+    let original_png = encode_rgba_png(&staged.original);
+    let grayscale_png = encode_gray_png(&staged.grayscale);
+    let blurred_png = encode_gray_png(&staged.blurred);
+    let edges_light_png = encode_themed_edge_png(&staged.edges, light_bg, light_fg);
+    let edges_dark_png = encode_themed_edge_png(&staged.edges, dark_bg, dark_fg);
+
     let response = js_sys::Object::new();
     let set = |key: &str, val: &JsValue| {
         js_sys::Reflect::set(&response, &JsValue::from_str(key), val)
@@ -152,57 +198,26 @@ fn post_success_response(generation: f64, staged: &StagedResult) {
     set("ok", &JsValue::from_bool(true));
     set("vectorJson", &JsValue::from_str(&vector_json));
 
-    // Raster images as raw Uint8Array buffers with dimensions.
+    // Pre-encoded PNG buffers.
     set(
-        "originalWidth",
-        &JsValue::from_f64(f64::from(staged.original.width())),
+        "originalPng",
+        &js_sys::Uint8Array::from(original_png.as_slice()),
     );
     set(
-        "originalHeight",
-        &JsValue::from_f64(f64::from(staged.original.height())),
+        "grayscalePng",
+        &js_sys::Uint8Array::from(grayscale_png.as_slice()),
     );
     set(
-        "originalPixels",
-        &js_sys::Uint8Array::from(staged.original.as_raw().as_slice()),
-    );
-
-    set(
-        "grayscaleWidth",
-        &JsValue::from_f64(f64::from(staged.grayscale.width())),
+        "blurredPng",
+        &js_sys::Uint8Array::from(blurred_png.as_slice()),
     );
     set(
-        "grayscaleHeight",
-        &JsValue::from_f64(f64::from(staged.grayscale.height())),
+        "edgesLightPng",
+        &js_sys::Uint8Array::from(edges_light_png.as_slice()),
     );
     set(
-        "grayscalePixels",
-        &js_sys::Uint8Array::from(staged.grayscale.as_raw().as_slice()),
-    );
-
-    set(
-        "blurredWidth",
-        &JsValue::from_f64(f64::from(staged.blurred.width())),
-    );
-    set(
-        "blurredHeight",
-        &JsValue::from_f64(f64::from(staged.blurred.height())),
-    );
-    set(
-        "blurredPixels",
-        &js_sys::Uint8Array::from(staged.blurred.as_raw().as_slice()),
-    );
-
-    set(
-        "edgesWidth",
-        &JsValue::from_f64(f64::from(staged.edges.width())),
-    );
-    set(
-        "edgesHeight",
-        &JsValue::from_f64(f64::from(staged.edges.height())),
-    );
-    set(
-        "edgesPixels",
-        &js_sys::Uint8Array::from(staged.edges.as_raw().as_slice()),
+        "edgesDarkPng",
+        &js_sys::Uint8Array::from(edges_dark_png.as_slice()),
     );
 
     let global: web_sys::DedicatedWorkerGlobalScope = js_sys::global()
@@ -211,6 +226,89 @@ fn post_success_response(generation: f64, staged: &StagedResult) {
     global
         .post_message(&response)
         .expect_throw("failed to postMessage");
+}
+
+/// Encode an RGBA image as PNG bytes.
+fn encode_rgba_png(image: &mujou_pipeline::RgbaImage) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+    // If encoding fails, return empty vec; main thread will show error.
+    let _ = encoder.write_image(
+        image.as_raw(),
+        image.width(),
+        image.height(),
+        image::ExtendedColorType::Rgba8,
+    );
+    buf
+}
+
+/// Encode a grayscale image as PNG bytes.
+fn encode_gray_png(image: &GrayImage) -> Vec<u8> {
+    let mut buf = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+    let _ = encoder.write_image(
+        image.as_raw(),
+        image.width(),
+        image.height(),
+        image::ExtendedColorType::L8,
+    );
+    buf
+}
+
+/// Encode a binary edge image as a themed RGB PNG.
+///
+/// Applies soft dilation for visibility at small sizes, then maps
+/// pixel values to the given foreground/background colors.
+fn encode_themed_edge_png(image: &GrayImage, bg: [u8; 3], fg: [u8; 3]) -> Vec<u8> {
+    // Soft-dilate edge pixels so thin lines survive smooth downscaling.
+    let dilated = dilate_soft(image);
+
+    // Map grayscale pixels to RGB using bg/fg colors.
+    let (w, h) = (dilated.width(), dilated.height());
+    let mut rgb_buf = Vec::with_capacity((w * h * 3) as usize);
+    for p in dilated.pixels() {
+        let v = p.0[0];
+        for c in 0..3 {
+            let color = u16::from(bg[c]) * u16::from(255 - v) + u16::from(fg[c]) * u16::from(v);
+            #[expect(clippy::cast_possible_truncation)]
+            rgb_buf.push((color / 255) as u8);
+        }
+    }
+
+    // Encode RGB buffer → PNG bytes.
+    let mut buf = Vec::new();
+    let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+    let _ = encoder.write_image(&rgb_buf, w, h, image::ExtendedColorType::Rgb8);
+    buf
+}
+
+/// Soft-dilate a binary image to approximate 1.25 px stroke width.
+///
+/// Edge pixels (255) are kept at full intensity. Their four cardinal
+/// neighbors are set to quarter intensity (64) if they are not already
+/// foreground. The color mapper's linear interpolation then renders
+/// those fringe pixels as a 25% blend of bg/fg, giving each 1 px
+/// edge line a visual weight of roughly 1.25 px after smooth browser
+/// downscaling.
+fn dilate_soft(image: &GrayImage) -> GrayImage {
+    let (w, h) = (image.width(), image.height());
+    GrayImage::from_fn(w, h, |x, y| {
+        if image.get_pixel(x, y).0[0] == 255 {
+            return image::Luma([255]);
+        }
+        let neighbors: [(u32, u32); 4] = [
+            (x.wrapping_sub(1), y),
+            (x + 1, y),
+            (x, y.wrapping_sub(1)),
+            (x, y + 1),
+        ];
+        for (nx, ny) in neighbors {
+            if nx < w && ny < h && image.get_pixel(nx, ny).0[0] == 255 {
+                return image::Luma([64]);
+            }
+        }
+        image::Luma([0])
+    })
 }
 
 /// Post an error response back to the main thread.

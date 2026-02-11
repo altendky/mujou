@@ -12,4 +12,4 @@ pub mod worker;
 
 pub use components::{ExportPanel, FileUpload, Filmstrip, Preview, StageControls, StagePreview};
 pub use stage::StageId;
-pub use worker::PipelineWorker;
+pub use worker::{PipelineWorker, WorkerResult};

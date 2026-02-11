@@ -1,25 +1,23 @@
 //! Web worker communication for off-main-thread pipeline processing.
 //!
 //! [`PipelineWorker`] wraps a `web_sys::Worker` running the
-//! `mujou-worker` WASM module. It sends image bytes + config to the
-//! worker via `postMessage` and receives the result back.
+//! `mujou-worker` WASM module. It sends image bytes, config, and theme
+//! colors to the worker via `postMessage` and receives pre-encoded PNG
+//! bytes + vector data back.
 //!
-//! Raster images are transferred as raw `Uint8Array` buffers to avoid
-//! the catastrophic overhead of JSON-encoding megabytes of pixel data.
-//! Only vector data (polylines, dimensions) is JSON-serialized.
-//!
-//! The worker is created from embedded JS + WASM blobs, so no extra
-//! static files need to be served by the dev server.
+//! PNG encoding happens entirely in the worker. The main thread only
+//! creates Blob URLs from the pre-encoded bytes — a near-instant
+//! operation that doesn't block the UI.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mujou_pipeline::{
-    Dimensions, GrayImage, PipelineConfig, PipelineError, Polyline, RgbaImage, StagedResult,
-};
+use mujou_pipeline::{Dimensions, PipelineConfig, PipelineError, Polyline};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+
+use crate::raster;
 
 /// The vector (non-raster) portion of a `StagedResult`, matching the
 /// worker's `VectorResult` struct.
@@ -30,6 +28,43 @@ struct VectorResult {
     joined: Polyline,
     masked: Option<Polyline>,
     dimensions: Dimensions,
+}
+
+/// Pre-rendered pipeline result with Blob URLs ready for `<img src>`.
+///
+/// All raster stages are pre-encoded as PNG in the worker thread.
+/// The main thread creates Blob URLs from the PNG bytes (near-instant).
+/// Blob URLs are automatically revoked when this struct is dropped.
+pub struct WorkerResult {
+    /// Blob URL for the original RGBA image.
+    pub original_url: raster::CachedBlobUrl,
+    /// Blob URL for the grayscale image.
+    pub grayscale_url: raster::CachedBlobUrl,
+    /// Blob URL for the blurred image.
+    pub blur_url: raster::CachedBlobUrl,
+    /// Blob URL for edges in light theme.
+    pub edges_light_url: raster::CachedBlobUrl,
+    /// Blob URL for edges in dark theme.
+    pub edges_dark_url: raster::CachedBlobUrl,
+    /// Contour polylines.
+    pub contours: Vec<Polyline>,
+    /// Simplified polylines.
+    pub simplified: Vec<Polyline>,
+    /// Joined single polyline.
+    pub joined: Polyline,
+    /// Masked polyline (if circular mask was applied).
+    pub masked: Option<Polyline>,
+    /// Image dimensions.
+    pub dimensions: Dimensions,
+}
+
+impl WorkerResult {
+    /// The final output polyline: masked if a circular mask was applied,
+    /// otherwise the joined path.
+    #[must_use]
+    pub fn final_polyline(&self) -> &Polyline {
+        self.masked.as_ref().unwrap_or(&self.joined)
+    }
 }
 
 /// A pipeline worker that runs `process_staged` in a dedicated web worker.
@@ -67,8 +102,10 @@ impl PipelineWorker {
 
     /// Run the pipeline in the worker.
     ///
-    /// Sends image bytes and config to the worker, returning a future
-    /// that resolves when the worker posts the result back.
+    /// Sends image bytes, config, and theme colors to the worker,
+    /// returning a future that resolves when the worker posts the
+    /// result back. All PNG encoding happens in the worker; the
+    /// returned [`WorkerResult`] contains ready-to-use Blob URLs.
     ///
     /// The `generation` parameter is passed through to the response so
     /// the caller can detect stale results.
@@ -85,12 +122,19 @@ impl PipelineWorker {
         image_bytes: &[u8],
         config: &PipelineConfig,
         generation: f64,
-    ) -> Result<StagedResult, PipelineError> {
+    ) -> Result<WorkerResult, PipelineError> {
         let config_json = serde_json::to_string(config).map_err(|e| {
             PipelineError::InvalidConfig(format!("failed to serialize config: {e}"))
         })?;
 
-        // Create a JS message object: { imageBytes: Uint8Array, configJson: string, generation: f64 }
+        // Read theme colors from the DOM before dispatching to the worker.
+        // The worker can't access the DOM, so we send the colors as part
+        // of the request.
+        let colors = raster::read_both_preview_colors().map_err(|e| {
+            PipelineError::InvalidConfig(format!("failed to read theme colors: {e}"))
+        })?;
+
+        // Create a JS message object.
         let message = js_sys::Object::new();
         let image_array = js_sys::Uint8Array::from(image_bytes);
         js_sys::Reflect::set(&message, &JsValue::from_str("imageBytes"), &image_array)
@@ -108,8 +152,14 @@ impl PipelineWorker {
         )
         .map_err(|_| PipelineError::InvalidConfig("failed to set generation".into()))?;
 
+        // Theme colors as hex strings (no # prefix).
+        set_rgb(&message, "lightBg", colors.light.bg)?;
+        set_rgb(&message, "lightFg", colors.light.fg)?;
+        set_rgb(&message, "darkBg", colors.dark.bg)?;
+        set_rgb(&message, "darkFg", colors.dark.fg)?;
+
         // Create a promise that resolves when the worker posts a message back.
-        let result = Rc::new(RefCell::new(None::<Result<StagedResult, PipelineError>>));
+        let result = Rc::new(RefCell::new(None::<Result<WorkerResult, PipelineError>>));
         let result_clone = Rc::clone(&result);
 
         let (promise, resolve, reject) = new_promise();
@@ -156,7 +206,6 @@ impl PipelineWorker {
         }
 
         // Prevent closures from being dropped while we await.
-        // They will be cleaned up when the future completes.
         let _onmessage_guard = onmessage;
         let _onerror_guard = onerror;
 
@@ -198,13 +247,20 @@ impl PipelineWorker {
     }
 }
 
-/// Decode a worker response into a `Result<StagedResult, PipelineError>`.
+/// Set an RGB hex string field on a JS object.
+fn set_rgb(obj: &js_sys::Object, key: &str, rgb: [u8; 3]) -> Result<(), PipelineError> {
+    let hex = format!("{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2]);
+    js_sys::Reflect::set(obj, &JsValue::from_str(key), &JsValue::from_str(&hex))
+        .map_err(|_| PipelineError::InvalidConfig(format!("failed to set {key}")))?;
+    Ok(())
+}
+
+/// Decode a worker response into a `Result<WorkerResult, PipelineError>`.
 ///
-/// The response uses a mixed protocol:
-/// - `ok: bool` — whether the pipeline succeeded
-/// - On success: vector data as JSON + raster images as raw buffers
-/// - On error: `errorJson` as a JSON-serialized `PipelineError`
-fn decode_response(data: &JsValue) -> Result<StagedResult, PipelineError> {
+/// The response contains pre-encoded PNG buffers for raster stages
+/// and JSON for vector data. We create Blob URLs from the PNG bytes
+/// (near-instant) and return the complete `WorkerResult`.
+fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
     let ok = js_sys::Reflect::get(data, &JsValue::from_str("ok"))
         .ok()
         .and_then(|v| v.as_bool())
@@ -226,7 +282,7 @@ fn decode_response(data: &JsValue) -> Result<StagedResult, PipelineError> {
         );
     }
 
-    // Success response: decode vector JSON + raster buffers.
+    // Decode vector JSON.
     let vector_json = js_sys::Reflect::get(data, &JsValue::from_str("vectorJson"))
         .ok()
         .and_then(|v| v.as_string())
@@ -236,17 +292,19 @@ fn decode_response(data: &JsValue) -> Result<StagedResult, PipelineError> {
         PipelineError::InvalidConfig(format!("failed to deserialize vector data: {e}"))
     })?;
 
-    // Decode raster images from raw Uint8Array buffers.
-    let original = decode_rgba_image(data, "original")?;
-    let grayscale = decode_gray_image(data, "grayscale")?;
-    let blurred = decode_gray_image(data, "blurred")?;
-    let edges = decode_gray_image(data, "edges")?;
+    // Create Blob URLs from pre-encoded PNG bytes (near-instant).
+    let original_url = png_to_blob_url(data, "originalPng")?;
+    let grayscale_url = png_to_blob_url(data, "grayscalePng")?;
+    let blur_url = png_to_blob_url(data, "blurredPng")?;
+    let edges_light_url = png_to_blob_url(data, "edgesLightPng")?;
+    let edges_dark_url = png_to_blob_url(data, "edgesDarkPng")?;
 
-    Ok(StagedResult {
-        original,
-        grayscale,
-        blurred,
-        edges,
+    Ok(WorkerResult {
+        original_url,
+        grayscale_url,
+        blur_url,
+        edges_light_url,
+        edges_dark_url,
         contours: vector.contours,
         simplified: vector.simplified,
         joined: vector.joined,
@@ -255,44 +313,26 @@ fn decode_response(data: &JsValue) -> Result<StagedResult, PipelineError> {
     })
 }
 
-/// Decode an RGBA image from the response fields `{prefix}Width`,
-/// `{prefix}Height`, `{prefix}Pixels`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn decode_rgba_image(data: &JsValue, prefix: &str) -> Result<RgbaImage, PipelineError> {
-    let width = get_f64(data, &format!("{prefix}Width"))? as u32;
-    let height = get_f64(data, &format!("{prefix}Height"))? as u32;
-    let pixels = get_uint8_array(data, &format!("{prefix}Pixels"))?;
-    RgbaImage::from_raw(width, height, pixels)
-        .ok_or_else(|| PipelineError::InvalidConfig(format!("invalid {prefix} image dimensions")))
-}
-
-/// Decode a grayscale image from the response fields `{prefix}Width`,
-/// `{prefix}Height`, `{prefix}Pixels`.
-#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-fn decode_gray_image(data: &JsValue, prefix: &str) -> Result<GrayImage, PipelineError> {
-    let width = get_f64(data, &format!("{prefix}Width"))? as u32;
-    let height = get_f64(data, &format!("{prefix}Height"))? as u32;
-    let pixels = get_uint8_array(data, &format!("{prefix}Pixels"))?;
-    GrayImage::from_raw(width, height, pixels)
-        .ok_or_else(|| PipelineError::InvalidConfig(format!("invalid {prefix} image dimensions")))
-}
-
-/// Get a `f64` field from a JS object.
-fn get_f64(data: &JsValue, key: &str) -> Result<f64, PipelineError> {
-    js_sys::Reflect::get(data, &JsValue::from_str(key))
-        .ok()
-        .and_then(|v| v.as_f64())
-        .ok_or_else(|| PipelineError::InvalidConfig(format!("missing or invalid field: {key}")))
-}
-
-/// Get a `Uint8Array` field from a JS object and convert to `Vec<u8>`.
-fn get_uint8_array(data: &JsValue, key: &str) -> Result<Vec<u8>, PipelineError> {
+/// Create a Blob URL from a pre-encoded PNG `Uint8Array` in the response.
+fn png_to_blob_url(data: &JsValue, key: &str) -> Result<raster::CachedBlobUrl, PipelineError> {
     let val = js_sys::Reflect::get(data, &JsValue::from_str(key))
         .map_err(|_| PipelineError::InvalidConfig(format!("missing field: {key}")))?;
     let array: js_sys::Uint8Array = val
         .dyn_into()
         .map_err(|_| PipelineError::InvalidConfig(format!("{key} is not a Uint8Array")))?;
-    Ok(array.to_vec())
+
+    let parts = js_sys::Array::new();
+    parts.push(&array);
+
+    let opts = web_sys::BlobPropertyBag::new();
+    opts.set_type("image/png");
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(&parts, &opts)
+        .map_err(|e| PipelineError::InvalidConfig(format!("Blob creation failed: {e:?}")))?;
+
+    let url = web_sys::Url::create_object_url_with_blob(&blob)
+        .map_err(|e| PipelineError::InvalidConfig(format!("URL creation failed: {e:?}")))?;
+
+    Ok(raster::CachedBlobUrl::new(url))
 }
 
 /// Create a web worker from embedded JS glue and WASM binary.
@@ -322,10 +362,6 @@ fn create_worker(worker_js: &str, worker_wasm: &[u8]) -> web_sys::Worker {
     // 2. Defines the wasm_bindgen JS glue
     // 3. Calls wasm_bindgen(wasm_url) to initialize
     // 4. After init, replays queued messages through the real handler
-    //
-    // This prevents a race condition: the main thread may postMessage
-    // before the worker's WASM module has finished loading and
-    // worker_main() has set up the real onmessage handler.
     let wrapper_js = format!(
         r#"// Worker wrapper — loads embedded wasm_bindgen glue and WASM blob.
 
@@ -366,9 +402,6 @@ wasm_bindgen("{wasm_url}")
     let worker = web_sys::Worker::new(&js_url).expect_throw("failed to create Worker");
 
     // Clean up the Blob URLs (the worker has already fetched them).
-    // Note: we revoke the JS URL but keep the WASM URL alive since
-    // the worker's async init may still be fetching it. The WASM URL
-    // will be leaked but is small (just a blob: reference).
     web_sys::Url::revoke_object_url(&js_url).ok();
 
     worker
