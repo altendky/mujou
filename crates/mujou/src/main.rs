@@ -259,7 +259,9 @@ fn app() -> Element {
             script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
 
             // Header
-            header { class: "px-6 py-4 border-b border-(--border) flex items-center justify-between gap-4",
+            // Extra right padding (pr-16) leaves room for the fixed-position
+            // theme toggle button so the upload button doesn't overlap it.
+            header { class: "pl-6 pr-16 py-4 border-b border-(--border) flex items-center justify-between gap-4",
                 div {
                     h1 { class: "text-2xl title-brand", "mujou" }
                     p { class: "text-(--muted) text-sm",
