@@ -221,11 +221,19 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
         }
     }
 
-    // Clear flags that the host `cargo` (or tools like cargo-llvm-cov)
-    // inject into the environment.  These flags target the *host*
-    // toolchain and are incompatible with the wasm32-unknown-unknown
-    // target that wasm-pack compiles for (e.g. `-C instrument-coverage`
-    // requires `profiler_builtins`, which isn't available for wasm32).
+    // Clear flags and wrappers that the host `cargo` (or tools like
+    // cargo-llvm-cov) inject into the environment.  These target the
+    // *host* toolchain and are incompatible with the wasm32-unknown-unknown
+    // target that wasm-pack compiles for.
+    //
+    // `RUSTFLAGS` / `CARGO_ENCODED_RUSTFLAGS` -- may contain host-only
+    //   codegen flags (e.g. `-C instrument-coverage`).
+    //
+    // `RUSTC_WRAPPER` / `RUSTC_WORKSPACE_WRAPPER` -- cargo-llvm-cov
+    //   installs itself as a `RUSTC_WRAPPER` that injects
+    //   `-C instrument-coverage --cfg=coverage` into every rustc
+    //   invocation.  The wasm32 target lacks `profiler_builtins`, so the
+    //   wrapper must not be inherited by the wasm-pack sub-build.
     let status = Command::new("wasm-pack")
         .args([
             "build",
@@ -238,6 +246,8 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
         ])
         .env_remove("RUSTFLAGS")
         .env_remove("CARGO_ENCODED_RUSTFLAGS")
+        .env_remove("RUSTC_WRAPPER")
+        .env_remove("RUSTC_WORKSPACE_WRAPPER")
         .status()
         .unwrap_or_else(|e| {
             panic!(
