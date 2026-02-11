@@ -346,6 +346,7 @@ fn render_select(
                 for (value, display) in options.iter() {
                     option {
                         value: "{value}",
+                        selected: value == &selected,
                         "{display}"
                     }
                 }
