@@ -3,23 +3,51 @@
 //! This crate compiles to a standalone WASM module that runs inside a
 //! `Worker`. It receives image bytes and a `PipelineConfig` via
 //! `postMessage`, calls `mujou_pipeline::process_staged`, and posts
-//! the serialized `Result<StagedResult, PipelineError>` back.
+//! the result back.
+//!
+//! Raster images (original, grayscale, blurred, edges) are sent as raw
+//! `Uint8Array` buffers to avoid the massive overhead of JSON-encoding
+//! megabytes of pixel data as number arrays. Vector data (polylines,
+//! dimensions) is sent as a small JSON string.
 //!
 //! Running the pipeline in a worker keeps the browser's main thread
 //! free for UI updates, animations, and user interaction.
 
+use mujou_pipeline::{Dimensions, Polyline, StagedResult};
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
+
+/// The vector (non-raster) portion of a `StagedResult`, serialized as
+/// JSON. Raster images are sent separately as raw `Uint8Array` buffers.
+#[derive(Serialize, Deserialize)]
+pub struct VectorResult {
+    pub contours: Vec<Polyline>,
+    pub simplified: Vec<Polyline>,
+    pub joined: Polyline,
+    pub masked: Option<Polyline>,
+    pub dimensions: Dimensions,
+}
 
 /// Message protocol: the main thread sends a JS object with:
 /// - `imageBytes`: `Uint8Array` containing the raw image file bytes
 /// - `configJson`: `String` containing JSON-serialized `PipelineConfig`
 /// - `generation`: `f64` generation counter (passed through to response)
 ///
-/// The worker responds with a JS object containing:
+/// On success the worker responds with a JS object containing:
 /// - `generation`: `f64` matching the request generation
-/// - `resultJson`: `String` containing JSON-serialized
-///   `Result<StagedResult, PipelineError>`
+/// - `ok`: `true`
+/// - `vectorJson`: `String` — JSON-serialized `VectorResult`
+/// - `originalWidth`, `originalHeight`: `f64` — RGBA image dimensions
+/// - `originalPixels`: `Uint8Array` — raw RGBA pixel data
+/// - `grayscaleWidth`, `grayscaleHeight`, `grayscalePixels`
+/// - `blurredWidth`, `blurredHeight`, `blurredPixels`
+/// - `edgesWidth`, `edgesHeight`, `edgesPixels`
+///
+/// On error the worker responds with:
+/// - `generation`: `f64`
+/// - `ok`: `false`
+/// - `errorJson`: `String` — JSON-serialized `PipelineError`
 ///
 /// # Worker entry point
 ///
@@ -82,29 +110,100 @@ fn handle_message(event: web_sys::MessageEvent) {
     // Run the pipeline (synchronous — blocks this worker thread only).
     let outcome = mujou_pipeline::process_staged(&image_bytes, &config);
 
-    // Serialize the result.
-    let result_json = match serde_json::to_string(&outcome) {
+    match outcome {
+        Ok(staged) => post_success_response(generation, &staged),
+        Err(e) => {
+            let error_json = serde_json::to_string(&e)
+                .unwrap_or_else(|ser_err| format!("\"serialization error: {ser_err}\""));
+            post_error_json(generation, &error_json);
+        }
+    }
+}
+
+/// Post a successful pipeline result back to the main thread.
+///
+/// Raster images are sent as raw `Uint8Array` buffers (zero JSON
+/// overhead). Vector data is sent as a small JSON string.
+#[allow(clippy::expect_used)]
+fn post_success_response(generation: f64, staged: &StagedResult) {
+    let vector = VectorResult {
+        contours: staged.contours.clone(),
+        simplified: staged.simplified.clone(),
+        joined: staged.joined.clone(),
+        masked: staged.masked.clone(),
+        dimensions: staged.dimensions,
+    };
+
+    let vector_json = match serde_json::to_string(&vector) {
         Ok(json) => json,
         Err(e) => {
-            post_error_response(generation, &format!("failed to serialize result: {e}"));
+            post_error_response(generation, &format!("failed to serialize vector data: {e}"));
             return;
         }
     };
 
-    // Post the result back to the main thread.
     let response = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &response,
-        &JsValue::from_str("generation"),
-        &JsValue::from_f64(generation),
-    )
-    .expect_throw("failed to set generation");
-    js_sys::Reflect::set(
-        &response,
-        &JsValue::from_str("resultJson"),
-        &JsValue::from_str(&result_json),
-    )
-    .expect_throw("failed to set resultJson");
+    let set = |key: &str, val: &JsValue| {
+        js_sys::Reflect::set(&response, &JsValue::from_str(key), val)
+            .expect_throw("failed to set response field");
+    };
+
+    set("generation", &JsValue::from_f64(generation));
+    set("ok", &JsValue::from_bool(true));
+    set("vectorJson", &JsValue::from_str(&vector_json));
+
+    // Raster images as raw Uint8Array buffers with dimensions.
+    set(
+        "originalWidth",
+        &JsValue::from_f64(f64::from(staged.original.width())),
+    );
+    set(
+        "originalHeight",
+        &JsValue::from_f64(f64::from(staged.original.height())),
+    );
+    set(
+        "originalPixels",
+        &js_sys::Uint8Array::from(staged.original.as_raw().as_slice()),
+    );
+
+    set(
+        "grayscaleWidth",
+        &JsValue::from_f64(f64::from(staged.grayscale.width())),
+    );
+    set(
+        "grayscaleHeight",
+        &JsValue::from_f64(f64::from(staged.grayscale.height())),
+    );
+    set(
+        "grayscalePixels",
+        &js_sys::Uint8Array::from(staged.grayscale.as_raw().as_slice()),
+    );
+
+    set(
+        "blurredWidth",
+        &JsValue::from_f64(f64::from(staged.blurred.width())),
+    );
+    set(
+        "blurredHeight",
+        &JsValue::from_f64(f64::from(staged.blurred.height())),
+    );
+    set(
+        "blurredPixels",
+        &js_sys::Uint8Array::from(staged.blurred.as_raw().as_slice()),
+    );
+
+    set(
+        "edgesWidth",
+        &JsValue::from_f64(f64::from(staged.edges.width())),
+    );
+    set(
+        "edgesHeight",
+        &JsValue::from_f64(f64::from(staged.edges.height())),
+    );
+    set(
+        "edgesPixels",
+        &js_sys::Uint8Array::from(staged.edges.as_raw().as_slice()),
+    );
 
     let global: web_sys::DedicatedWorkerGlobalScope = js_sys::global()
         .dyn_into()
@@ -114,30 +213,33 @@ fn handle_message(event: web_sys::MessageEvent) {
         .expect_throw("failed to postMessage");
 }
 
-/// Post an error response back to the main thread when we can't even
-/// serialize the pipeline result properly.
+/// Post an error response back to the main thread.
 fn post_error_response(generation: f64, error_msg: &str) {
-    let error_result: Result<mujou_pipeline::StagedResult, mujou_pipeline::PipelineError> = Err(
-        mujou_pipeline::PipelineError::InvalidConfig(error_msg.to_string()),
+    let error = mujou_pipeline::PipelineError::InvalidConfig(error_msg.to_string());
+    let error_json = serde_json::to_string(&error).unwrap_or_else(|_| "\"unknown error\"".into());
+    post_error_json(generation, &error_json);
+}
+
+/// Post a pre-serialized error JSON back to the main thread.
+fn post_error_json(generation: f64, error_json: &str) {
+    let response = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &response,
+        &JsValue::from_str("generation"),
+        &JsValue::from_f64(generation),
+    );
+    let _ = js_sys::Reflect::set(
+        &response,
+        &JsValue::from_str("ok"),
+        &JsValue::from_bool(false),
+    );
+    let _ = js_sys::Reflect::set(
+        &response,
+        &JsValue::from_str("errorJson"),
+        &JsValue::from_str(error_json),
     );
 
-    // Best effort — if this also fails to serialize, we're in trouble,
-    // but the main thread's generation counter will handle the timeout.
-    if let Ok(json) = serde_json::to_string(&error_result) {
-        let response = js_sys::Object::new();
-        let _ = js_sys::Reflect::set(
-            &response,
-            &JsValue::from_str("generation"),
-            &JsValue::from_f64(generation),
-        );
-        let _ = js_sys::Reflect::set(
-            &response,
-            &JsValue::from_str("resultJson"),
-            &JsValue::from_str(&json),
-        );
-
-        if let Ok(global) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() {
-            let _ = global.post_message(&response);
-        }
+    if let Ok(global) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() {
+        let _ = global.post_message(&response);
     }
 }

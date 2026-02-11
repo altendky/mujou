@@ -2,8 +2,11 @@
 //!
 //! [`PipelineWorker`] wraps a `web_sys::Worker` running the
 //! `mujou-worker` WASM module. It sends image bytes + config to the
-//! worker via `postMessage` and receives the serialized
-//! `Result<StagedResult, PipelineError>` back.
+//! worker via `postMessage` and receives the result back.
+//!
+//! Raster images are transferred as raw `Uint8Array` buffers to avoid
+//! the catastrophic overhead of JSON-encoding megabytes of pixel data.
+//! Only vector data (polylines, dimensions) is JSON-serialized.
 //!
 //! The worker is created from embedded JS + WASM blobs, so no extra
 //! static files need to be served by the dev server.
@@ -11,9 +14,23 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mujou_pipeline::{PipelineConfig, PipelineError, StagedResult};
+use mujou_pipeline::{
+    Dimensions, GrayImage, PipelineConfig, PipelineError, Polyline, RgbaImage, StagedResult,
+};
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+
+/// The vector (non-raster) portion of a `StagedResult`, matching the
+/// worker's `VectorResult` struct.
+#[derive(Serialize, Deserialize)]
+struct VectorResult {
+    contours: Vec<Polyline>,
+    simplified: Vec<Polyline>,
+    joined: Polyline,
+    masked: Option<Polyline>,
+    dimensions: Dimensions,
+}
 
 /// A pipeline worker that runs `process_staged` in a dedicated web worker.
 ///
@@ -76,12 +93,8 @@ impl PipelineWorker {
         // Create a JS message object: { imageBytes: Uint8Array, configJson: string, generation: f64 }
         let message = js_sys::Object::new();
         let image_array = js_sys::Uint8Array::from(image_bytes);
-        js_sys::Reflect::set(
-            &message,
-            &JsValue::from_str("imageBytes"),
-            &image_array,
-        )
-        .map_err(|_| PipelineError::InvalidConfig("failed to set imageBytes".into()))?;
+        js_sys::Reflect::set(&message, &JsValue::from_str("imageBytes"), &image_array)
+            .map_err(|_| PipelineError::InvalidConfig("failed to set imageBytes".into()))?;
         js_sys::Reflect::set(
             &message,
             &JsValue::from_str("configJson"),
@@ -108,36 +121,18 @@ impl PipelineWorker {
                 let data = event.data();
 
                 // Extract the generation to verify this response matches our request.
-                let resp_generation = js_sys::Reflect::get(&data, &JsValue::from_str("generation"))
-                    .ok()
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(-1.0);
+                let resp_generation =
+                    js_sys::Reflect::get(&data, &JsValue::from_str("generation"))
+                        .ok()
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(-1.0);
 
                 if (resp_generation - generation).abs() > f64::EPSILON {
                     // Stale response — ignore it.
                     return;
                 }
 
-                let result_json = js_sys::Reflect::get(&data, &JsValue::from_str("resultJson"))
-                    .ok()
-                    .and_then(|v| v.as_string());
-
-                let outcome = result_json.map_or_else(
-                    || {
-                        Err(PipelineError::InvalidConfig(
-                            "worker response missing resultJson".into(),
-                        ))
-                    },
-                    |json| {
-                        serde_json::from_str::<Result<StagedResult, PipelineError>>(&json)
-                            .unwrap_or_else(|e| {
-                                Err(PipelineError::InvalidConfig(format!(
-                                    "failed to deserialize worker result: {e}"
-                                )))
-                            })
-                    },
-                );
-
+                let outcome = decode_response(&data);
                 *result_clone.borrow_mut() = Some(outcome);
                 resolve_clone.call0(&JsValue::NULL).ok();
             },
@@ -146,10 +141,7 @@ impl PipelineWorker {
         // Set up error handler.
         let onerror =
             Closure::<dyn FnMut(web_sys::ErrorEvent)>::new(move |event: web_sys::ErrorEvent| {
-                let _ = reject.call1(
-                    &JsValue::NULL,
-                    &JsValue::from_str(&event.message()),
-                );
+                let _ = reject.call1(&JsValue::NULL, &JsValue::from_str(&event.message()));
             });
 
         {
@@ -206,6 +198,103 @@ impl PipelineWorker {
     }
 }
 
+/// Decode a worker response into a `Result<StagedResult, PipelineError>`.
+///
+/// The response uses a mixed protocol:
+/// - `ok: bool` — whether the pipeline succeeded
+/// - On success: vector data as JSON + raster images as raw buffers
+/// - On error: `errorJson` as a JSON-serialized `PipelineError`
+fn decode_response(data: &JsValue) -> Result<StagedResult, PipelineError> {
+    let ok = js_sys::Reflect::get(data, &JsValue::from_str("ok"))
+        .ok()
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if !ok {
+        // Error response.
+        let error_json = js_sys::Reflect::get(data, &JsValue::from_str("errorJson"))
+            .ok()
+            .and_then(|v| v.as_string())
+            .unwrap_or_else(|| "\"unknown worker error\"".into());
+        return serde_json::from_str::<PipelineError>(&error_json).map_or_else(
+            |_| {
+                Err(PipelineError::InvalidConfig(format!(
+                    "worker error (raw): {error_json}"
+                )))
+            },
+            Err,
+        );
+    }
+
+    // Success response: decode vector JSON + raster buffers.
+    let vector_json = js_sys::Reflect::get(data, &JsValue::from_str("vectorJson"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| PipelineError::InvalidConfig("missing vectorJson".into()))?;
+
+    let vector: VectorResult = serde_json::from_str(&vector_json).map_err(|e| {
+        PipelineError::InvalidConfig(format!("failed to deserialize vector data: {e}"))
+    })?;
+
+    // Decode raster images from raw Uint8Array buffers.
+    let original = decode_rgba_image(data, "original")?;
+    let grayscale = decode_gray_image(data, "grayscale")?;
+    let blurred = decode_gray_image(data, "blurred")?;
+    let edges = decode_gray_image(data, "edges")?;
+
+    Ok(StagedResult {
+        original,
+        grayscale,
+        blurred,
+        edges,
+        contours: vector.contours,
+        simplified: vector.simplified,
+        joined: vector.joined,
+        masked: vector.masked,
+        dimensions: vector.dimensions,
+    })
+}
+
+/// Decode an RGBA image from the response fields `{prefix}Width`,
+/// `{prefix}Height`, `{prefix}Pixels`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn decode_rgba_image(data: &JsValue, prefix: &str) -> Result<RgbaImage, PipelineError> {
+    let width = get_f64(data, &format!("{prefix}Width"))? as u32;
+    let height = get_f64(data, &format!("{prefix}Height"))? as u32;
+    let pixels = get_uint8_array(data, &format!("{prefix}Pixels"))?;
+    RgbaImage::from_raw(width, height, pixels)
+        .ok_or_else(|| PipelineError::InvalidConfig(format!("invalid {prefix} image dimensions")))
+}
+
+/// Decode a grayscale image from the response fields `{prefix}Width`,
+/// `{prefix}Height`, `{prefix}Pixels`.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn decode_gray_image(data: &JsValue, prefix: &str) -> Result<GrayImage, PipelineError> {
+    let width = get_f64(data, &format!("{prefix}Width"))? as u32;
+    let height = get_f64(data, &format!("{prefix}Height"))? as u32;
+    let pixels = get_uint8_array(data, &format!("{prefix}Pixels"))?;
+    GrayImage::from_raw(width, height, pixels)
+        .ok_or_else(|| PipelineError::InvalidConfig(format!("invalid {prefix} image dimensions")))
+}
+
+/// Get a `f64` field from a JS object.
+fn get_f64(data: &JsValue, key: &str) -> Result<f64, PipelineError> {
+    js_sys::Reflect::get(data, &JsValue::from_str(key))
+        .ok()
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| PipelineError::InvalidConfig(format!("missing or invalid field: {key}")))
+}
+
+/// Get a `Uint8Array` field from a JS object and convert to `Vec<u8>`.
+fn get_uint8_array(data: &JsValue, key: &str) -> Result<Vec<u8>, PipelineError> {
+    let val = js_sys::Reflect::get(data, &JsValue::from_str(key))
+        .map_err(|_| PipelineError::InvalidConfig(format!("missing field: {key}")))?;
+    let array: js_sys::Uint8Array = val
+        .dyn_into()
+        .map_err(|_| PipelineError::InvalidConfig(format!("{key} is not a Uint8Array")))?;
+    Ok(array.to_vec())
+}
+
 /// Create a web worker from embedded JS glue and WASM binary.
 ///
 /// 1. Creates a Blob URL for the WASM binary
@@ -220,11 +309,13 @@ fn create_worker(worker_js: &str, worker_wasm: &[u8]) -> web_sys::Worker {
     wasm_blob_parts.push(&wasm_array.buffer());
     let wasm_blob_opts = web_sys::BlobPropertyBag::new();
     wasm_blob_opts.set_type("application/wasm");
-    let wasm_blob =
-        web_sys::Blob::new_with_buffer_source_sequence_and_options(&wasm_blob_parts, &wasm_blob_opts)
-            .expect_throw("failed to create WASM Blob");
-    let wasm_url =
-        web_sys::Url::create_object_url_with_blob(&wasm_blob).expect_throw("failed to create WASM Blob URL");
+    let wasm_blob = web_sys::Blob::new_with_buffer_source_sequence_and_options(
+        &wasm_blob_parts,
+        &wasm_blob_opts,
+    )
+    .expect_throw("failed to create WASM Blob");
+    let wasm_url = web_sys::Url::create_object_url_with_blob(&wasm_blob)
+        .expect_throw("failed to create WASM Blob URL");
 
     // Create a wrapper script that:
     // 1. Queues any messages that arrive before WASM is ready
@@ -268,8 +359,8 @@ wasm_bindgen("{wasm_url}")
     let js_blob =
         web_sys::Blob::new_with_str_sequence_and_options(&js_blob_parts, &js_blob_opts)
             .expect_throw("failed to create JS Blob");
-    let js_url =
-        web_sys::Url::create_object_url_with_blob(&js_blob).expect_throw("failed to create JS Blob URL");
+    let js_url = web_sys::Url::create_object_url_with_blob(&js_blob)
+        .expect_throw("failed to create JS Blob URL");
 
     // Create the worker.
     let worker = web_sys::Worker::new(&js_url).expect_throw("failed to create Worker");

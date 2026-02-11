@@ -78,7 +78,6 @@ fn app() -> Element {
     let mut selected_stage = use_signal(|| StageId::Masked);
 
     // Elapsed time tracking for the processing indicator.
-    let mut processing_start_ms = use_signal(|| 0.0_f64);
     let mut elapsed_ms = use_signal(|| 0.0_f64);
 
     // The "committed" config is what the pipeline actually runs with.
@@ -121,16 +120,37 @@ fn app() -> Element {
 
         processing.set(true);
         error.set(None);
-        processing_start_ms.set(js_sys::Date::now());
         elapsed_ms.set(0.0);
 
         let worker = Rc::clone(&worker_for_effect);
         spawn(async move {
+            let start = js_sys::Date::now();
+
+            // Spawn a timer task that updates elapsed_ms every 100ms.
+            // This lives alongside the worker call — both are async
+            // tasks on the single-threaded WASM executor, interleaving
+            // via the event loop.
+            let timer_running = Rc::new(std::cell::Cell::new(true));
+            let timer_flag = Rc::clone(&timer_running);
+            spawn(async move {
+                while timer_flag.get() {
+                    gloo_timers::future::TimeoutFuture::new(ELAPSED_UPDATE_MS).await;
+                    if !timer_flag.get() {
+                        break;
+                    }
+                    elapsed_ms.set(js_sys::Date::now() - start);
+                }
+            });
+
             // Run the pipeline in the web worker — this .await yields
             // to the browser event loop so animations and cancel clicks
             // keep working.
             #[allow(clippy::cast_precision_loss)]
             let outcome = worker.run(&bytes, &cfg, my_generation as f64).await;
+
+            // Stop the timer.
+            timer_running.set(false);
+            elapsed_ms.set(js_sys::Date::now() - start);
 
             // If another run was triggered while we were processing,
             // discard this stale result silently.
@@ -150,27 +170,6 @@ fn app() -> Element {
             }
 
             processing.set(false);
-        });
-    });
-
-    // --- Elapsed time update effect ---
-    // While processing, update the elapsed time display every 100ms.
-    use_effect(move || {
-        if !processing() {
-            return;
-        }
-
-        let start = *processing_start_ms.peek();
-        spawn(async move {
-            loop {
-                gloo_timers::future::TimeoutFuture::new(ELAPSED_UPDATE_MS).await;
-
-                if !*processing.peek() {
-                    break;
-                }
-
-                elapsed_ms.set(js_sys::Date::now() - start);
-            }
         });
     });
 
