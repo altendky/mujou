@@ -125,8 +125,10 @@ fn handle_message(event: web_sys::MessageEvent) {
             post_success_response(generation, &staged, light_bg, light_fg, dark_bg, dark_fg);
         }
         Err(e) => {
-            let error_json = serde_json::to_string(&e)
-                .unwrap_or_else(|ser_err| format!("\"serialization error: {ser_err}\""));
+            let error_json = serde_json::to_string(&e).unwrap_or_else(|ser_err| {
+                serde_json::to_string(&format!("serialization error: {ser_err}"))
+                    .unwrap_or_else(|_| "\"unknown error\"".into())
+            });
             post_error_json(generation, &error_json);
         }
     }
