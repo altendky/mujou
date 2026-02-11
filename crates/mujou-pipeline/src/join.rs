@@ -320,6 +320,11 @@ fn emit_reversed_and_index(output: &mut Vec<Point>, grid: &mut SpatialGrid, pts:
 /// neighbourhood in `cell_to_samples`. Each candidate sample found there
 /// is re-queried against the current grid; if the new distance is better
 /// than the cached value the cache entry is replaced.
+///
+/// This is a heuristic: candidates whose samples are more than 1 cell
+/// away from the emitted points may retain stale (higher) cached
+/// distances. This affects only ordering quality, not correctness — a
+/// stale entry delays but never skips a candidate.
 fn update_nearby_caches(
     emitted_pts: &[Point],
     grid: &SpatialGrid,
