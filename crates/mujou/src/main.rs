@@ -259,10 +259,15 @@ fn app() -> Element {
             script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
 
             // Header
-            header { class: "px-6 py-4 border-b border-(--border)",
-                h1 { class: "text-2xl title-brand", "mujou" }
-                p { class: "text-(--muted) text-sm",
-                    "Image to vector path converter for sand tables and CNC devices"
+            header { class: "px-6 py-4 border-b border-(--border) flex items-center justify-between gap-4",
+                div {
+                    h1 { class: "text-2xl title-brand", "mujou" }
+                    p { class: "text-(--muted) text-sm",
+                        "Image to vector path converter for sand tables and CNC devices"
+                    }
+                }
+                FileUpload {
+                    on_upload: on_upload,
                 }
             }
 
@@ -374,12 +379,7 @@ fn app() -> Element {
                 }
             }
 
-            // Footer: Upload zone
-            div { class: "px-6 pb-6",
-                FileUpload {
-                    on_upload: on_upload,
-                }
-            }
+
         }
     }
 }
