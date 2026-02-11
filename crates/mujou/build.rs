@@ -188,27 +188,39 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
     let worker_crate = workspace_root.join("crates/mujou-worker");
     let worker_pkg_dir = out_dir.join("worker-pkg");
 
-    // Rerun when the worker crate source changes.
+    let pipeline_crate = workspace_root.join("crates/mujou-pipeline");
+
+    // Rerun when the worker crate or its pipeline dependency changes.
     register_rs_sources(&worker_crate.join("src"));
     println!(
         "cargo:rerun-if-changed={}",
         worker_crate.join("Cargo.toml").display()
+    );
+    register_rs_sources(&pipeline_crate.join("src"));
+    println!(
+        "cargo:rerun-if-changed={}",
+        pipeline_crate.join("Cargo.toml").display()
     );
 
     let js_path = worker_pkg_dir.join("mujou_worker.js");
     let wasm_path = worker_pkg_dir.join("mujou_worker_bg.wasm");
 
     // Skip the wasm-pack build if the output already exists and is
-    // newer than all worker source files.  This is critical for dev
-    // speed: build.rs re-runs whenever *any* registered file changes
-    // (including Tailwind-scanned .rs files in mujou/mujou-io), but
-    // the worker only needs rebuilding when its own source changes.
+    // newer than all worker and pipeline source files.  This is
+    // critical for dev speed: build.rs re-runs whenever *any*
+    // registered file changes (including Tailwind-scanned .rs files
+    // in mujou/mujou-io), but the worker only needs rebuilding when
+    // its own source or its pipeline dependency changes.
     // Without this check, wasm-pack (10-30s) runs on every save.
     if wasm_path.exists() && js_path.exists() {
         let wasm_mtime = fs::metadata(&wasm_path).and_then(|m| m.modified()).ok();
         if let Some(wasm_mtime) = wasm_mtime {
             let worker_stale = is_any_newer_than(&worker_crate.join("src"), wasm_mtime)
                 || fs::metadata(worker_crate.join("Cargo.toml"))
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|t| t > wasm_mtime)
+                || is_any_newer_than(&pipeline_crate.join("src"), wasm_mtime)
+                || fs::metadata(pipeline_crate.join("Cargo.toml"))
                     .and_then(|m| m.modified())
                     .is_ok_and(|t| t > wasm_mtime);
 
