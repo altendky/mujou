@@ -246,7 +246,7 @@ fn app() -> Element {
             href: "https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Noto+Sans+JP:wght@400&display=swap",
         }
 
-        div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col",
+        div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col overflow-x-hidden",
             // Theme toggle (fixed-positioned via shared theme.css;
             // content injected by shared theme-toggle.js)
             button {
@@ -267,9 +267,9 @@ fn app() -> Element {
             }
 
             // Main content area
-            div { class: "flex-1 flex flex-col lg:flex-row gap-6 p-6",
+            div { class: "flex-1 flex flex-col lg:flex-row gap-6 p-6 min-w-0",
                 // Left column: Preview + Filmstrip + Controls
-                div { class: "flex-1 flex flex-col gap-4",
+                div { class: "flex-1 flex flex-col gap-4 min-w-0",
 
                     // Show results (stale or fresh) when available.
                     // The processing indicator overlays rather than replaces.
@@ -366,7 +366,7 @@ fn app() -> Element {
                 }
 
                 // Right sidebar: Export (desktop only)
-                div { class: "hidden lg:block lg:w-72 flex-shrink-0",
+                div { class: "hidden lg:block lg:w-72 shrink-0",
                     ExportPanel {
                         result: result(),
                         filename: filename(),
