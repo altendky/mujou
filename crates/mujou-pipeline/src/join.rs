@@ -524,6 +524,9 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
         }
 
         // Update caches for candidates near the newly emitted contour.
+        // Only the contour's own points are passed because the retrace
+        // prefix consists of coordinate-duplicates of existing history
+        // points — they cannot improve any candidate's cached distance.
         update_nearby_caches(
             candidates[chosen_idx].points(),
             &grid,
