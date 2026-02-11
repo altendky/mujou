@@ -2,17 +2,16 @@
 
 use std::rc::Rc;
 
-use dioxus::prelude::*;
-use mujou_pipeline::StagedResult;
-
 use crate::download;
+use crate::worker::WorkerResult;
+use dioxus::prelude::*;
 
 /// Props for the [`ExportPanel`] component.
 #[derive(Props, Clone)]
 pub struct ExportPanelProps {
-    /// The staged pipeline result to export. `None` disables all buttons.
+    /// The pipeline result to export. `None` disables all buttons.
     /// Wrapped in `Rc` to avoid cloning intermediate data on each render.
-    result: Option<Rc<StagedResult>>,
+    result: Option<Rc<WorkerResult>>,
     /// Base filename (without extension) for downloads.
     filename: String,
 }

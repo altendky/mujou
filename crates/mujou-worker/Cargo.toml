@@ -1,29 +1,26 @@
 [package]
-name = "mujou-io"
+name = "mujou-worker"
 version = "0.1.0"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Browser I/O and Dioxus components for mujou"
-keywords = ["wasm", "dioxus", "file-upload"]
+description = "Web worker entry point for mujou pipeline processing"
+keywords = ["wasm", "web-worker", "image-processing"]
 categories = ["wasm"]
 
+[lib]
+crate-type = ["cdylib"]
+
 [dependencies]
-dioxus.workspace = true
 image.workspace = true
 mujou-pipeline.workspace = true
-mujou-export.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-web-sys.workspace = true
 wasm-bindgen.workspace = true
-wasm-bindgen-futures.workspace = true
+web-sys.workspace = true
 js-sys.workspace = true
-thiserror.workspace = true
-
-[dev-dependencies]
 
 [lints]
 workspace = true

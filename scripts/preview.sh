@@ -82,4 +82,11 @@ echo "    Landing page: http://localhost:$PORT/"
 echo "    App:          http://localhost:$PORT/app/"
 echo "    Press Ctrl+C to stop."
 echo ""
-python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$PREVIEW_DIR"
+
+# Restore terminal settings in case the build process (wasm-pack) left
+# them in a non-default state (e.g. disabled SIGINT for a progress bar).
+stty sane 2>/dev/null || true
+
+# exec replaces the shell with python, so ctrl+c sends SIGINT directly
+# to the server process with no bash signal handling in between.
+exec python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$PREVIEW_DIR"

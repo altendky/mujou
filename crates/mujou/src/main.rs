@@ -1,7 +1,10 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use mujou_io::{ExportPanel, FileUpload, Filmstrip, StageControls, StageId, StagePreview};
+use mujou_io::{
+    ExportPanel, FileUpload, Filmstrip, PipelineWorker, StageControls, StageId, StagePreview,
+    WorkerResult,
+};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
@@ -12,9 +15,21 @@ use wasm_bindgen::closure::Closure;
 /// thrashing during continuous slider drags.
 const CONFIG_DEBOUNCE_MS: u32 = 200;
 
+/// Interval in milliseconds for updating the elapsed time display
+/// during processing.
+const ELAPSED_UPDATE_MS: u32 = 100;
+
 /// Cherry blossoms example image bundled at compile time so the app
 /// can show example output immediately on first load.
 static CHERRY_BLOSSOMS: &[u8] = include_bytes!(env!("CHERRY_BLOSSOMS_PATH"));
+
+/// Worker JS glue — compiled from `crates/mujou-worker/` by `build.rs`
+/// via `wasm-pack build --target no-modules`.
+static WORKER_JS: &str = include_str!(env!("WORKER_JS_PATH"));
+
+/// Worker WASM binary — compiled from `crates/mujou-worker/` by
+/// `build.rs` via `wasm-pack build --target no-modules`.
+static WORKER_WASM: &[u8] = include_bytes!(env!("WORKER_WASM_PATH"));
 
 fn main() {
     dioxus::launch(app);
@@ -48,15 +63,28 @@ fn app() -> Element {
         cb.forget(); // leak — lives for the page lifetime
     });
 
+    // --- Pipeline worker ---
+    // Created once at app startup. The worker runs mujou-pipeline in a
+    // dedicated web worker thread so the main thread stays responsive.
+    let worker = use_hook(|| Rc::new(PipelineWorker::new(WORKER_JS, WORKER_WASM)));
+
     // --- Application state ---
     let mut image_bytes = use_signal(|| Some(CHERRY_BLOSSOMS.to_vec()));
     let mut filename = use_signal(|| String::from("cherry-blossoms"));
-    let mut result = use_signal(|| Option::<Rc<mujou_pipeline::StagedResult>>::None);
+    let mut result = use_signal(|| Option::<Rc<WorkerResult>>::None);
     let mut processing = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
     let mut generation = use_signal(|| 0u64);
     let mut debounce_generation = use_signal(|| 0u64);
     let mut selected_stage = use_signal(|| StageId::Masked);
+
+    // Elapsed time tracking for the processing indicator.
+    let mut elapsed_ms = use_signal(|| 0.0_f64);
+
+    // Start timestamp for the current processing run. Shared between the
+    // spawn (which sets it) and the render-complete effect (which reads
+    // it for the final elapsed snapshot).
+    let mut processing_start = use_signal(|| Option::<f64>::None);
 
     // The "committed" config is what the pipeline actually runs with.
     // Updated immediately on image upload, debounced on slider changes.
@@ -82,8 +110,9 @@ fn app() -> Element {
 
     // --- Pipeline processing effect ---
     // Re-runs whenever image_bytes or committed_config changes.
-    // Spawns an async task so the UI remains responsive while the
-    // heavy synchronous pipeline work runs.
+    // Sends the work to the web worker so the main thread stays free
+    // for UI updates, animations, and cancel button clicks.
+    let worker_for_effect = Rc::clone(&worker);
     use_effect(move || {
         let Some(bytes) = image_bytes() else {
             return;
@@ -97,19 +126,50 @@ fn app() -> Element {
 
         processing.set(true);
         error.set(None);
+        elapsed_ms.set(0.0);
+        let start = js_sys::Date::now();
+        processing_start.set(Some(start));
 
+        let worker = Rc::clone(&worker_for_effect);
         spawn(async move {
-            // Yield to the browser event loop so it can paint the
-            // processing indicator before we block on the pipeline.
-            gloo_timers::future::TimeoutFuture::new(0).await;
+            // Spawn a timer task that updates elapsed_ms every 100ms.
+            // This lives alongside the worker call — both are async
+            // tasks on the single-threaded WASM executor, interleaving
+            // via the event loop.
+            //
+            // The timer watches `processing_start` and stops when it is
+            // cleared (either by completion, cancellation, or a new run).
+            spawn(async move {
+                loop {
+                    gloo_timers::future::TimeoutFuture::new(ELAPSED_UPDATE_MS).await;
+                    match *processing_start.peek() {
+                        Some(s) => elapsed_ms.set(js_sys::Date::now() - s),
+                        None => break,
+                    }
+                }
+            });
 
-            let outcome = mujou_pipeline::process_staged(&bytes, &cfg);
+            // Run the pipeline in the web worker — this .await yields
+            // to the browser event loop so animations and cancel clicks
+            // keep working. PNG encoding also happens in the worker, so
+            // the returned WorkerResult has ready-to-use Blob URLs.
+            #[allow(clippy::cast_precision_loss)]
+            let outcome = worker.run(&bytes, &cfg, my_generation as f64).await;
 
             // If another run was triggered while we were processing,
-            // discard this stale result silently.
+            // discard this stale result silently. The new run already
+            // reset processing_start, so the timer will track the new
+            // run's start time.
             if *generation.peek() != my_generation {
                 return;
             }
+
+            // Record final elapsed time and hide the overlay. Since
+            // PNG encoding happened in the worker, result.set() only
+            // triggers a lightweight re-render (no main-thread encoding).
+            elapsed_ms.set(js_sys::Date::now() - start);
+            processing.set(false);
+            processing_start.set(None);
 
             match outcome {
                 Ok(res) => {
@@ -118,11 +178,8 @@ fn app() -> Element {
                 }
                 Err(e) => {
                     error.set(Some(format!("{e}")));
-                    // Keep the previous result visible if one exists.
                 }
             }
-
-            processing.set(false);
         });
     });
 
@@ -151,6 +208,14 @@ fn app() -> Element {
             }
         });
     });
+
+    // --- Cancel handler ---
+    let worker_for_cancel = Rc::clone(&worker);
+    let on_cancel = move |_| {
+        worker_for_cancel.cancel();
+        processing.set(false);
+        processing_start.set(None);
+    };
 
     // --- Config change handler ---
     let on_config_change = move |new_config: mujou_pipeline::PipelineConfig| {
@@ -208,7 +273,7 @@ fn app() -> Element {
 
                     // Show results (stale or fresh) when available.
                     // The processing indicator overlays rather than replaces.
-                    if let Some(ref staged) = result() {
+                    if let Some(ref worker_result) = result() {
                         // Stage preview with processing overlay
                         div { class: "relative",
                             // Preview content (stays visible during re-processing)
@@ -216,7 +281,7 @@ fn app() -> Element {
                                 class: if processing() { "opacity-50 transition-opacity" } else { "transition-opacity" },
 
                                 StagePreview {
-                                    staged: Rc::clone(staged),
+                                    result: Rc::clone(worker_result),
                                     selected: selected_stage(),
                                 }
                             }
@@ -224,9 +289,14 @@ fn app() -> Element {
                             // Processing indicator overlay
                             if processing() {
                                 div { class: "absolute inset-0 flex items-center justify-center",
-                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-2 shadow",
+                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2",
                                         p { class: "text-(--text-secondary) text-sm animate-pulse",
-                                            "Processing..."
+                                            "Processing... ({format_elapsed(elapsed_ms())})"
+                                        }
+                                        button {
+                                            class: "text-xs px-3 py-1 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
+                                            onclick: on_cancel,
+                                            "Cancel"
                                         }
                                     }
                                 }
@@ -235,7 +305,7 @@ fn app() -> Element {
 
                         // Filmstrip (always visible)
                         Filmstrip {
-                            staged: Rc::clone(staged),
+                            result: Rc::clone(worker_result),
                             selected: selected_stage(),
                             on_select: on_stage_select,
                         }
@@ -254,8 +324,15 @@ fn app() -> Element {
                     } else if processing() {
                         // First-time processing (no previous result to show)
                         div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-(--text-secondary) text-lg animate-pulse",
-                                "Processing..."
+                            div { class: "flex flex-col items-center gap-3",
+                                p { class: "text-(--text-secondary) text-lg animate-pulse",
+                                    "Processing... ({format_elapsed(elapsed_ms())})"
+                                }
+                                button {
+                                    class: "text-sm px-4 py-1.5 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
+                                    onclick: on_cancel,
+                                    "Cancel"
+                                }
                             }
                         }
                     } else if image_bytes().is_some() {
@@ -305,6 +382,14 @@ fn app() -> Element {
             }
         }
     }
+}
+
+/// Format elapsed milliseconds as a human-readable duration string.
+///
+/// Examples: "0.0s", "1.2s", "12.3s"
+fn format_elapsed(ms: f64) -> String {
+    let seconds = ms / 1000.0;
+    format!("{seconds:.1}s")
 }
 
 /// Read the current theme from the DOM `data-theme` attribute.

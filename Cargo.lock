@@ -1194,7 +1194,10 @@ dependencies = [
  "js-sys",
  "mujou-io",
  "mujou-pipeline",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -1216,8 +1219,11 @@ dependencies = [
  "js-sys",
  "mujou-export",
  "mujou-pipeline",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -1227,7 +1233,22 @@ version = "0.1.0"
 dependencies = [
  "image",
  "imageproc",
+ "serde",
+ "serde_json",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "mujou-worker"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "js-sys",
+ "mujou-pipeline",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

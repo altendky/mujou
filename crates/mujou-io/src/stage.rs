@@ -74,18 +74,6 @@ impl StageId {
             Self::Masked => "M",
         }
     }
-
-    /// Whether this stage produces raster image output.
-    ///
-    /// Raster stages are displayed as `<img>` elements via Blob URLs.
-    /// Vector stages are displayed as inline SVG.
-    #[must_use]
-    pub const fn is_raster(self) -> bool {
-        matches!(
-            self,
-            Self::Original | Self::Grayscale | Self::Blur | Self::Edges
-        )
-    }
 }
 
 impl fmt::Display for StageId {

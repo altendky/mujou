@@ -7,6 +7,8 @@
 //! ordering and joining them. This allows strategies like [`Retrace`] to
 //! integrate ordering decisions with backtracking capabilities.
 
+use serde::{Deserialize, Serialize};
+
 use crate::optimize;
 use crate::types::{Point, Polyline};
 
@@ -15,7 +17,7 @@ use crate::types::{Point, Polyline};
 /// Each variant receives **unordered** contours and handles its own
 /// ordering internally. Additional variants (edge-aware routing, spiral)
 /// can be added without changing the `PipelineConfig` struct.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum PathJoinerKind {
     /// Nearest-neighbor ordering followed by straight-line concatenation.
     ///

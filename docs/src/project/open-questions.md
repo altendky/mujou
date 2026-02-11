@@ -20,7 +20,7 @@ Items to address after MVP:
 
 ### Performance
 
-- [ ] Web worker offloading -- Move pipeline processing off the main thread to prevent UI blocking
+- [x] Web worker offloading -- Pipeline processing runs in a dedicated web worker with cancel support and elapsed time indicator (see #47)
 - [ ] SIMD acceleration -- Enable `wasm32-simd128` target feature for faster image processing
 - [ ] Image downsampling -- Auto-downsample images above a size threshold before processing
 

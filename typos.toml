@@ -10,6 +10,8 @@ extend-ignore-re = [
 [default.extend-words]
 # Theta-Rho file extension (.thr) used throughout the project
 thr = "thr"
+# PNG is the image format, not a typo for "ON"
+PN = "PN"
 
 [files]
 # Files to ignore
