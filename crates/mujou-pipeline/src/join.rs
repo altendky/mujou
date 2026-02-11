@@ -243,7 +243,7 @@ fn arc_length_sample_indices(contour: &Polyline, resolution: f64) -> Vec<usize> 
         accumulated += pts[i - 1].distance(pts[i]);
         if accumulated >= resolution {
             indices.push(i);
-            accumulated = 0.0;
+            accumulated %= resolution;
         }
     }
 
