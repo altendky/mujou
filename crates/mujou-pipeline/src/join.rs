@@ -375,6 +375,11 @@ fn update_nearby_caches(
 // Retrace joiner
 // ---------------------------------------------------------------------------
 
+/// Target number of grid cells across the longest canvas dimension.
+/// Balances lookup speed against memory overhead for typical workloads
+/// (~200 contours x 50 pts).
+const GRID_CELLS_PER_AXIS: f64 = 50.0;
+
 /// Full-history retrace with integrated contour ordering.
 ///
 /// Algorithm (retrace-aware greedy nearest-neighbor):
@@ -404,10 +409,10 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
         return Polyline::new(Vec::new());
     }
 
-    // Derive cell size from bounding box: ~50 cells across the canvas.
+    // Derive cell size from bounding box.
     let (min_x, min_y, max_x, max_y) = contour_bounding_box(&candidates);
     let canvas_extent = (max_x - min_x).max(max_y - min_y).max(1.0);
-    let cell_size = canvas_extent / 50.0;
+    let cell_size = canvas_extent / GRID_CELLS_PER_AXIS;
 
     let n = candidates.len();
     let mut used = vec![false; n];
