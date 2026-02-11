@@ -123,7 +123,7 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
         // Compact upload button
         div { class: "flex items-center gap-3",
             label {
-                class: "inline-flex items-center gap-2 px-4 py-2 bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white font-medium transition-colors",
+                class: "inline-flex items-center gap-2 px-4 h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white font-medium transition-colors",
                 input {
                     r#type: "file",
                     accept: ".png,.jpg,.jpeg,.bmp,.webp",
