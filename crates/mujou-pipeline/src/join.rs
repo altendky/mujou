@@ -609,9 +609,9 @@ mod tests {
         assert_eq!(pts[1], Point::new(1.0, 0.0));
         assert_eq!(pts[2], Point::new(2.0, 0.0));
         assert_eq!(pts[3], Point::new(3.0, 0.0));
-        // c1 follows after c2
-        assert!(pts.iter().any(|p| *p == Point::new(100.0, 0.0)));
-        assert!(pts.iter().any(|p| *p == Point::new(101.0, 0.0)));
+        // c1 follows after c2 (no backtrack needed; c2 end (3,0) is closest to c1 start)
+        assert_eq!(pts[4], Point::new(100.0, 0.0));
+        assert_eq!(pts[5], Point::new(101.0, 0.0));
     }
 
     #[test]
