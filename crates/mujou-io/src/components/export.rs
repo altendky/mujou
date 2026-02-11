@@ -61,9 +61,8 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
         }
     };
 
-    let enabled_class = "px-4 py-2 bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded text-white font-medium transition-colors cursor-pointer";
-    let disabled_class =
-        "px-4 py-2 bg-[var(--btn-disabled)] rounded text-[var(--text-disabled)] cursor-not-allowed";
+    let enabled_class = "inline-flex items-center justify-center px-4 h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded text-white font-medium transition-colors cursor-pointer";
+    let disabled_class = "inline-flex items-center justify-center px-4 h-[var(--btn-height)] bg-[var(--btn-disabled)] rounded text-[var(--text-disabled)] cursor-not-allowed";
 
     rsx! {
         div { class: "space-y-3",

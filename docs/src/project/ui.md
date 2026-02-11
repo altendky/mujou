@@ -8,25 +8,13 @@ All processing runs client-side in WASM.
 
 ### File Upload
 
-- Drag-and-drop zone and file picker button
-- Uses Dioxus built-in `onchange`/`ondrop` file events (cross-platform, no extra dependencies)
-- Accepts PNG, JPEG, BMP, WebP
-- Shows file name and image dimensions after upload
-- Reads file bytes via `file.read_bytes().await`
+Compact "Upload Image" button in the header with a full-page drag-and-drop overlay.
 
-```rust
-// Dioxus file upload pattern
-input {
-    r#type: "file",
-    accept: ".png,.jpg,.jpeg,.bmp,.webp",
-    onchange: move |evt| async move {
-        for file in evt.files() {
-            let bytes = file.read_bytes().await;
-            // Send to pipeline
-        }
-    },
-}
-```
+- **Header button**: styled `<label>` wrapping a hidden `<input type="file">` — accepts PNG, JPEG, BMP, WebP
+- **Drag overlay**: a fixed-position sentinel layer (`position: fixed; inset: 0`) is always in the DOM but invisible and non-interactive. When a file is dragged over the browser window the overlay becomes visible with a semi-transparent backdrop, dashed border, and "Drop image here" prompt. Uses a `dragenter`/`dragleave` counter to handle child-element event bubbling.
+- Uses Dioxus built-in `onchange`/`ondrop` file events (cross-platform, no extra dependencies)
+- Reads file bytes via `file.read_bytes().await`
+- File validation errors display inline next to the upload button
 
 ### Canvas Preview
 
@@ -94,7 +82,7 @@ Many Oasis Mini users will access from phones.
 
 ```text
 ┌─────────────────────────────────────────────────────┐
-│  mujou                                               │
+│  mujou                            [Upload Image]     │
 ├──────────────────────────┬──────────────────────────┤
 │                          │  Parameters               │
 │                          │  ┌──────────────────────┐ │
@@ -111,14 +99,25 @@ Many Oasis Mini users will access from phones.
 │                          │  │ [THR] [G-code] [SVG] │ │
 │                          │  │ [DXF] [PNG]          │ │
 │                          │  └──────────────────────┘ │
-├──────────────────────────┴──────────────────────────┤
-│  Drop image here or [Choose File]                    │
+└──────────────────────────┴──────────────────────────┘
+```
+
+Drag overlay (shown only while dragging a file over the window):
+
+```text
+┌─────────────────────────────────────────────────────┐
+│ ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┐ │
+│ │                                                  │ │
+│ │            Drop image here                       │ │
+│ │            PNG, JPEG, BMP, WebP                  │ │
+│ │                                                  │ │
+│ └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─┘ │
 └─────────────────────────────────────────────────────┘
 ```
 
 ### Mobile Layout
 
-Stacked vertically: upload area, preview, parameters (collapsed/expandable), export buttons.
+Stacked vertically: header (with upload button), preview, parameters (collapsed/expandable), export buttons.
 
 ## State Management
 
@@ -133,6 +132,6 @@ When `image_bytes` or `config` changes, the pipeline re-runs and `path` updates,
 
 ## Error Handling
 
-- Invalid image format: show error message in upload area
+- Invalid image format: show error message inline next to the upload button
 - Processing failure: show error message, keep last successful result
 - Oversized image: warn user, offer to downsample

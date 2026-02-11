@@ -19,6 +19,9 @@
   --title-spacing: 0.2em;
   --title-spacing-jp: 0.1em;
 
+  /* -- Shared sizing -- */
+  --btn-height: 2.5rem;
+
   /* -- Light palette (default) -- */
   --bg: #fafafa;
   --text: #1a1a1a;
@@ -86,8 +89,8 @@
   background: none;
   border: 1px solid var(--link-border);
   border-radius: 50%;
-  width: 2.5rem;
-  height: 2.5rem;
+  width: var(--btn-height);
+  height: var(--btn-height);
   cursor: pointer;
   color: var(--muted);
   display: flex;
