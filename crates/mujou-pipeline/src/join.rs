@@ -503,6 +503,10 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
         // Retrace from current output end to the best history point.
         // Every retraced point follows an already-drawn groove
         // (invisible in sand).
+        //
+        // Safety: `k` is always < `current_end` (the length before this
+        // loop started).  Point is Copy, so `output[k]` captures a value
+        // before any reallocation caused by push.
         let current_end = output.len() - 1;
         if best_history_idx < current_end {
             for k in (best_history_idx..current_end).rev() {
