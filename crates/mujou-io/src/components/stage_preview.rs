@@ -49,11 +49,6 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     // Reactive theme signal provided by the app root.
     let is_dark: Signal<bool> = use_context();
 
-    // Track the current blob URL so we can revoke it on re-render
-    // (handles rapid re-renders where onload/onerror never fires on the
-    // replaced <img>) and on unmount/stage-switch.
-    let mut prev_blob_url: Signal<Option<String>> = use_signal(|| None);
-
     // Bridge the Rc prop into the reactive system via a Signal.
     // Pointer equality avoids deep comparison of GrayImage data
     // (which does not implement PartialEq).
@@ -81,34 +76,26 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
             .map(raster::CachedBlobUrl::new)
     });
 
-    // Revoke outstanding blob URLs when the component is destroyed.
-    {
-        let prev_blob_url = prev_blob_url;
-        use_drop(move || {
-            if let Some(ref url) = *prev_blob_url.peek() {
-                raster::revoke_blob_url(url);
-            }
-        });
-    }
+    // Eagerly cached Blob URL for the Grayscale stage.
+    let grayscale_cache = use_memo(move || {
+        let staged = staged_signal();
+        raster::gray_image_to_blob_url(&staged.grayscale)
+            .ok()
+            .map(raster::CachedBlobUrl::new)
+    });
 
-    // If switching away from a raster stage, clean up any outstanding
-    // blob URL that may not have been revoked via onload/onerror.
-    if !selected.is_raster()
-        && let Some(ref prev) = prev_blob_url.take()
-    {
-        raster::revoke_blob_url(prev);
-    }
+    // Eagerly cached Blob URL for the Blur stage.
+    let blur_cache = use_memo(move || {
+        let staged = staged_signal();
+        raster::gray_image_to_blob_url(&staged.blurred)
+            .ok()
+            .map(raster::CachedBlobUrl::new)
+    });
 
     match selected {
         StageId::Original => {
             // Use the eagerly cached Blob URL; the CachedBlobUrl wrapper
             // revokes it automatically when the memo recomputes.
-            // Clean up any leftover prev_blob_url from a previous
-            // non-memoized raster stage (Grayscale/Blur).
-            if let Some(ref prev) = prev_blob_url.take() {
-                raster::revoke_blob_url(prev);
-            }
-
             let cached = original_cache.read();
             cached.as_ref().map_or_else(
                 || {
@@ -132,24 +119,34 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         }
 
         StageId::Grayscale | StageId::Blur => {
-            let image = match selected {
-                StageId::Grayscale => &staged.grayscale,
-                _ => &staged.blurred,
+            // Use eagerly cached Blob URLs; CachedBlobUrl revokes
+            // automatically when the memo recomputes.
+            let cached = match selected {
+                StageId::Grayscale => grayscale_cache.read(),
+                _ => blur_cache.read(),
             };
-            let label = selected.to_string();
-
-            render_raster_preview(
-                &mut prev_blob_url,
-                raster::gray_image_to_blob_url(image),
-                &label,
+            cached.as_ref().map_or_else(
+                || {
+                    rsx! {
+                        p { class: "text-[var(--text-error)] text-sm",
+                            "Failed to render {selected}"
+                        }
+                    }
+                },
+                |c| {
+                    let url = c.url().to_owned();
+                    rsx! {
+                        img {
+                            src: "{url}",
+                            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
+                            alt: "{selected} stage preview",
+                        }
+                    }
+                },
             )
         }
 
         StageId::Edges => {
-            // Clean up any leftover raster blob URL from a previous stage.
-            if let Some(ref prev) = prev_blob_url.take() {
-                raster::revoke_blob_url(prev);
-            }
             // Use eagerly cached themed Blob URLs for the Edges stage.
             // Both light and dark versions are generated via use_memo when
             // the pipeline result changes; toggling the theme simply selects
@@ -233,42 +230,6 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
                 }
             }
         }
-    }
-}
-
-/// Render a raster stage preview from an encoding result.
-///
-/// Handles the common revoke-previous → encode → store → render pattern
-/// shared by non-memoized raster stages (Grayscale, Blur).
-fn render_raster_preview(
-    prev_blob_url: &mut Signal<Option<String>>,
-    blob_url_result: Result<String, raster::RasterError>,
-    stage_label: &str,
-) -> Element {
-    // Revoke the previous blob URL before creating a new one.
-    if let Some(ref prev) = prev_blob_url.take() {
-        raster::revoke_blob_url(prev);
-    }
-
-    match blob_url_result {
-        Ok(url) => {
-            prev_blob_url.set(Some(url.clone()));
-            let url_for_error = url.clone();
-            rsx! {
-                img {
-                    src: "{url}",
-                    class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
-                    alt: "{stage_label} stage preview",
-                    onload: move |_| raster::revoke_blob_url(&url),
-                    onerror: move |_| raster::revoke_blob_url(&url_for_error),
-                }
-            }
-        }
-        Err(e) => rsx! {
-            p { class: "text-[var(--text-error)] text-sm",
-                "Failed to render {stage_label}: {e}"
-            }
-        },
     }
 }
 
