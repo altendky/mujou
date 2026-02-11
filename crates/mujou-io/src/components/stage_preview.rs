@@ -92,90 +92,99 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
             .map(raster::CachedBlobUrl::new)
     });
 
-    match selected {
-        StageId::Original => {
-            // Use the eagerly cached Blob URL; the CachedBlobUrl wrapper
-            // revokes it automatically when the memo recomputes.
-            let cached = original_cache.read();
-            cached.as_ref().map_or_else(
-                || {
-                    rsx! {
-                        p { class: "text-[var(--text-error)] text-sm",
-                            "Failed to render Original"
-                        }
-                    }
-                },
-                |c| {
-                    let url = c.url().to_owned();
-                    rsx! {
-                        img {
-                            src: "{url}",
-                            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
-                            alt: "Original stage preview",
-                        }
-                    }
-                },
-            )
-        }
+    // Raster stage <img> elements are always present in the DOM so the
+    // browser eagerly decodes their blob URLs.  Non-selected raster
+    // stages are hidden with `display: none`.  This eliminates the
+    // flicker that occurs when a new <img> first appears and the
+    // browser needs to decode the PNG.
+    //
+    // Vector stages (SVG) are conditionally rendered since inline SVG
+    // paints instantly without an async decode step.
 
-        StageId::Grayscale | StageId::Blur => {
-            // Use eagerly cached Blob URLs; CachedBlobUrl revokes
-            // automatically when the memo recomputes.
-            let cached = match selected {
-                StageId::Grayscale => grayscale_cache.read(),
-                _ => blur_cache.read(),
-            };
-            cached.as_ref().map_or_else(
-                || {
-                    rsx! {
-                        p { class: "text-[var(--text-error)] text-sm",
-                            "Failed to render {selected}"
-                        }
-                    }
-                },
-                |c| {
-                    let url = c.url().to_owned();
-                    rsx! {
-                        img {
-                            src: "{url}",
-                            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
-                            alt: "{selected} stage preview",
-                        }
-                    }
-                },
-            )
-        }
+    rsx! {
+        // -- Raster stages (always in DOM) --
+        {render_cached_raster(&original_cache, "Original", selected == StageId::Original)}
+        {render_cached_raster(&grayscale_cache, "Grayscale", selected == StageId::Grayscale)}
+        {render_cached_raster(&blur_cache, "Blur", selected == StageId::Blur)}
+        {render_cached_edges(&edge_cache, selected == StageId::Edges, is_dark())}
 
-        StageId::Edges => {
-            // Use eagerly cached themed Blob URLs for the Edges stage.
-            // Both light and dark versions are generated via use_memo when
-            // the pipeline result changes; toggling the theme simply selects
-            // the other URL.
-            let cached = edge_cache.read();
-            #[allow(clippy::option_if_let_else)]
-            match cached.as_ref() {
-                Some(c) => {
-                    let url = if is_dark() {
-                        c.dark_url.clone()
-                    } else {
-                        c.light_url.clone()
-                    };
-                    rsx! {
-                        img {
-                            src: "{url}",
-                            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain",
-                            alt: "Edges stage preview",
-                        }
-                    }
+        // -- Vector stages (conditional) --
+        {render_vector_preview(staged, selected, w, h)}
+    }
+}
+
+/// Render a cached raster preview image.
+///
+/// Always emits an `<img>` element so the browser eagerly decodes the
+/// blob URL.  When `visible` is false the image is hidden via CSS
+/// `display: none` — the browser still loads and decodes it, but it
+/// takes no layout space.  Showing it later is instant.
+fn render_cached_raster(
+    cache: &Memo<Option<raster::CachedBlobUrl>>,
+    label: &str,
+    visible: bool,
+) -> Element {
+    let cached = cache.read();
+    match cached.as_ref() {
+        Some(c) => {
+            let url = c.url().to_owned();
+            let hidden = if visible { "" } else { " hidden" };
+            rsx! {
+                img {
+                    src: "{url}",
+                    class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain{hidden}",
+                    alt: "{label} stage preview",
                 }
-                None => rsx! {
-                    p { class: "text-[var(--text-error)] text-sm",
-                        "Edge preview not available"
-                    }
-                },
             }
         }
+        None if visible => rsx! {
+            p { class: "text-[var(--text-error)] text-sm",
+                "Failed to render {label}"
+            }
+        },
+        None => rsx! {},
+    }
+}
 
+/// Render the cached Edges preview with theme-dependent URL.
+///
+/// Same always-in-DOM strategy as [`render_cached_raster`], but
+/// selects the light or dark Blob URL based on the active theme.
+fn render_cached_edges(
+    cache: &Memo<Option<raster::ThemedEdgeUrls>>,
+    visible: bool,
+    is_dark: bool,
+) -> Element {
+    let cached = cache.read();
+    match cached.as_ref() {
+        Some(c) => {
+            let url = if is_dark {
+                c.dark_url.clone()
+            } else {
+                c.light_url.clone()
+            };
+            let hidden = if visible { "" } else { " hidden" };
+            rsx! {
+                img {
+                    src: "{url}",
+                    class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain{hidden}",
+                    alt: "Edges stage preview",
+                }
+            }
+        }
+        None if visible => rsx! {
+            p { class: "text-[var(--text-error)] text-sm",
+                "Edge preview not available"
+            }
+        },
+        None => rsx! {},
+    }
+}
+
+/// Render the vector (SVG) preview for Contours, Simplified, Path, or
+/// Masked stages.  Returns `None` for raster stages.
+fn render_vector_preview(staged: &StagedResult, selected: StageId, w: u32, h: u32) -> Element {
+    match selected {
         StageId::Contours | StageId::Simplified => {
             let polylines = match selected {
                 StageId::Contours => &staged.contours,
@@ -230,6 +239,9 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
                 }
             }
         }
+
+        // Raster stages are handled by the always-present <img> elements.
+        _ => rsx! {},
     }
 }
 
