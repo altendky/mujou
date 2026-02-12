@@ -384,7 +384,7 @@ self.onmessage = function(e) {{ _msgQueue.push(e); }};
 // Initialize the WASM module from the embedded blob URL.
 // worker_main() (the #[wasm_bindgen(start)] function) runs during
 // instantiation and sets the real onmessage handler on self.
-wasm_bindgen("{wasm_url}")
+wasm_bindgen({{ module_or_path: "{wasm_url}" }})
     .then(function() {{
         // Replay any messages that arrived before initialization.
         var q = _msgQueue;
