@@ -27,6 +27,19 @@
 //! (or `Result` for fallible stages), carrying all previously computed
 //! intermediates. The caller can inspect the current stage's output via
 //! accessor methods at any point.
+//!
+//! # Memory
+//!
+//! Every stage from [`ContoursTraced`] onward retains the full raster
+//! stack (original RGBA, grayscale, blurred, and edge images) alongside
+//! the growing vector data. For a 1000×1000 source image this is roughly
+//! 7 MB of raster data pinned in memory until [`Joined::into_result`]
+//! consumes the final stage. This is intentional: [`StagedResult`] needs
+//! every intermediate for visualization and export.
+//!
+//! Callers that only need the final polyline (and not the intermediate
+//! images) should prefer [`crate::process`], which discards the raster
+//! intermediates and returns only the output path and dimensions.
 
 use image::DynamicImage;
 
@@ -245,6 +258,9 @@ impl EdgesDetected {
 /// Pipeline state after contour tracing.
 ///
 /// Call [`simplify`](Self::simplify) to advance to the next stage.
+///
+/// See the [module-level memory notes](self#memory) for the cost of
+/// retaining all prior raster intermediates.
 #[must_use = "pipeline stages are consumed by advancing — call .simplify() to continue"]
 pub struct ContoursTraced {
     config: PipelineConfig,
@@ -285,6 +301,9 @@ impl ContoursTraced {
 /// Pipeline state after path simplification (RDP).
 ///
 /// Call [`mask`](Self::mask) to advance to the next stage.
+///
+/// See the [module-level memory notes](self#memory) for the cost of
+/// retaining all prior raster intermediates.
 #[must_use = "pipeline stages are consumed by advancing — call .mask() to continue"]
 pub struct Simplified {
     config: PipelineConfig,
@@ -343,6 +362,9 @@ impl Simplified {
 /// Pipeline state after optional circular masking.
 ///
 /// Call [`join`](Self::join) to advance to the final stage.
+///
+/// See the [module-level memory notes](self#memory) for the cost of
+/// retaining all prior raster intermediates.
 #[must_use = "pipeline stages are consumed by advancing — call .join() to continue"]
 pub struct Masked {
     config: PipelineConfig,
@@ -387,6 +409,9 @@ impl Masked {
 ///
 /// Call [`into_result`](Self::into_result) to extract the
 /// [`StagedResult`] containing all intermediates.
+///
+/// See the [module-level memory notes](self#memory) for the cost of
+/// retaining all prior raster intermediates.
 #[must_use = "call .into_result() to extract the StagedResult"]
 pub struct Joined {
     original: RgbaImage,
