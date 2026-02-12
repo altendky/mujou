@@ -9,6 +9,7 @@
 //! interaction lives in `mujou-io`.
 
 pub mod blur;
+mod canny;
 pub mod contour;
 pub mod edge;
 pub mod grayscale;

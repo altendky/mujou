@@ -1,6 +1,7 @@
 //! Canny edge detection and edge map inversion.
 //!
-//! Wraps [`imageproc::edges::canny`] to detect edges in a blurred grayscale
+//! Wraps [`crate::canny::canny`] (a vendored + patched copy of
+//! `imageproc::edges::canny`) to detect edges in a blurred grayscale
 //! image. Returns a binary image where white pixels (255) are edges and
 //! black pixels (0) are background.
 //!
@@ -36,7 +37,7 @@ const _: () = assert!(MIN_THRESHOLD > 0.0);
 pub fn canny(image: &GrayImage, low_threshold: f32, high_threshold: f32) -> GrayImage {
     let high = high_threshold.max(MIN_THRESHOLD);
     let low = low_threshold.max(MIN_THRESHOLD).min(high);
-    imageproc::edges::canny(image, low, high)
+    crate::canny::canny(image, low, high)
 }
 
 /// Invert a binary edge map (bitwise NOT).
