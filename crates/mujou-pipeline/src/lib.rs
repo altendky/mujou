@@ -16,12 +16,14 @@ pub mod grayscale;
 pub mod join;
 pub mod mask;
 pub mod optimize;
+pub mod pipeline;
 pub mod simplify;
 pub mod types;
 
 pub use contour::{ContourTracer, ContourTracerKind};
 pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
+pub use pipeline::Pipeline;
 pub use types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, ProcessResult,
     RgbaImage, StagedResult,
@@ -55,79 +57,15 @@ pub fn process_staged(
     image_bytes: &[u8],
     config: &PipelineConfig,
 ) -> Result<StagedResult, PipelineError> {
-    // 0. Decode the source image.
-    let decoded = grayscale::decode(image_bytes)?;
-    let original = grayscale::to_rgba(&decoded);
+    use pipeline::{Advance, Stage};
 
-    // 1. Convert to grayscale.
-    let grayscale_img = grayscale::to_grayscale(&decoded);
-    let dimensions = Dimensions {
-        width: grayscale_img.width(),
-        height: grayscale_img.height(),
-    };
-
-    // 2. Gaussian blur.
-    let blurred = blur::gaussian_blur(&grayscale_img, config.blur_sigma);
-
-    // 3. Canny edge detection.
-    let edges_raw = edge::canny(&blurred, config.canny_low, config.canny_high);
-
-    // 4. Optional inversion of the edge map.
-    let edges = if config.invert {
-        edge::invert_edge_map(&edges_raw)
-    } else {
-        edges_raw
-    };
-
-    // 5. Contour tracing.
-    let contours = config.contour_tracer.trace(&edges);
-    if contours.is_empty() {
-        return Err(PipelineError::NoContours);
+    let mut stage: Stage = Pipeline::new(image_bytes.to_vec(), config.clone()).into();
+    loop {
+        match stage.advance()? {
+            Advance::Next(next) => stage = next,
+            Advance::Complete(done) => break done.complete(),
+        }
     }
-
-    // 6. Path simplification (RDP).
-    let simplified = simplify::simplify_paths(&contours, config.simplify_tolerance);
-
-    // 7. Optional circular mask.
-    //
-    // Clip individual polylines to the circular boundary *before* joining.
-    // This discards contours entirely outside the mask and splits those
-    // crossing the boundary, so the join step only connects surviving
-    // contours (producing connections that stay within the masked region).
-    let masked = if config.circular_mask {
-        let center = Point::new(
-            f64::from(dimensions.width) / 2.0,
-            f64::from(dimensions.height) / 2.0,
-        );
-        let extent = dimensions.width.min(dimensions.height);
-        let radius = f64::from(extent) * config.mask_diameter / 2.0;
-        Some(mask::apply_circular_mask(&simplified, center, radius))
-    } else {
-        None
-    };
-
-    // 8. Path ordering + joining into a single continuous path.
-    //
-    // Each PathJoinerKind variant handles its own ordering internally:
-    // - StraightLine delegates to optimize_path_order() then concatenates.
-    // - Retrace uses an integrated retrace-aware greedy nearest-neighbor.
-    //
-    // When masking is enabled, join the masked polylines; otherwise join
-    // the simplified polylines directly.
-    let join_input = masked.as_deref().unwrap_or(&simplified);
-    let joined = config.path_joiner.join(join_input);
-
-    Ok(StagedResult {
-        original,
-        grayscale: grayscale_img,
-        blurred,
-        edges,
-        contours,
-        simplified,
-        masked,
-        joined,
-        dimensions,
-    })
 }
 
 /// Run the full image processing pipeline.
