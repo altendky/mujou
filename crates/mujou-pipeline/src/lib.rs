@@ -2,7 +2,7 @@
 //!
 //! Converts raster images into vector polylines through:
 //! grayscale -> blur -> edge detection -> contour tracing ->
-//! simplification -> ordering + joining -> optional mask.
+//! simplification -> optional mask -> ordering + joining.
 //!
 //! This crate has **no I/O dependencies** -- it operates on in-memory
 //! byte slices and returns structured data. All browser/filesystem
@@ -40,9 +40,9 @@ pub use types::{
 /// 4. Optional edge map inversion
 /// 5. Contour tracing (pluggable strategy)
 /// 6. Path simplification (Ramer-Douglas-Peucker)
-/// 7. Path ordering + joining into single continuous path (pluggable strategy;
+/// 7. Optional circular mask
+/// 8. Path ordering + joining into single continuous path (pluggable strategy;
 ///    each joiner handles its own ordering internally)
-/// 8. Optional circular mask
 ///
 /// # Errors
 ///
@@ -86,14 +86,12 @@ pub fn process_staged(
     // 6. Path simplification (RDP).
     let simplified = simplify::simplify_paths(&contours, config.simplify_tolerance);
 
-    // 7. Path ordering + joining into a single continuous path.
+    // 7. Optional circular mask.
     //
-    // Each PathJoinerKind variant handles its own ordering internally:
-    // - StraightLine delegates to optimize_path_order() then concatenates.
-    // - Retrace uses an integrated retrace-aware greedy nearest-neighbor.
-    let joined = config.path_joiner.join(&simplified);
-
-    // 8. Optional circular mask.
+    // Clip individual polylines to the circular boundary *before* joining.
+    // This discards contours entirely outside the mask and splits those
+    // crossing the boundary, so the join step only connects surviving
+    // contours (producing connections that stay within the masked region).
     let masked = if config.circular_mask {
         let center = Point::new(
             f64::from(dimensions.width) / 2.0,
@@ -101,13 +99,21 @@ pub fn process_staged(
         );
         let extent = dimensions.width.min(dimensions.height);
         let radius = f64::from(extent) * config.mask_diameter / 2.0;
-        let clipped = mask::clip_polyline_to_circle(&joined, center, radius);
-
-        // Re-join the clipped segments into a single path.
-        Some(config.path_joiner.join(&clipped))
+        Some(mask::apply_circular_mask(&simplified, center, radius))
     } else {
         None
     };
+
+    // 8. Path ordering + joining into a single continuous path.
+    //
+    // Each PathJoinerKind variant handles its own ordering internally:
+    // - StraightLine delegates to optimize_path_order() then concatenates.
+    // - Retrace uses an integrated retrace-aware greedy nearest-neighbor.
+    //
+    // When masking is enabled, join the masked polylines; otherwise join
+    // the simplified polylines directly.
+    let join_input = masked.as_deref().unwrap_or(&simplified);
+    let joined = config.path_joiner.join(join_input);
 
     Ok(StagedResult {
         original,
@@ -116,8 +122,8 @@ pub fn process_staged(
         edges,
         contours,
         simplified,
-        joined,
         masked,
+        joined,
         dimensions,
     })
 }
@@ -344,19 +350,25 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             circular_mask: true,
-            mask_diameter: 0.8,
+            mask_diameter: 1.0,
             ..PipelineConfig::default()
         };
         let staged = process_staged(&png, &config).unwrap();
 
         assert!(
             staged.masked.is_some(),
-            "expected Some masked polyline when circular_mask=true"
+            "expected Some masked polylines when circular_mask=true"
+        );
+        // With mask_diameter=1.0 (full extent), the vertical edge at
+        // x=20 on a 40x40 image should survive clipping.
+        assert!(
+            !staged.masked.as_ref().unwrap().is_empty(),
+            "expected non-empty masked polylines with full-extent mask"
         );
     }
 
     #[test]
-    fn process_staged_final_polyline_returns_masked_when_present() {
+    fn process_staged_final_polyline_returns_joined_with_mask() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             circular_mask: true,
@@ -365,8 +377,9 @@ mod tests {
         };
         let staged = process_staged(&png, &config).unwrap();
 
-        // final_polyline should return the masked path.
-        assert_eq!(staged.final_polyline(), staged.masked.as_ref().unwrap());
+        // final_polyline always returns the joined path (mask is applied
+        // before joining, so joined is always the final result).
+        assert_eq!(staged.final_polyline(), &staged.joined);
     }
 
     #[test]

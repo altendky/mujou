@@ -80,11 +80,23 @@ Otherwise, intermediate points are dropped.
 
 **User parameter:** `simplify_tolerance` (f64, default: 2.0 pixels)
 
-### 7. Path Ordering + Joining
+### 7. Circular Mask (Optional)
+
+For round sand tables (Sisyphus, Oasis Mini), clip all polylines to a circle centered on the image.
+Points outside the circle are removed.
+Polylines that cross the circle boundary are split at the intersection.
+Contours entirely outside the mask are discarded before joining, so the join step only connects surviving contours.
+
+**User parameters:**
+
+- `circular_mask` (bool, default: false)
+- `mask_diameter` (f64, fraction of image width, default: 1.0)
+
+### 8. Path Ordering + Joining
 
 Sand tables cannot lift the ball -- every movement draws a visible line.
 The output must be a **single continuous path**, not a set of disconnected contours.
-This step receives **unordered** contours from simplification and produces a single continuous `Polyline`. Each joining strategy handles its own ordering internally, which allows strategies like Retrace to integrate ordering decisions with backtracking capabilities.
+This step receives contours from masking (if enabled) or simplification, and produces a single continuous `Polyline`. Each joining strategy handles its own ordering internally, which allows strategies like Retrace to integrate ordering decisions with backtracking capabilities.
 
 This is a [pluggable algorithm strategy](principles.md#pluggable-algorithm-strategies) -- the user selects which joining method to use.
 
@@ -126,17 +138,6 @@ For .thr output on circular tables, connect via short spiral arcs in polar coord
 Spirals are the natural visual language of polar sand tables.
 
 **Tradeoffs:** Only applicable to polar output formats. Requires theta-rho space path planning.
-
-### 8. Circular Mask (Optional)
-
-For round sand tables (Sisyphus, Oasis Mini), clip all polylines to a circle centered on the image.
-Points outside the circle are removed.
-Polylines that cross the circle boundary are split at the intersection.
-
-**User parameters:**
-
-- `circular_mask` (bool, default: false)
-- `mask_diameter` (f64, fraction of image width, default: 1.0)
 
 ### 9. Invert (Optional)
 

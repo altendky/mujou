@@ -112,9 +112,10 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             render_img_thumb(url, "Edges thumbnail")
         }
 
-        StageId::Contours | StageId::Simplified => {
+        StageId::Contours | StageId::Simplified | StageId::Masked => {
             let polylines = match stage {
                 StageId::Contours => &result.contours,
+                StageId::Masked => result.masked.as_deref().unwrap_or(&result.simplified),
                 _ => &result.simplified,
             };
             let w = result.dimensions.width;
@@ -135,11 +136,8 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             }
         }
 
-        StageId::Path | StageId::Masked => {
-            let polyline = match stage {
-                StageId::Masked => result.final_polyline(),
-                _ => &result.joined,
-            };
+        StageId::Path => {
+            let polyline = &result.joined;
             let w = result.dimensions.width;
             let h = result.dimensions.height;
             let view_box = format!("0 0 {w} {h}");

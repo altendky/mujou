@@ -97,9 +97,10 @@ fn render_raster_edges(result: &WorkerResult, visible: bool, is_dark: bool) -> E
 /// Masked stages. Returns empty for raster stages.
 fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u32) -> Element {
     match selected {
-        StageId::Contours | StageId::Simplified => {
+        StageId::Contours | StageId::Simplified | StageId::Masked => {
             let polylines = match selected {
                 StageId::Contours => &result.contours,
+                StageId::Masked => result.masked.as_deref().unwrap_or(&result.simplified),
                 _ => &result.simplified,
             };
             let view_box = format!("0 0 {w} {h}");
@@ -125,11 +126,8 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
             }
         }
 
-        StageId::Path | StageId::Masked => {
-            let polyline = match selected {
-                StageId::Masked => result.final_polyline(),
-                _ => &result.joined,
-            };
+        StageId::Path => {
+            let polyline = &result.joined;
             let view_box = format!("0 0 {w} {h}");
             let d = build_path_data(polyline);
 
