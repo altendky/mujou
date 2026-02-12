@@ -248,7 +248,7 @@ pub fn process_staged_with_diagnostics(
     let join_diag = StageDiagnostics {
         duration: join_duration,
         metrics: StageMetrics::Join {
-            strategy: format!("{:?}", config.path_joiner),
+            strategy: config.path_joiner.to_string(),
             input_polyline_count: join_input_polyline_count,
             input_point_count: join_input_point_count,
             output_point_count: join_output_point_count,
