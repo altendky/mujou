@@ -32,19 +32,19 @@ struct Cli {
     image_path: PathBuf,
 
     /// Gaussian blur sigma.
-    #[arg(long, default_value_t = 1.4)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_BLUR_SIGMA)]
     blur_sigma: f32,
 
     /// Canny low threshold.
-    #[arg(long, default_value_t = 30.0)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_CANNY_LOW)]
     canny_low: f32,
 
     /// Canny high threshold.
-    #[arg(long, default_value_t = 80.0)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_CANNY_HIGH)]
     canny_high: f32,
 
     /// RDP simplification tolerance in pixels.
-    #[arg(long, default_value_t = 2.0)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_SIMPLIFY_TOLERANCE)]
     simplify_tolerance: f64,
 
     /// Path joining strategy.
@@ -56,7 +56,7 @@ struct Cli {
     no_mask: bool,
 
     /// Mask diameter as fraction of image extent (0.0-1.0).
-    #[arg(long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_DIAMETER)]
     mask_diameter: f64,
 
     /// Invert edge map before contour tracing.
