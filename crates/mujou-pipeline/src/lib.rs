@@ -202,7 +202,6 @@ pub fn process_staged_with_diagnostics(
     };
 
     // 7. Optional circular mask.
-    let t = Instant::now();
     let (masked, mask_diag) = if config.circular_mask {
         let center = Point::new(
             f64::from(dimensions.width) / 2.0,
@@ -211,13 +210,15 @@ pub fn process_staged_with_diagnostics(
         let extent = dimensions.width.min(dimensions.height);
         let radius = f64::from(extent) * config.mask_diameter / 2.0;
         let pts_before = total_points(&simplified);
+        let t = Instant::now();
         let result = mask::apply_circular_mask(&simplified, center, radius);
+        let mask_duration = t.elapsed();
         let pts_after = total_points(&result);
         let polys_after = result.len();
         (
             Some(result),
             Some(StageDiagnostics {
-                duration: t.elapsed(),
+                duration: mask_duration,
                 metrics: StageMetrics::Mask {
                     diameter: config.mask_diameter,
                     radius_px: radius,
