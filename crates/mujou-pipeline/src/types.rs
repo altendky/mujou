@@ -199,15 +199,30 @@ impl PipelineConfig {
     /// costly reprocess.
     #[must_use]
     pub fn pipeline_eq(&self, other: &Self) -> bool {
-        self.blur_sigma == other.blur_sigma
-            && self.canny_low == other.canny_low
-            && self.canny_high == other.canny_high
-            && self.contour_tracer == other.contour_tracer
-            && self.simplify_tolerance == other.simplify_tolerance
-            && self.path_joiner == other.path_joiner
-            && self.circular_mask == other.circular_mask
-            && self.mask_diameter == other.mask_diameter
-            && self.invert == other.invert
+        // Destructure so adding a field to PipelineConfig without updating
+        // this match causes a compile error.
+        let Self {
+            blur_sigma,
+            canny_low,
+            canny_high,
+            canny_max: _,
+            contour_tracer,
+            simplify_tolerance,
+            path_joiner,
+            circular_mask,
+            mask_diameter,
+            invert,
+        } = self;
+
+        *blur_sigma == other.blur_sigma
+            && *canny_low == other.canny_low
+            && *canny_high == other.canny_high
+            && *contour_tracer == other.contour_tracer
+            && *simplify_tolerance == other.simplify_tolerance
+            && *path_joiner == other.path_joiner
+            && *circular_mask == other.circular_mask
+            && *mask_diameter == other.mask_diameter
+            && *invert == other.invert
     }
 }
 
