@@ -14,16 +14,18 @@
   var modes = ["system", "light", "dark"];
   var darkQuery = matchMedia("(prefers-color-scheme: dark)");
 
+  // Lucide icons (ISC license) — consistent stroke-based set.
+  // https://lucide.dev
   var svg = function (body) {
     return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + body + "</svg>";
   };
   var icons = {
-    // Half-circle: system / auto
-    system: svg('<circle cx="12" cy="12" r="9" fill="currentColor" stroke="none"/><path d="M12 3a9 9 0 0 1 0 18z" fill="var(--bg)" stroke="none"/>'),
-    // Sun: light mode
-    light: svg('<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>'),
-    // Moon: dark mode
-    dark: svg('<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>')
+    // Lucide sun-moon: system / auto theme
+    system: svg('<path d="M12 8a2.83 2.83 0 0 0 4 4 4 4 0 1 1-4-4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/>'),
+    // Lucide sun: light mode
+    light: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>'),
+    // Lucide moon: dark mode
+    dark: svg('<path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/>')
   };
   var labels = { system: "System theme", light: "Light theme", dark: "Dark theme" };
 

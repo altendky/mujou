@@ -8,7 +8,8 @@ All processing runs client-side in WASM.
 
 ### File Upload
 
-Compact "Upload Image" button in the header with a full-page drag-and-drop overlay.
+Compact upload icon button in the header with a full-page drag-and-drop overlay.
+Uses the Lucide `upload` icon via `dioxus-free-icons`.
 
 - **Header button**: styled `<label>` wrapping a hidden `<input type="file">` — accepts PNG, JPEG, BMP, WebP
 - **Drag overlay**: a fixed-position sentinel layer (`position: fixed; inset: 0`) is always in the DOM but invisible and non-interactive. When a file is dragged over the browser window the overlay becomes visible with a semi-transparent backdrop, dashed border, and "Drop image here" prompt. Uses a `dragenter`/`dragleave` counter to handle child-element event bubbling.
@@ -82,7 +83,7 @@ Many Oasis Mini users will access from phones.
 
 ```text
 ┌─────────────────────────────────────────────────────┐
-│  mujou                            [Upload Image]     │
+│  mujou                                    [⬆]        │
 ├──────────────────────────┬──────────────────────────┤
 │                          │  Parameters               │
 │                          │  ┌──────────────────────┐ │

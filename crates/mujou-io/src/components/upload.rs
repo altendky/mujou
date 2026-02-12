@@ -2,6 +2,8 @@
 
 use dioxus::html::{FileData, HasFileData};
 use dioxus::prelude::*;
+use dioxus_free_icons::Icon;
+use dioxus_free_icons::icons::ld_icons::LdUpload;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 
@@ -26,7 +28,7 @@ pub struct FileUploadProps {
 
 /// A compact upload button with a full-page drag-and-drop overlay.
 ///
-/// Renders an "Upload Image" button (intended for placement in the header)
+/// Renders an upload icon button (intended for placement in the header)
 /// and a fixed-position drag overlay that appears only when a file is
 /// dragged over the browser window. Accepts PNG, JPEG, BMP, and WebP
 /// images. When a file is selected (via the picker or drag-and-drop),
@@ -123,14 +125,19 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
         // Compact upload button
         div { class: "flex items-center gap-3",
             label {
-                class: "inline-flex items-center gap-2 px-4 h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white font-medium transition-colors",
+                class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
+                title: "Upload image",
                 input {
                     r#type: "file",
                     accept: ".png,.jpg,.jpeg,.bmp,.webp",
                     class: "hidden",
                     onchange: handle_files,
                 }
-                "Upload Image"
+                Icon {
+                    width: 20,
+                    height: 20,
+                    icon: LdUpload,
+                }
             }
 
             if let Some(ref err) = error() {
