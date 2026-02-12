@@ -357,8 +357,20 @@ pub(crate) fn count_edge_pixels(image: &image::GrayImage) -> u64 {
         .sum()
 }
 
+/// Statistics for a set of contour polylines.
+pub(crate) struct ContourStats {
+    /// Total number of points across all contours.
+    pub total: usize,
+    /// Minimum number of points in any single contour.
+    pub min: usize,
+    /// Maximum number of points in any single contour.
+    pub max: usize,
+    /// Mean number of points per contour.
+    pub mean: f64,
+}
+
 /// Compute contour statistics from a set of polylines.
-pub(crate) fn contour_stats(contours: &[crate::Polyline]) -> (usize, usize, usize, f64) {
+pub(crate) fn contour_stats(contours: &[crate::Polyline]) -> ContourStats {
     let total: usize = contours.iter().map(crate::Polyline::len).sum();
     let min = contours.iter().map(crate::Polyline::len).min().unwrap_or(0);
     let max = contours.iter().map(crate::Polyline::len).max().unwrap_or(0);
@@ -368,7 +380,12 @@ pub(crate) fn contour_stats(contours: &[crate::Polyline]) -> (usize, usize, usiz
     } else {
         total as f64 / contours.len() as f64
     };
-    (total, min, max, mean)
+    ContourStats {
+        total,
+        min,
+        max,
+        mean,
+    }
 }
 
 /// Total points across a slice of polylines.
@@ -399,11 +416,11 @@ mod tests {
 
     #[test]
     fn contour_stats_empty() {
-        let (total, min, max, mean) = contour_stats(&[]);
-        assert_eq!(total, 0);
-        assert_eq!(min, 0);
-        assert_eq!(max, 0);
-        assert!((mean - 0.0).abs() < f64::EPSILON);
+        let stats = contour_stats(&[]);
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.min, 0);
+        assert_eq!(stats.max, 0);
+        assert!((stats.mean - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -420,11 +437,11 @@ mod tests {
                 crate::Point::new(3.0, 0.0),
             ]),
         ];
-        let (total, min, max, mean) = contour_stats(&contours);
-        assert_eq!(total, 6);
-        assert_eq!(min, 2);
-        assert_eq!(max, 4);
-        assert!((mean - 3.0).abs() < f64::EPSILON);
+        let stats = contour_stats(&contours);
+        assert_eq!(stats.total, 6);
+        assert_eq!(stats.min, 2);
+        assert_eq!(stats.max, 4);
+        assert!((stats.mean - 3.0).abs() < f64::EPSILON);
     }
 
     #[test]

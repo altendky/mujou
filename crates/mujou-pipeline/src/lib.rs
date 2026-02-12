@@ -165,15 +165,15 @@ pub fn process_staged_with_diagnostics(
     if contours.is_empty() {
         return Err(PipelineError::NoContours);
     }
-    let (ct_total, ct_min, ct_max, ct_mean) = contour_stats(&contours);
+    let ct_stats = contour_stats(&contours);
     let contour_diag = StageDiagnostics {
         duration: contour_duration,
         metrics: StageMetrics::ContourTracing {
             contour_count: contours.len(),
-            total_point_count: ct_total,
-            min_contour_points: ct_min,
-            max_contour_points: ct_max,
-            mean_contour_points: ct_mean,
+            total_point_count: ct_stats.total,
+            min_contour_points: ct_stats.min,
+            max_contour_points: ct_stats.max,
+            mean_contour_points: ct_stats.mean,
         },
     };
 
