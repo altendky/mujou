@@ -185,9 +185,9 @@ pub enum StageMetrics {
 /// High-level summary counts for the entire pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineSummary {
-    /// Source image dimensions.
+    /// Source image width in pixels.
     pub image_width: u32,
-    /// Source image dimensions.
+    /// Source image height in pixels.
     pub image_height: u32,
     /// Total pixel count.
     pub pixel_count: u64,
