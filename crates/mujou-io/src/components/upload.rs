@@ -127,6 +127,7 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
             label {
                 class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
                 title: "Upload image",
+                "aria-label": "Upload image",
                 input {
                     r#type: "file",
                     accept: ".png,.jpg,.jpeg,.bmp,.webp",
