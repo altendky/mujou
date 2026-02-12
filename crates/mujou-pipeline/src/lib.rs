@@ -11,6 +11,7 @@
 pub mod blur;
 mod canny;
 pub mod contour;
+pub mod diagnostics;
 pub mod edge;
 pub mod grayscale;
 pub mod join;
@@ -20,6 +21,7 @@ pub mod simplify;
 pub mod types;
 
 pub use contour::{ContourTracer, ContourTracerKind};
+pub use diagnostics::PipelineDiagnostics;
 pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
 pub use types::{
@@ -55,79 +57,242 @@ pub fn process_staged(
     image_bytes: &[u8],
     config: &PipelineConfig,
 ) -> Result<StagedResult, PipelineError> {
+    let (staged, _diagnostics) = process_staged_with_diagnostics(image_bytes, config)?;
+    Ok(staged)
+}
+
+/// Run the full pipeline and return both the staged result and diagnostics.
+///
+/// This is the instrumented entry point. Diagnostics include per-stage
+/// wall-clock durations, item counts, and derived statistics useful for
+/// algorithm tuning.
+///
+/// # Errors
+///
+/// Same as [`process_staged`].
+#[allow(clippy::too_many_lines)]
+pub fn process_staged_with_diagnostics(
+    image_bytes: &[u8],
+    config: &PipelineConfig,
+) -> Result<(StagedResult, PipelineDiagnostics), PipelineError> {
+    use diagnostics::{
+        PipelineSummary, StageDiagnostics, StageMetrics, contour_stats, count_edge_pixels,
+        total_points,
+    };
+    use std::time::Instant;
+
+    let pipeline_start = Instant::now();
+
     // 0. Decode the source image.
+    let t = Instant::now();
     let decoded = grayscale::decode(image_bytes)?;
     let original = grayscale::to_rgba(&decoded);
+    let decode_diag = StageDiagnostics {
+        duration: t.elapsed(),
+        metrics: StageMetrics::Decode {
+            input_bytes: image_bytes.len(),
+            width: original.width(),
+            height: original.height(),
+            pixel_count: u64::from(original.width()) * u64::from(original.height()),
+        },
+    };
 
     // 1. Convert to grayscale.
+    let t = Instant::now();
     let grayscale_img = grayscale::to_grayscale(&decoded);
     let dimensions = Dimensions {
         width: grayscale_img.width(),
         height: grayscale_img.height(),
     };
+    let grayscale_diag = StageDiagnostics {
+        duration: t.elapsed(),
+        metrics: StageMetrics::Grayscale {
+            width: dimensions.width,
+            height: dimensions.height,
+        },
+    };
 
     // 2. Gaussian blur.
+    let t = Instant::now();
     let blurred = blur::gaussian_blur(&grayscale_img, config.blur_sigma);
+    let blur_diag = StageDiagnostics {
+        duration: t.elapsed(),
+        metrics: StageMetrics::Blur {
+            sigma: config.blur_sigma,
+        },
+    };
 
     // 3. Canny edge detection.
+    let t = Instant::now();
     let edges_raw = edge::canny(&blurred, config.canny_low, config.canny_high);
+    let edge_duration = t.elapsed();
+    let edge_pixel_count = count_edge_pixels(&edges_raw);
+    let total_pixel_count = u64::from(edges_raw.width()) * u64::from(edges_raw.height());
+    let edge_diag = StageDiagnostics {
+        duration: edge_duration,
+        metrics: StageMetrics::EdgeDetection {
+            low_threshold: config.canny_low.max(edge::MIN_THRESHOLD),
+            high_threshold: config
+                .canny_high
+                .max(edge::MIN_THRESHOLD)
+                .max(config.canny_low.max(edge::MIN_THRESHOLD)),
+            edge_pixel_count,
+            total_pixel_count,
+        },
+    };
 
     // 4. Optional inversion of the edge map.
-    let edges = if config.invert {
-        edge::invert_edge_map(&edges_raw)
+    let t = Instant::now();
+    let (edges, invert_diag) = if config.invert {
+        let inverted = edge::invert_edge_map(&edges_raw);
+        let inv_edge_count = count_edge_pixels(&inverted);
+        (
+            inverted,
+            Some(StageDiagnostics {
+                duration: t.elapsed(),
+                metrics: StageMetrics::Invert {
+                    edge_pixel_count: inv_edge_count,
+                },
+            }),
+        )
     } else {
-        edges_raw
+        (edges_raw, None)
     };
 
     // 5. Contour tracing.
+    let t = Instant::now();
     let contours = config.contour_tracer.trace(&edges);
+    let contour_duration = t.elapsed();
     if contours.is_empty() {
         return Err(PipelineError::NoContours);
     }
+    let (ct_total, ct_min, ct_max, ct_mean) = contour_stats(&contours);
+    let contour_diag = StageDiagnostics {
+        duration: contour_duration,
+        metrics: StageMetrics::ContourTracing {
+            contour_count: contours.len(),
+            total_point_count: ct_total,
+            min_contour_points: ct_min,
+            max_contour_points: ct_max,
+            mean_contour_points: ct_mean,
+        },
+    };
 
     // 6. Path simplification (RDP).
+    let points_before_simplify = total_points(&contours);
+    let t = Instant::now();
     let simplified = simplify::simplify_paths(&contours, config.simplify_tolerance);
+    let simplify_duration = t.elapsed();
+    let points_after_simplify = total_points(&simplified);
+    #[allow(clippy::cast_precision_loss)]
+    let reduction_ratio = if points_before_simplify > 0 {
+        1.0 - (points_after_simplify as f64 / points_before_simplify as f64)
+    } else {
+        0.0
+    };
+    let simplify_diag = StageDiagnostics {
+        duration: simplify_duration,
+        metrics: StageMetrics::Simplification {
+            tolerance: config.simplify_tolerance,
+            polyline_count: simplified.len(),
+            points_before: points_before_simplify,
+            points_after: points_after_simplify,
+            reduction_ratio,
+        },
+    };
 
     // 7. Optional circular mask.
-    //
-    // Clip individual polylines to the circular boundary *before* joining.
-    // This discards contours entirely outside the mask and splits those
-    // crossing the boundary, so the join step only connects surviving
-    // contours (producing connections that stay within the masked region).
-    let masked = if config.circular_mask {
+    let t = Instant::now();
+    let (masked, mask_diag) = if config.circular_mask {
         let center = Point::new(
             f64::from(dimensions.width) / 2.0,
             f64::from(dimensions.height) / 2.0,
         );
         let extent = dimensions.width.min(dimensions.height);
         let radius = f64::from(extent) * config.mask_diameter / 2.0;
-        Some(mask::apply_circular_mask(&simplified, center, radius))
+        let pts_before = total_points(&simplified);
+        let result = mask::apply_circular_mask(&simplified, center, radius);
+        let pts_after = total_points(&result);
+        let polys_after = result.len();
+        (
+            Some(result),
+            Some(StageDiagnostics {
+                duration: t.elapsed(),
+                metrics: StageMetrics::Mask {
+                    diameter: config.mask_diameter,
+                    radius_px: radius,
+                    polylines_before: simplified.len(),
+                    polylines_after: polys_after,
+                    points_before: pts_before,
+                    points_after: pts_after,
+                },
+            }),
+        )
     } else {
-        None
+        (None, None)
     };
 
     // 8. Path ordering + joining into a single continuous path.
-    //
-    // Each PathJoinerKind variant handles its own ordering internally:
-    // - StraightLine delegates to optimize_path_order() then concatenates.
-    // - Retrace uses an integrated retrace-aware greedy nearest-neighbor.
-    //
-    // When masking is enabled, join the masked polylines; otherwise join
-    // the simplified polylines directly.
     let join_input = masked.as_deref().unwrap_or(&simplified);
+    let join_input_polyline_count = join_input.len();
+    let join_input_point_count = total_points(join_input);
+    let t = Instant::now();
     let joined = config.path_joiner.join(join_input);
+    let join_duration = t.elapsed();
+    let join_output_point_count = joined.len();
+    #[allow(clippy::cast_precision_loss)]
+    let expansion_ratio = if join_input_point_count > 0 {
+        join_output_point_count as f64 / join_input_point_count as f64
+    } else {
+        0.0
+    };
+    let join_diag = StageDiagnostics {
+        duration: join_duration,
+        metrics: StageMetrics::Join {
+            strategy: format!("{:?}", config.path_joiner),
+            input_polyline_count: join_input_polyline_count,
+            input_point_count: join_input_point_count,
+            output_point_count: join_output_point_count,
+            expansion_ratio,
+        },
+    };
 
-    Ok(StagedResult {
-        original,
-        grayscale: grayscale_img,
-        blurred,
-        edges,
-        contours,
-        simplified,
-        masked,
-        joined,
-        dimensions,
-    })
+    let total_duration = pipeline_start.elapsed();
+
+    let pipeline_diagnostics = PipelineDiagnostics {
+        decode: decode_diag,
+        grayscale: grayscale_diag,
+        blur: blur_diag,
+        edge_detection: edge_diag,
+        invert: invert_diag,
+        contour_tracing: contour_diag,
+        simplification: simplify_diag,
+        mask: mask_diag,
+        join: join_diag,
+        total_duration,
+        summary: PipelineSummary {
+            image_width: dimensions.width,
+            image_height: dimensions.height,
+            pixel_count: u64::from(dimensions.width) * u64::from(dimensions.height),
+            contour_count: contours.len(),
+            final_point_count: joined.len(),
+        },
+    };
+
+    Ok((
+        StagedResult {
+            original,
+            grayscale: grayscale_img,
+            blurred,
+            edges,
+            contours,
+            simplified,
+            masked,
+            joined,
+            dimensions,
+        },
+        pipeline_diagnostics,
+    ))
 }
 
 /// Run the full image processing pipeline.
