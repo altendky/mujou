@@ -79,7 +79,7 @@ pub fn process_staged_with_diagnostics(
         PipelineSummary, StageDiagnostics, StageMetrics, contour_stats, count_edge_pixels,
         total_points,
     };
-    use std::time::Instant;
+    use web_time::Instant;
 
     let pipeline_start = Instant::now();
 
