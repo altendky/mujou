@@ -19,6 +19,17 @@ use image::GrayImage;
 pub const MIN_THRESHOLD: f32 = 1.0;
 const _: () = assert!(MIN_THRESHOLD > 0.0);
 
+/// Clamp Canny thresholds to valid ranges.
+///
+/// Both thresholds are raised to at least [`MIN_THRESHOLD`] and
+/// `low` is clamped to be at most `high`. Returns `(low, high)`.
+#[must_use]
+pub const fn clamp_thresholds(low_threshold: f32, high_threshold: f32) -> (f32, f32) {
+    let high = high_threshold.max(MIN_THRESHOLD);
+    let low = low_threshold.max(MIN_THRESHOLD).min(high);
+    (low, high)
+}
+
 /// Detect edges using the Canny algorithm.
 ///
 /// Returns a binary image: 255 for edge pixels, 0 for non-edge.
@@ -28,15 +39,15 @@ const _: () = assert!(MIN_THRESHOLD > 0.0);
 /// above `high_threshold` are definite edges; those between `low_threshold`
 /// and `high_threshold` are edges only if connected to a definite edge.
 ///
-/// Both thresholds are clamped to a minimum of [`MIN_THRESHOLD`] and
-/// `low_threshold` is clamped to be at most `high_threshold`. This
-/// prevents degenerate edge maps that would hang the application.
+/// Both thresholds are clamped via [`clamp_thresholds`] to a minimum of
+/// [`MIN_THRESHOLD`] and `low_threshold` is clamped to be at most
+/// `high_threshold`. This prevents degenerate edge maps that would hang
+/// the application.
 ///
 /// This is step 4 in the pipeline, between Gaussian blur and contour tracing.
 #[must_use = "returns the binary edge map"]
 pub fn canny(image: &GrayImage, low_threshold: f32, high_threshold: f32) -> GrayImage {
-    let high = high_threshold.max(MIN_THRESHOLD);
-    let low = low_threshold.max(MIN_THRESHOLD).min(high);
+    let (low, high) = clamp_thresholds(low_threshold, high_threshold);
     crate::canny::canny(image, low, high)
 }
 

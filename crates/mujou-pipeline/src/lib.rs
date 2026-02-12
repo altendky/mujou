@@ -128,14 +128,13 @@ pub fn process_staged_with_diagnostics(
     let edge_duration = t.elapsed();
     let edge_pixel_count = count_edge_pixels(&edges_raw);
     let total_pixel_count = u64::from(edges_raw.width()) * u64::from(edges_raw.height());
+    let (effective_low, effective_high) =
+        edge::clamp_thresholds(config.canny_low, config.canny_high);
     let edge_diag = StageDiagnostics {
         duration: edge_duration,
         metrics: StageMetrics::EdgeDetection {
-            low_threshold: config.canny_low.max(edge::MIN_THRESHOLD),
-            high_threshold: config
-                .canny_high
-                .max(edge::MIN_THRESHOLD)
-                .max(config.canny_low.max(edge::MIN_THRESHOLD)),
+            low_threshold: effective_low,
+            high_threshold: effective_high,
             edge_pixel_count,
             total_pixel_count,
         },
