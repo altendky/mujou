@@ -351,10 +351,7 @@ fn format_metrics(metrics: &StageMetrics) -> String {
 
 /// Count edge pixels (value == 255) in a grayscale image.
 pub(crate) fn count_edge_pixels(image: &image::GrayImage) -> u64 {
-    image
-        .pixels()
-        .map(|p| u64::from(u8::from(p.0[0] == 255)))
-        .sum()
+    image.pixels().filter(|p| p.0[0] == 255).count() as u64
 }
 
 /// Statistics for a set of contour polylines.
