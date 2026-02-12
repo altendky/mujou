@@ -790,6 +790,23 @@ pub enum Stage {
     Joined(Joined),
 }
 
+/// Compile-time guard: if a [`Stage`] variant is added, this match becomes
+/// non-exhaustive and the build fails — reminding you to bump [`STAGE_COUNT`].
+#[allow(dead_code, clippy::match_same_arms)]
+const fn _stage_count_guard(s: &Stage) {
+    match s {
+        Stage::Pending(_)
+        | Stage::Decoded(_)
+        | Stage::Grayscaled(_)
+        | Stage::Blurred(_)
+        | Stage::EdgesDetected(_)
+        | Stage::ContoursTraced(_)
+        | Stage::Simplified(_)
+        | Stage::Masked(_)
+        | Stage::Joined(_) => {}
+    }
+}
+
 /// Result of [`Stage::advance`]: either the next stage or the
 /// completed final stage returned unchanged.
 #[must_use]
