@@ -4,10 +4,9 @@
 
 use std::path::PathBuf;
 
-#[test]
-fn cherry_blossoms_pipeline_to_svg() {
-    // Locate the workspace root by searching upward for Cargo.lock.
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+/// Locate the workspace root by searching upward from the crate directory for `Cargo.lock`.
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .find(|dir| dir.join("Cargo.lock").exists())
         .unwrap_or_else(|| {
@@ -16,7 +15,12 @@ fn cherry_blossoms_pipeline_to_svg() {
                 env!("CARGO_MANIFEST_DIR"),
             )
         })
-        .to_path_buf();
+        .to_path_buf()
+}
+
+#[test]
+fn cherry_blossoms_pipeline_to_svg() {
+    let workspace_root = workspace_root();
     let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
     assert!(
         image_path.exists(),
@@ -68,16 +72,7 @@ fn cherry_blossoms_pipeline_to_svg() {
 /// Lower thresholds produce many more edges that can exhaust WASM memory.
 #[test]
 fn cherry_blossoms_default_config() {
-    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .find(|dir| dir.join("Cargo.lock").exists())
-        .unwrap_or_else(|| {
-            panic!(
-                "could not find workspace root (no Cargo.lock above {:?})",
-                env!("CARGO_MANIFEST_DIR"),
-            )
-        })
-        .to_path_buf();
+    let workspace_root = workspace_root();
     let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
     let image_bytes = std::fs::read(&image_path).unwrap();
     eprintln!("Loaded cherry-blossoms.png: {} bytes", image_bytes.len());
