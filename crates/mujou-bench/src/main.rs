@@ -68,7 +68,7 @@ struct Cli {
     svg: Option<PathBuf>,
 
     /// Number of runs for averaging.
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
     runs: usize,
 
     /// Output diagnostics as JSON instead of human-readable report.
@@ -87,11 +87,6 @@ enum Joiner {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-
-    if cli.runs == 0 {
-        eprintln!("Error: --runs must be at least 1");
-        return ExitCode::FAILURE;
-    }
 
     let config = mujou_pipeline::PipelineConfig {
         blur_sigma: cli.blur_sigma,
