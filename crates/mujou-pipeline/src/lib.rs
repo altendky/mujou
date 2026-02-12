@@ -144,11 +144,12 @@ pub fn process_staged_with_diagnostics(
     let t = Instant::now();
     let (edges, invert_diag) = if config.invert {
         let inverted = edge::invert_edge_map(&edges_raw);
+        let invert_duration = t.elapsed();
         let inv_edge_count = count_edge_pixels(&inverted);
         (
             inverted,
             Some(StageDiagnostics {
-                duration: t.elapsed(),
+                duration: invert_duration,
                 metrics: StageMetrics::Invert {
                     edge_pixel_count: inv_edge_count,
                 },
