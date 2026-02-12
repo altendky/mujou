@@ -55,6 +55,7 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         // the browser eagerly decodes their blob URLs. Non-selected
         // raster stages are hidden with `display: none`.
         {render_raster_img(result.original_url.url(), "Original", selected == StageId::Original)}
+        {render_raster_img(result.downsampled_url.url(), "Downsampled", selected == StageId::Downsampled)}
         {render_raster_img(result.grayscale_url.url(), "Grayscale", selected == StageId::Grayscale)}
         {render_raster_img(result.blur_url.url(), "Blur", selected == StageId::Blur)}
         {render_raster_edges(result, selected == StageId::Edges, is_dark())}

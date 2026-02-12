@@ -44,7 +44,9 @@ mod duration_serde {
 pub struct PipelineDiagnostics {
     /// Stage 0: image decoding.
     pub decode: StageDiagnostics,
-    /// Stage 1: grayscale conversion.
+    /// Stage 1: downsampling to working resolution.
+    pub downsample: StageDiagnostics,
+    /// Stage 2: grayscale conversion.
     pub grayscale: StageDiagnostics,
     /// Stage 2: Gaussian blur.
     pub blur: StageDiagnostics,
@@ -93,6 +95,23 @@ pub enum StageMetrics {
         height: u32,
         /// Total pixel count (`width * height`).
         pixel_count: u64,
+    },
+    /// Image downsampling metrics.
+    Downsample {
+        /// Original image width before downsampling.
+        original_width: u32,
+        /// Original image height before downsampling.
+        original_height: u32,
+        /// Image width after downsampling.
+        width: u32,
+        /// Image height after downsampling.
+        height: u32,
+        /// Target max dimension.
+        max_dimension: u32,
+        /// Resampling filter used.
+        filter: String,
+        /// Whether downsampling was actually applied.
+        applied: bool,
     },
     /// Grayscale conversion metrics.
     Grayscale {
@@ -222,6 +241,7 @@ impl PipelineDiagnostics {
         let stages: Vec<(&str, &StageDiagnostics)> = {
             let mut s = vec![
                 ("Decode", &self.decode),
+                ("Downsample", &self.downsample),
                 ("Grayscale", &self.grayscale),
                 ("Blur", &self.blur),
                 ("Edge Detection", &self.edge_detection),
@@ -274,6 +294,23 @@ fn format_metrics(metrics: &StageMetrics) -> String {
             ..
         } => {
             format!("{input_bytes} bytes -> {width}x{height}")
+        }
+        StageMetrics::Downsample {
+            original_width,
+            original_height,
+            width,
+            height,
+            max_dimension,
+            filter,
+            applied,
+        } => {
+            if *applied {
+                format!(
+                    "{original_width}x{original_height} -> {width}x{height} (target={max_dimension}, {filter})",
+                )
+            } else {
+                format!("{original_width}x{original_height} (no change, <= {max_dimension})",)
+            }
         }
         StageMetrics::Grayscale { width, height } => format!("{width}x{height}"),
         StageMetrics::Blur { sigma } => format!("sigma={sigma:.2}"),
@@ -433,6 +470,18 @@ mod tests {
                     width: 100,
                     height: 100,
                     pixel_count: 10000,
+                },
+            },
+            downsample: StageDiagnostics {
+                duration: Duration::from_millis(0),
+                metrics: StageMetrics::Downsample {
+                    original_width: 100,
+                    original_height: 100,
+                    width: 100,
+                    height: 100,
+                    max_dimension: 256,
+                    filter: "Triangle".to_string(),
+                    applied: false,
                 },
             },
             grayscale: StageDiagnostics {

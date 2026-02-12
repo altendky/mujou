@@ -91,6 +91,75 @@ Static sites are inherently portable -- if GitHub Pages becomes insufficient, mi
 
 **Configuration:** See [Requirements](requirements.md#deployment).
 
+## Reference Target Device
+
+**Decision:** Default pipeline resolution and parameters target a ~34" (850mm) diameter sand table with a ~5mm effective track width.
+
+**Rationale:**
+
+### Market survey (Feb 2026)
+
+The kinetic sand table market spans desktop toys to furniture-scale pieces.
+Key products by sand area diameter:
+
+| Brand | Model | Sand Diameter | Price | Notes |
+| ----- | ----- | ------------- | ----- | ----- |
+| Oasis Mini | Desktop | 9" / 23cm | $129-149 | Best seller, 50k+ units shipped |
+| SANDSARA mini | Desktop | ~8" / 20cm | $169-180 | |
+| Sisyphus Mini ES | Desktop | 9.9" / 25cm | $690 | |
+| SANDSARA Dark Walnut | Desktop | ~14" / 36cm | $750 | |
+| HoMedics Drift 16" | Desktop | 16" / 41cm | $319 | |
+| Sisyphus Metal Side | Side table | 16" / 41cm | $1,780 | |
+| Oasis Side Table | Side table | 20" / 50cm | $399-499 | Pre-order, ships 2026 |
+| HoMedics Drift 21" | Desktop | 21" / 53cm | $500 | |
+| Sisyphus Metal Coffee | Coffee table | 27.25" / 69cm | $2,640 | |
+| Oasis Coffee Table | Coffee table | 34" / 85cm | $799-999 | Pre-order, ships 2026 |
+
+The **Oasis Coffee Table (34" / 850mm)** is the largest mainstream table.
+It is also under $1,000, making it the largest table likely to see significant volume.
+
+### Effective track width (~5mm)
+
+All these tables use a steel ball (~12mm diameter) dragged magnetically through sand.
+The ball is a sphere, so the groove it carves is narrower than the ball diameter -- only the contact chord at the depth the ball sinks matters:
+
+- 0.5mm sink depth: track width ≈ 4.8mm
+- 1.0mm sink depth: track width ≈ 6.6mm
+- 2.0mm sink depth: track width ≈ 9.0mm
+
+**We use 5mm as the working estimate for effective track width.**
+
+### Resolvable detail vs. positional precision
+
+The 5mm track width constrains two different things:
+
+1. **Minimum line spacing** -- two parallel lines must be ≥5mm apart to read as distinct features. For a 34" (850mm) table this gives ~170 independent lines across the diameter.
+
+2. **Positional precision** -- a single line's *position* can be controlled much finer than 5mm. A gently curving or slightly angled line benefits from sub-track-width resolution, the same way anti-aliased text benefits from sub-pixel positioning. Coarse quantization would produce visible staircase artifacts on gentle curves.
+
+This means the useful *processing* resolution is higher than 170px -- we need enough resolution for smooth contour positioning, even though the output can't resolve features closer than ~5mm.
+
+### Resolvable lines per table
+
+At 5mm track width:
+
+| Table | Diameter | Independent lines across |
+| ----- | -------- | ----------------------- |
+| Oasis Mini | 9" / 230mm | ~46 |
+| Oasis Side Table | 20" / 500mm | ~100 |
+| Sisyphus Metal Coffee | 27.25" / 690mm | ~138 |
+| Oasis Coffee Table | 34" / 850mm | ~170 |
+
+### Pipeline resolution strategy
+
+**MVP approach:** Downsample the input image early (after decode) to a working resolution of ~256px on the long axis. Run the full pipeline (grayscale, blur, Canny, contour tracing, simplification, masking, joining) at this resolution. This is ~1.5x oversampling relative to the ~170 resolvable lines on the largest common table, which provides some headroom for smooth contour positioning without processing pixels that can never produce visible detail.
+
+At 256x256 (65k pixels) vs 1024x1024 (1M pixels), the expensive stages (blur, Canny) should run ~16x faster.
+
+Positional precision on gentle curves will be limited to the ~3.3mm grid spacing (850mm / 256px). This may produce visible staircase artifacts on the largest tables. Acceptable for MVP; evaluate with real output.
+
+**Deferred: coarse-then-fine with region masking.** A coarse pass at low resolution identifies where edges exist, producing a binary mask of "interesting" regions. A second fine-resolution pass runs only in unmasked regions, skipping the ~99% of the image that is featureless. This avoids full-image high-res cost while preserving sub-pixel positional precision where edges actually occur. Simpler than a tiling approach (no stitching across tile boundaries). See [Open Questions](open-questions.md#coarse-then-fine-processing).
+
 ## Project Architecture
 
 **Decision:** Sans-IO with three-layer Cargo workspace.

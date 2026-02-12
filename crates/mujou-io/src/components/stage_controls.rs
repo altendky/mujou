@@ -6,7 +6,9 @@
 //! what you can adjust.
 
 use dioxus::prelude::*;
-use mujou_pipeline::{ContourTracerKind, PathJoinerKind, PipelineConfig, max_gradient_magnitude};
+use mujou_pipeline::{
+    ContourTracerKind, DownsampleFilter, PathJoinerKind, PipelineConfig, max_gradient_magnitude,
+};
 
 use crate::stage::StageId;
 
@@ -43,6 +45,59 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             rsx! {
                 p { class: "text-sm text-[var(--text-secondary)] italic",
                     "No adjustable parameters for this stage."
+                }
+            }
+        }
+
+        StageId::Downsampled => {
+            let value = config.working_resolution;
+            let config_slider = config.clone();
+            let config_filter = config.clone();
+            rsx! {
+                div { class: "space-y-2",
+                    {render_slider(
+                        "working_resolution",
+                        "Working Resolution",
+                        f64::from(value),
+                        64.0,
+                        1024.0,
+                        1.0,
+                        move |v: f64| {
+                            let mut c = config_slider.clone();
+                            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                            { c.working_resolution = v as u32; }
+                            on_change.call(c);
+                        },
+                    )}
+                    {render_select(
+                        "downsample_filter",
+                        "Downsample Filter",
+                        &[
+                            ("Nearest", "Nearest"),
+                            ("Triangle", "Triangle (Bilinear)"),
+                            ("CatmullRom", "CatmullRom (Bicubic)"),
+                            ("Gaussian", "Gaussian"),
+                            ("Lanczos3", "Lanczos3"),
+                        ],
+                        match config_filter.downsample_filter {
+                            DownsampleFilter::Nearest => "Nearest",
+                            DownsampleFilter::Triangle => "Triangle",
+                            DownsampleFilter::CatmullRom => "CatmullRom",
+                            DownsampleFilter::Gaussian => "Gaussian",
+                            DownsampleFilter::Lanczos3 => "Lanczos3",
+                        },
+                        move |v: String| {
+                            let mut c = config_filter.clone();
+                            c.downsample_filter = match v.as_str() {
+                                "Nearest" => DownsampleFilter::Nearest,
+                                "CatmullRom" => DownsampleFilter::CatmullRom,
+                                "Gaussian" => DownsampleFilter::Gaussian,
+                                "Lanczos3" => DownsampleFilter::Lanczos3,
+                                _ => DownsampleFilter::Triangle,
+                            };
+                            on_change.call(c);
+                        },
+                    )}
                 }
             }
         }

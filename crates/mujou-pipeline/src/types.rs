@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::contour::ContourTracerKind;
+use crate::downsample::DownsampleFilter;
 use crate::join::PathJoinerKind;
 
 /// Re-export `GrayImage` so downstream crates can reference
@@ -173,6 +174,21 @@ pub struct PipelineConfig {
 
     /// Whether to invert the binary edge map before contour tracing.
     pub invert: bool,
+
+    /// Maximum pixel dimension (longest axis) for the working image.
+    ///
+    /// After decoding, the image is downsampled so the longest axis
+    /// matches this value. All subsequent pipeline stages operate at
+    /// this reduced resolution. Based on reference target device
+    /// analysis: a 34" sand table with ~5mm track width has ~170
+    /// resolvable lines, so 256px provides ~1.5x oversampling.
+    pub working_resolution: u32,
+
+    /// Resampling filter used when downsampling. Triangle (bilinear) is
+    /// a good default -- fast and sufficient quality given the Gaussian
+    /// blur stage that follows. Lanczos3 is sharper but significantly
+    /// slower.
+    pub downsample_filter: DownsampleFilter,
 }
 
 impl Default for PipelineConfig {
@@ -188,6 +204,8 @@ impl Default for PipelineConfig {
             circular_mask: true,
             mask_diameter: 1.0,
             invert: false,
+            working_resolution: 256,
+            downsample_filter: DownsampleFilter::default(),
         }
     }
 }
@@ -212,6 +230,8 @@ impl PipelineConfig {
             circular_mask,
             mask_diameter,
             invert,
+            working_resolution,
+            downsample_filter,
         } = self;
 
         *blur_sigma == other.blur_sigma
@@ -223,6 +243,8 @@ impl PipelineConfig {
             && *circular_mask == other.circular_mask
             && *mask_diameter == other.mask_diameter
             && *invert == other.invert
+            && *working_resolution == other.working_resolution
+            && *downsample_filter == other.downsample_filter
     }
 }
 
@@ -260,7 +282,9 @@ pub struct ProcessResult {
 pub struct StagedResult {
     /// Stage 0: original decoded RGBA image (pre-processing).
     pub original: RgbaImage,
-    /// Stage 1: decoded + grayscale image.
+    /// Stage 1: downsampled RGBA image (working resolution).
+    pub downsampled: RgbaImage,
+    /// Stage 2: decoded + grayscale image.
     pub grayscale: GrayImage,
     /// Stage 2: Gaussian-blurred image.
     pub blurred: GrayImage,
@@ -304,6 +328,7 @@ impl StagedResult {
 #[derive(Serialize, Deserialize)]
 struct StagedResultProxy {
     original: (u32, u32, Vec<u8>),
+    downsampled: (u32, u32, Vec<u8>),
     grayscale: (u32, u32, Vec<u8>),
     blurred: (u32, u32, Vec<u8>),
     edges: (u32, u32, Vec<u8>),
@@ -321,6 +346,11 @@ impl Serialize for StagedResult {
                 self.original.width(),
                 self.original.height(),
                 self.original.as_raw().clone(),
+            ),
+            downsampled: (
+                self.downsampled.width(),
+                self.downsampled.height(),
+                self.downsampled.as_raw().clone(),
             ),
             grayscale: (
                 self.grayscale.width(),
@@ -353,6 +383,12 @@ impl<'de> Deserialize<'de> for StagedResult {
 
         let original = RgbaImage::from_raw(proxy.original.0, proxy.original.1, proxy.original.2)
             .ok_or_else(|| serde::de::Error::custom("invalid RGBA image dimensions"))?;
+        let downsampled = RgbaImage::from_raw(
+            proxy.downsampled.0,
+            proxy.downsampled.1,
+            proxy.downsampled.2,
+        )
+        .ok_or_else(|| serde::de::Error::custom("invalid downsampled image dimensions"))?;
         let grayscale =
             GrayImage::from_raw(proxy.grayscale.0, proxy.grayscale.1, proxy.grayscale.2)
                 .ok_or_else(|| serde::de::Error::custom("invalid grayscale image dimensions"))?;
@@ -363,6 +399,7 @@ impl<'de> Deserialize<'de> for StagedResult {
 
         Ok(Self {
             original,
+            downsampled,
             grayscale,
             blurred,
             edges,
@@ -708,6 +745,8 @@ mod tests {
             circular_mask: true,
             mask_diameter: 0.85,
             invert: true,
+            working_resolution: 256,
+            downsample_filter: DownsampleFilter::Triangle,
         };
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: PipelineConfig = serde_json::from_str(&json).unwrap();
@@ -733,6 +772,7 @@ mod tests {
         // Create a minimal StagedResult with small images.
         let staged = StagedResult {
             original: RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255])),
+            downsampled: RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255])),
             grayscale: GrayImage::from_pixel(2, 2, image::Luma([50])),
             blurred: GrayImage::from_pixel(2, 2, image::Luma([45])),
             edges: GrayImage::from_pixel(2, 2, image::Luma([255])),
@@ -761,6 +801,10 @@ mod tests {
             deserialized.original.dimensions()
         );
         assert_eq!(staged.original.as_raw(), deserialized.original.as_raw());
+        assert_eq!(
+            staged.downsampled.as_raw(),
+            deserialized.downsampled.as_raw()
+        );
         assert_eq!(staged.grayscale.as_raw(), deserialized.grayscale.as_raw());
         assert_eq!(staged.blurred.as_raw(), deserialized.blurred.as_raw());
         assert_eq!(staged.edges.as_raw(), deserialized.edges.as_raw());
@@ -803,6 +847,7 @@ mod tests {
         // and deserialized — this is the type that crosses the worker boundary.
         let staged = StagedResult {
             original: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
+            downsampled: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
             grayscale: GrayImage::from_pixel(1, 1, image::Luma([0])),
             blurred: GrayImage::from_pixel(1, 1, image::Luma([0])),
             edges: GrayImage::from_pixel(1, 1, image::Luma([0])),

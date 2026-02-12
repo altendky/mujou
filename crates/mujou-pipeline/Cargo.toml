@@ -15,6 +15,7 @@ image.workspace = true
 imageproc.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+web-time.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

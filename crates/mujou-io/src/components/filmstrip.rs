@@ -100,6 +100,9 @@ fn render_tile(
 fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Element {
     match stage {
         StageId::Original => render_img_thumb(result.original_url.url(), "Original thumbnail"),
+        StageId::Downsampled => {
+            render_img_thumb(result.downsampled_url.url(), "Downsampled thumbnail")
+        }
         StageId::Grayscale => render_img_thumb(result.grayscale_url.url(), "Grayscale thumbnail"),
         StageId::Blur => render_img_thumb(result.blur_url.url(), "Blur thumbnail"),
 

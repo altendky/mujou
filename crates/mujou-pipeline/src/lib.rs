@@ -12,6 +12,7 @@ pub mod blur;
 mod canny;
 pub mod contour;
 pub mod diagnostics;
+pub mod downsample;
 pub mod edge;
 pub mod grayscale;
 pub mod join;
@@ -22,6 +23,7 @@ pub mod types;
 
 pub use contour::{ContourTracer, ContourTracerKind};
 pub use diagnostics::PipelineDiagnostics;
+pub use downsample::DownsampleFilter;
 pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
 pub use types::{
@@ -38,15 +40,17 @@ pub use types::{
 ///
 /// # Pipeline steps
 ///
-/// 1. Decode image and convert to grayscale
-/// 2. Gaussian blur (noise reduction)
-/// 3. Canny edge detection
-/// 4. Optional edge map inversion
-/// 5. Contour tracing (pluggable strategy)
-/// 6. Path simplification (Ramer-Douglas-Peucker)
-/// 7. Optional circular mask
-/// 8. Path ordering + joining into single continuous path (pluggable strategy;
-///    each joiner handles its own ordering internally)
+/// 1. Decode image
+/// 2. Downsample to working resolution
+/// 3. Convert to grayscale
+/// 4. Gaussian blur (noise reduction)
+/// 5. Canny edge detection
+/// 6. Optional edge map inversion
+/// 7. Contour tracing (pluggable strategy)
+/// 8. Path simplification (Ramer-Douglas-Peucker)
+/// 9. Optional circular mask
+/// 10. Path ordering + joining into single continuous path (pluggable strategy;
+///     each joiner handles its own ordering internally)
 ///
 /// # Errors
 ///
@@ -79,7 +83,7 @@ pub fn process_staged_with_diagnostics(
         PipelineSummary, StageDiagnostics, StageMetrics, contour_stats, count_edge_pixels,
         total_points,
     };
-    use std::time::Instant;
+    use web_time::Instant;
 
     let pipeline_start = Instant::now();
 
@@ -97,9 +101,30 @@ pub fn process_staged_with_diagnostics(
         },
     };
 
-    // 1. Convert to grayscale.
+    // 1. Downsample to working resolution.
     let t = Instant::now();
-    let grayscale_img = grayscale::to_grayscale(&decoded);
+    let (downsampled_dynamic, downsample_applied) = downsample::downsample(
+        &decoded,
+        config.working_resolution,
+        config.downsample_filter,
+    );
+    let downsampled = grayscale::to_rgba(&downsampled_dynamic);
+    let downsample_diag = StageDiagnostics {
+        duration: t.elapsed(),
+        metrics: StageMetrics::Downsample {
+            original_width: original.width(),
+            original_height: original.height(),
+            width: downsampled.width(),
+            height: downsampled.height(),
+            max_dimension: config.working_resolution,
+            filter: config.downsample_filter.to_string(),
+            applied: downsample_applied,
+        },
+    };
+
+    // 2. Convert to grayscale (at working resolution).
+    let t = Instant::now();
+    let grayscale_img = grayscale::to_grayscale(&downsampled_dynamic);
     let dimensions = Dimensions {
         width: grayscale_img.width(),
         height: grayscale_img.height(),
@@ -261,6 +286,7 @@ pub fn process_staged_with_diagnostics(
 
     let pipeline_diagnostics = PipelineDiagnostics {
         decode: decode_diag,
+        downsample: downsample_diag,
         grayscale: grayscale_diag,
         blur: blur_diag,
         edge_detection: edge_diag,
@@ -282,6 +308,7 @@ pub fn process_staged_with_diagnostics(
     Ok((
         StagedResult {
             original,
+            downsampled,
             grayscale: grayscale_img,
             blurred,
             edges,

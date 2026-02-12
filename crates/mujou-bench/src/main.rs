@@ -63,6 +63,14 @@ struct Cli {
     #[arg(long)]
     invert: bool,
 
+    /// Working resolution (max dimension in pixels after downsampling).
+    #[arg(long, default_value_t = 256)]
+    working_resolution: u32,
+
+    /// Downsample filter (nearest, triangle, catmull-rom, gaussian, lanczos3).
+    #[arg(long, value_enum, default_value_t = Filter::Triangle)]
+    downsample_filter: Filter,
+
     /// Write SVG output to file.
     #[arg(long)]
     svg: Option<PathBuf>,
@@ -85,6 +93,21 @@ enum Joiner {
     Retrace,
 }
 
+/// Downsample resampling filter selection.
+#[derive(Clone, Copy, ValueEnum)]
+enum Filter {
+    /// Nearest-neighbor (fastest, blocky).
+    Nearest,
+    /// Bilinear interpolation (fast, decent quality).
+    Triangle,
+    /// Bicubic Catmull-Rom (moderate, good quality).
+    CatmullRom,
+    /// Gaussian (moderate, smooth).
+    Gaussian,
+    /// Lanczos with 3 lobes (slowest, sharpest).
+    Lanczos3,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -105,6 +128,14 @@ fn main() -> ExitCode {
         circular_mask: !cli.no_mask,
         mask_diameter: cli.mask_diameter,
         invert: cli.invert,
+        working_resolution: cli.working_resolution,
+        downsample_filter: match cli.downsample_filter {
+            Filter::Nearest => mujou_pipeline::DownsampleFilter::Nearest,
+            Filter::Triangle => mujou_pipeline::DownsampleFilter::Triangle,
+            Filter::CatmullRom => mujou_pipeline::DownsampleFilter::CatmullRom,
+            Filter::Gaussian => mujou_pipeline::DownsampleFilter::Gaussian,
+            Filter::Lanczos3 => mujou_pipeline::DownsampleFilter::Lanczos3,
+        },
         ..mujou_pipeline::PipelineConfig::default()
     };
 
@@ -218,6 +249,7 @@ fn print_multi_run_summary(all_diagnostics: &[mujou_pipeline::PipelineDiagnostic
 
     let stage_extractors: &[(&str, StageExtractor)] = &[
         ("Decode", |d| Some(d.decode.duration)),
+        ("Downsample", |d| Some(d.downsample.duration)),
         ("Grayscale", |d| Some(d.grayscale.duration)),
         ("Blur", |d| Some(d.blur.duration)),
         ("Edge Detection", |d| Some(d.edge_detection.duration)),
