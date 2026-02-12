@@ -188,12 +188,19 @@ type StageExtractor = fn(&mujou_pipeline::PipelineDiagnostics) -> Option<std::ti
 /// Print aggregated statistics across multiple runs.
 #[allow(clippy::cast_precision_loss)]
 fn print_multi_run_summary(all_diagnostics: &[mujou_pipeline::PipelineDiagnostics]) {
+    debug_assert!(!all_diagnostics.is_empty(), "no diagnostics to summarize");
+
     println!();
     println!(
         "Summary ({} runs)\n{}",
         all_diagnostics.len(),
         "=".repeat(60),
     );
+
+    if all_diagnostics.is_empty() {
+        println!("Warning: no diagnostics to summarize");
+        return;
+    }
 
     let durations: Vec<f64> = all_diagnostics
         .iter()
