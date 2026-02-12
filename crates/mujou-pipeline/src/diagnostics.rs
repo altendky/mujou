@@ -6,8 +6,8 @@
 //! alongside the pipeline results.
 //!
 //! Duration measurements use [`std::time::Duration`] (platform-agnostic).
-//! The caller is responsible for providing timestamps; on native targets
-//! this is [`std::time::Instant`], on WASM it can be `performance.now()`.
+//! Timestamps are captured internally via the `web-time` crate, which
+//! uses `performance.now()` on WASM and `std::time::Instant` on native.
 //!
 //! Durations are serialized as fractional seconds (`f64`) for JSON
 //! compatibility, since `std::time::Duration` does not implement serde
