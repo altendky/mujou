@@ -51,6 +51,7 @@ gloo-timers = { version = "0.3", features = ["futures"] }
 
 # UI framework
 dioxus = "0.7"
+dioxus-free-icons = { version = "0.10", default-features = false, features = ["lucide"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
