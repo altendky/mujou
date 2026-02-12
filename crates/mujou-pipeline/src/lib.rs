@@ -20,6 +20,7 @@ pub mod simplify;
 pub mod types;
 
 pub use contour::{ContourTracer, ContourTracerKind};
+pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
 pub use types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, ProcessResult,
@@ -333,8 +334,8 @@ mod tests {
         assert!(!staged.simplified.is_empty(), "expected simplified paths");
         assert!(!staged.joined.is_empty(), "expected joined path");
 
-        // Mask disabled by default.
-        assert!(staged.masked.is_none());
+        // Mask enabled by default.
+        assert!(staged.masked.is_some());
 
         // Dimensions match source.
         assert_eq!(
