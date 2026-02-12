@@ -35,12 +35,13 @@ Pipeline re-runs when parameters change.
 | Control | Input Type | Range | Default |
 | ------- | ---------- | ----- | ------- |
 | Blur radius | Slider | 0.0 - 10.0 | 1.4 |
-| Canny low threshold | Slider | 0 - 500 | 50 |
-| Canny high threshold | Slider | 0 - 500 | 150 |
+| Canny low threshold | Slider | 1 - canny max | 30 |
+| Canny high threshold | Slider | canny low - canny max | 80 |
+| Canny max | Slider | canny high - ~1140 | 120 |
 | Contour tracing | Select | Border following / Marching squares | Border following |
 | Simplify tolerance | Slider | 0.0 - 20.0 | 2.0 |
-| Path joining | Select | Straight line / Retrace / ... | Straight line |
-| Circular mask | Toggle | on/off | off |
+| Path joining | Select | Straight line / Retrace / ... | Retrace |
+| Circular mask | Toggle | on/off | on |
 | Mask diameter | Slider | 0.1 - 1.0 | 1.0 |
 | Invert | Toggle | on/off | off |
 | Preview mode | Select | original/edges/paths/paths only | paths |

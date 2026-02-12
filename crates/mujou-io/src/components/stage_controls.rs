@@ -6,7 +6,7 @@
 //! what you can adjust.
 
 use dioxus::prelude::*;
-use mujou_pipeline::{ContourTracerKind, PathJoinerKind, PipelineConfig};
+use mujou_pipeline::{ContourTracerKind, PathJoinerKind, PipelineConfig, max_gradient_magnitude};
 
 use crate::stage::StageId;
 
@@ -73,10 +73,13 @@ pub fn StageControls(props: StageControlsProps) -> Element {
         StageId::Edges => {
             let canny_low = config.canny_low;
             let canny_high = config.canny_high;
+            let canny_max = config.canny_max;
             let invert = config.invert;
             let config_low = config.clone();
             let config_high = config.clone();
+            let config_max = config.clone();
             let config_invert = config.clone();
+            let theoretical_max = f64::from(max_gradient_magnitude());
             rsx! {
                 div { class: "space-y-2",
                     {render_slider(
@@ -84,7 +87,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         "Canny Low",
                         f64::from(canny_low),
                         1.0,
-                        500.0,
+                        f64::from(canny_max),
                         1.0,
                         move |v: f64| {
                             let mut c = config_low.clone();
@@ -100,14 +103,32 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         "Canny High",
                         f64::from(canny_high),
                         1.0,
-                        500.0,
+                        f64::from(canny_max),
                         1.0,
                         move |v: f64| {
                             let mut c = config_high.clone();
                             #[allow(clippy::cast_possible_truncation)]
                             let v = v as f32;
-                            // Enforce canny_high >= canny_low.
-                            c.canny_high = v.max(c.canny_low);
+                            // Enforce canny_low <= canny_high <= canny_max.
+                            c.canny_high = v.max(c.canny_low).min(c.canny_max);
+                            on_change.call(c);
+                        },
+                    )}
+                    {render_slider(
+                        "canny_max",
+                        "Canny Max",
+                        f64::from(canny_max),
+                        0.0,
+                        theoretical_max,
+                        1.0,
+                        move |v: f64| {
+                            let mut c = config_max.clone();
+                            #[allow(clippy::cast_possible_truncation)]
+                            let v = v as f32;
+                            // Slider range starts at 0 so the full
+                            // scale is visible, but clamp so canny_max
+                            // never drops below canny_high.
+                            c.canny_max = v.max(c.canny_high);
                             on_change.call(c);
                         },
                     )}

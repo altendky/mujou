@@ -144,6 +144,14 @@ pub struct PipelineConfig {
     /// Must be at least [`edge::MIN_THRESHOLD`] and at least `canny_low`.
     pub canny_high: f32,
 
+    /// Upper bound for the Canny threshold sliders in the UI.
+    ///
+    /// Does **not** affect pipeline computation — it controls slider
+    /// range so the user can "zoom in" on a useful threshold region.
+    /// Must be at least `canny_high` and at most
+    /// [`edge::max_gradient_magnitude()`].
+    pub canny_max: f32,
+
     /// Which contour tracing algorithm to use.
     pub contour_tracer: ContourTracerKind,
 
@@ -171,15 +179,50 @@ impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
             blur_sigma: 1.4,
-            canny_low: 50.0,
-            canny_high: 150.0,
+            canny_low: 30.0,
+            canny_high: 80.0,
+            canny_max: 120.0,
             contour_tracer: ContourTracerKind::default(),
             simplify_tolerance: 2.0,
             path_joiner: PathJoinerKind::default(),
-            circular_mask: false,
+            circular_mask: true,
             mask_diameter: 1.0,
             invert: false,
         }
+    }
+}
+
+impl PipelineConfig {
+    /// Compare two configs considering only fields that affect pipeline
+    /// output.  UI-only fields like [`canny_max`](Self::canny_max) are
+    /// ignored so that adjusting slider range alone does not trigger a
+    /// costly reprocess.
+    #[must_use]
+    pub fn pipeline_eq(&self, other: &Self) -> bool {
+        // Destructure so adding a field to PipelineConfig without updating
+        // this match causes a compile error.
+        let Self {
+            blur_sigma,
+            canny_low,
+            canny_high,
+            canny_max: _,
+            contour_tracer,
+            simplify_tolerance,
+            path_joiner,
+            circular_mask,
+            mask_diameter,
+            invert,
+        } = self;
+
+        *blur_sigma == other.blur_sigma
+            && *canny_low == other.canny_low
+            && *canny_high == other.canny_high
+            && *contour_tracer == other.contour_tracer
+            && *simplify_tolerance == other.simplify_tolerance
+            && *path_joiner == other.path_joiner
+            && *circular_mask == other.circular_mask
+            && *mask_diameter == other.mask_diameter
+            && *invert == other.invert
     }
 }
 
@@ -521,14 +564,79 @@ mod tests {
     fn pipeline_config_defaults_match_spec() {
         let config = PipelineConfig::default();
         assert!((config.blur_sigma - 1.4).abs() < f32::EPSILON);
-        assert!((config.canny_low - 50.0).abs() < f32::EPSILON);
-        assert!((config.canny_high - 150.0).abs() < f32::EPSILON);
+        assert!((config.canny_low - 30.0).abs() < f32::EPSILON);
+        assert!((config.canny_high - 80.0).abs() < f32::EPSILON);
+        assert!((config.canny_max - 120.0).abs() < f32::EPSILON);
         assert_eq!(config.contour_tracer, ContourTracerKind::BorderFollowing);
         assert!((config.simplify_tolerance - 2.0).abs() < f64::EPSILON);
-        assert_eq!(config.path_joiner, PathJoinerKind::StraightLine);
-        assert!(!config.circular_mask);
+        assert_eq!(config.path_joiner, PathJoinerKind::Retrace);
+        assert!(config.circular_mask);
         assert!((config.mask_diameter - 1.0).abs() < f64::EPSILON);
         assert!(!config.invert);
+    }
+
+    #[test]
+    fn pipeline_eq_ignores_canny_max() {
+        let a = PipelineConfig::default();
+        let mut b = a.clone();
+        b.canny_max = a.canny_max + 100.0;
+
+        // PartialEq sees the difference.
+        assert_ne!(a, b);
+        // pipeline_eq ignores it.
+        assert!(a.pipeline_eq(&b));
+    }
+
+    #[test]
+    fn pipeline_eq_detects_processing_field_change() {
+        let a = PipelineConfig::default();
+
+        let mut b = a.clone();
+        b.canny_low += 1.0;
+        assert!(!a.pipeline_eq(&b), "canny_low change should be detected");
+
+        let mut b = a.clone();
+        b.canny_high += 1.0;
+        assert!(!a.pipeline_eq(&b), "canny_high change should be detected");
+
+        let mut b = a.clone();
+        b.blur_sigma += 0.1;
+        assert!(!a.pipeline_eq(&b), "blur_sigma change should be detected");
+
+        let mut b = a.clone();
+        b.invert = !a.invert;
+        assert!(!a.pipeline_eq(&b), "invert change should be detected");
+
+        let mut b = a.clone();
+        b.circular_mask = !a.circular_mask;
+        assert!(
+            !a.pipeline_eq(&b),
+            "circular_mask change should be detected"
+        );
+
+        // ContourTracerKind currently has only one variant (BorderFollowing).
+        // Uncomment when a second variant is added:
+        // let mut b = a.clone();
+        // b.contour_tracer = ContourTracerKind::NewVariant;
+        // assert!(!a.pipeline_eq(&b), "contour_tracer change should be detected");
+
+        let mut b = a.clone();
+        b.simplify_tolerance += 0.5;
+        assert!(
+            !a.pipeline_eq(&b),
+            "simplify_tolerance change should be detected"
+        );
+
+        let mut b = a.clone();
+        b.path_joiner = PathJoinerKind::StraightLine;
+        assert!(!a.pipeline_eq(&b), "path_joiner change should be detected");
+
+        let mut b = a.clone();
+        b.mask_diameter -= 0.1;
+        assert!(
+            !a.pipeline_eq(&b),
+            "mask_diameter change should be detected"
+        );
     }
 
     // --- PipelineError tests ---
@@ -593,6 +701,7 @@ mod tests {
             blur_sigma: 2.0,
             canny_low: 30.0,
             canny_high: 120.0,
+            canny_max: 200.0,
             contour_tracer: ContourTracerKind::BorderFollowing,
             simplify_tolerance: 1.5,
             path_joiner: PathJoinerKind::Retrace,

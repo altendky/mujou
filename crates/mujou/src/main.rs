@@ -190,8 +190,10 @@ fn app() -> Element {
     use_effect(move || {
         let cfg = live_config();
 
-        // Skip debounce if configs already match (e.g. initial render).
-        if cfg == committed_config.peek().clone() {
+        // Skip debounce if pipeline-relevant fields are unchanged.
+        // UI-only fields like canny_max are excluded so adjusting
+        // slider range alone never triggers reprocessing.
+        if cfg.pipeline_eq(&committed_config.peek()) {
             return;
         }
 
