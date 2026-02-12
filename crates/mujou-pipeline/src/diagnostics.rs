@@ -31,6 +31,11 @@ mod duration_serde {
     /// Deserialize a `Duration` from fractional seconds (`f64`).
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
         let secs = f64::deserialize(deserializer)?;
+        if !secs.is_finite() || secs < 0.0 {
+            return Err(serde::de::Error::custom(
+                "duration seconds must be a finite non-negative number",
+            ));
+        }
         Ok(Duration::from_secs_f64(secs))
     }
 }
