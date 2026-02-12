@@ -613,6 +613,30 @@ mod tests {
             !a.pipeline_eq(&b),
             "circular_mask change should be detected"
         );
+
+        // ContourTracerKind currently has only one variant (BorderFollowing).
+        // Uncomment when a second variant is added:
+        // let mut b = a.clone();
+        // b.contour_tracer = ContourTracerKind::NewVariant;
+        // assert!(!a.pipeline_eq(&b), "contour_tracer change should be detected");
+
+        let mut b = a.clone();
+        b.simplify_tolerance += 0.5;
+        assert!(
+            !a.pipeline_eq(&b),
+            "simplify_tolerance change should be detected"
+        );
+
+        let mut b = a.clone();
+        b.path_joiner = PathJoinerKind::StraightLine;
+        assert!(!a.pipeline_eq(&b), "path_joiner change should be detected");
+
+        let mut b = a.clone();
+        b.mask_diameter -= 0.1;
+        assert!(
+            !a.pipeline_eq(&b),
+            "mask_diameter change should be detected"
+        );
     }
 
     // --- PipelineError tests ---
