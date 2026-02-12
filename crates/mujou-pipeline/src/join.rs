@@ -27,7 +27,6 @@ pub enum PathJoinerKind {
     ///
     /// Produces visible straight scratches between features, but scratch
     /// length is minimized by the internal path optimization.
-    #[default]
     StraightLine,
 
     /// Full-history retrace with integrated contour ordering.
@@ -47,6 +46,7 @@ pub enum PathJoinerKind {
     /// by retracing backward through already-drawn grooves. Produces a
     /// longer total path but significantly fewer visible artifacts than
     /// `StraightLine`.
+    #[default]
     Retrace,
 }
 
@@ -565,8 +565,8 @@ mod tests {
     use crate::types::Point;
 
     #[test]
-    fn default_is_straight_line() {
-        assert_eq!(PathJoinerKind::default(), PathJoinerKind::StraightLine);
+    fn default_is_retrace() {
+        assert_eq!(PathJoinerKind::default(), PathJoinerKind::Retrace);
     }
 
     #[test]

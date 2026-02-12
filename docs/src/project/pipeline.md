@@ -151,12 +151,13 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `blur_sigma` | f32 | 1.4 | Gaussian blur kernel sigma |
-| `canny_low` | f32 | 50.0 | Canny low threshold |
-| `canny_high` | f32 | 150.0 | Canny high threshold |
+| `canny_low` | f32 | 30.0 | Canny low threshold |
+| `canny_high` | f32 | 80.0 | Canny high threshold |
+| `canny_max` | f32 | 120.0 | Upper bound for Canny threshold sliders (UI only) |
 | `contour_tracer` | `ContourTracer` | `BorderFollowing` | Contour tracing algorithm ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `simplify_tolerance` | f64 | 2.0 | RDP simplification tolerance (pixels) |
-| `path_joiner` | `PathJoiner` | `StraightLineJoin` | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
-| `circular_mask` | bool | false | Clip output to circle |
+| `path_joiner` | `PathJoiner` | `Retrace` | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
+| `circular_mask` | bool | true | Clip output to circle |
 | `mask_diameter` | f64 | 1.0 | Mask diameter as fraction of image width |
 | `invert` | bool | false | Invert edge map |
 

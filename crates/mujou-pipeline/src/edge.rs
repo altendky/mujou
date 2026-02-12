@@ -39,6 +39,44 @@ pub fn canny(image: &GrayImage, low_threshold: f32, high_threshold: f32) -> Gray
     imageproc::edges::canny(image, low, high)
 }
 
+/// Maximum possible gradient magnitude for the Sobel 3×3 kernels used
+/// by [`imageproc::edges::canny`].
+///
+/// Computed by brute-forcing all 2⁹ = 512 possible binary (0 / 255)
+/// 3×3 pixel neighborhoods and returning the maximum
+/// `sqrt(gx² + gy²)`.  This exactly mirrors the gradient norm used
+/// internally by `imageproc`.
+///
+/// The result for Sobel 3×3 is `sqrt(5) × 2 × 255 ≈ 1140.39`, as
+/// documented upstream.
+///
+/// When the gradient method becomes configurable, this function should
+/// accept the kernel pair as parameters.
+#[must_use]
+pub fn max_gradient_magnitude() -> f32 {
+    // Sobel 3×3 kernels (matching imageproc::kernel::{SOBEL_HORIZONTAL_3X3, SOBEL_VERTICAL_3X3}).
+    const SOBEL_H: [i32; 9] = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+    const SOBEL_V: [i32; 9] = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+
+    let mut max_mag: f32 = 0.0;
+    // Enumerate every possible binary 3×3 neighborhood (pixel = 0 or 255).
+    for bits in 0_u32..512 {
+        let mut gx: i32 = 0;
+        let mut gy: i32 = 0;
+        for i in 0..9 {
+            let pixel = if bits & (1 << i) != 0 { 255_i32 } else { 0 };
+            gx += pixel * SOBEL_H[i];
+            gy += pixel * SOBEL_V[i];
+        }
+        #[allow(clippy::cast_precision_loss)]
+        let mag = (gx as f32).hypot(gy as f32);
+        if mag > max_mag {
+            max_mag = mag;
+        }
+    }
+    max_mag
+}
+
 /// Invert a binary edge map (bitwise NOT).
 ///
 /// Swaps edge pixels (255 → 0) and background pixels (0 → 255).
@@ -128,6 +166,23 @@ mod tests {
         img.put_pixel(2, 2, image::Luma([255]));
         let double_inverted = invert_edge_map(&invert_edge_map(&img));
         assert_eq!(img, double_inverted);
+    }
+
+    #[test]
+    fn max_gradient_magnitude_matches_imageproc_docs() {
+        // imageproc documents the greatest possible edge strength as
+        // `sqrt(5) * 2 * 255`, approximately 1140.39.
+        let expected = 5_f32.sqrt() * 2.0 * 255.0;
+        let actual = max_gradient_magnitude();
+        assert!(
+            (actual - expected).abs() < 0.01,
+            "expected ≈{expected}, got {actual}",
+        );
+    }
+
+    #[test]
+    fn max_gradient_magnitude_is_positive() {
+        assert!(max_gradient_magnitude() > 0.0);
     }
 
     #[test]
