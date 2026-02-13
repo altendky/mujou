@@ -538,11 +538,8 @@ fn ConfigButtons(
                 Icon { width: 20, height: 20, icon: LdClipboardPaste }
             }
             button {
-                class: if show_descriptions() {
-                    "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] rounded cursor-pointer transition-colors bg-[var(--btn-primary)] text-white ring-2 ring-[var(--border-accent)] ring-offset-1"
-                } else {
-                    btn_class
-                },
+                class: "{btn_class}",
+                class: if show_descriptions() { "ring-2 ring-[var(--border-accent)] ring-offset-1" },
                 title: "Toggle parameter descriptions",
                 aria_label: "Toggle parameter descriptions",
                 onclick: move |_| show_descriptions.toggle(),
