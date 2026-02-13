@@ -70,7 +70,7 @@ struct Cli {
     working_resolution: u32,
 
     /// Downsample filter (nearest, triangle, catmull-rom, gaussian, lanczos3).
-    #[arg(long, value_enum, default_value_t = Filter::Triangle)]
+    #[arg(long, value_enum, default_value_t = CLI_DEFAULT_FILTER)]
     downsample_filter: Filter,
 
     /// Write SVG output to file.
@@ -109,6 +109,22 @@ enum Filter {
     /// Lanczos with 3 lobes (slowest, sharpest).
     Lanczos3,
 }
+
+/// Maps a [`mujou_pipeline::DownsampleFilter`] to the local CLI [`Filter`] enum.
+const fn filter_from_pipeline(f: mujou_pipeline::DownsampleFilter) -> Filter {
+    match f {
+        mujou_pipeline::DownsampleFilter::Nearest => Filter::Nearest,
+        mujou_pipeline::DownsampleFilter::Triangle => Filter::Triangle,
+        mujou_pipeline::DownsampleFilter::CatmullRom => Filter::CatmullRom,
+        mujou_pipeline::DownsampleFilter::Gaussian => Filter::Gaussian,
+        mujou_pipeline::DownsampleFilter::Lanczos3 => Filter::Lanczos3,
+    }
+}
+
+/// The CLI default filter, derived from [`PipelineConfig::DEFAULT_DOWNSAMPLE_FILTER`]
+/// so the two cannot silently diverge.
+const CLI_DEFAULT_FILTER: Filter =
+    filter_from_pipeline(mujou_pipeline::PipelineConfig::DEFAULT_DOWNSAMPLE_FILTER);
 
 fn main() -> ExitCode {
     let cli = Cli::parse();

@@ -210,6 +210,8 @@ impl PipelineConfig {
     pub const DEFAULT_INVERT: bool = false;
     /// Default working resolution (max dimension after downsampling).
     pub const DEFAULT_WORKING_RESOLUTION: u32 = 256;
+    /// Default downsample filter.
+    pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Triangle;
 }
 
 impl Default for PipelineConfig {
@@ -226,7 +228,7 @@ impl Default for PipelineConfig {
             mask_diameter: Self::DEFAULT_MASK_DIAMETER,
             invert: Self::DEFAULT_INVERT,
             working_resolution: Self::DEFAULT_WORKING_RESOLUTION,
-            downsample_filter: DownsampleFilter::default(),
+            downsample_filter: Self::DEFAULT_DOWNSAMPLE_FILTER,
         }
     }
 }
