@@ -858,4 +858,103 @@ mod tests {
         assert!(report.contains("Edge Detection"));
         assert!(report.contains("Retrace"));
     }
+
+    #[test]
+    fn report_downsample_applied_true() {
+        let diag = PipelineDiagnostics {
+            decode: StageDiagnostics {
+                duration: Duration::from_millis(10),
+                metrics: StageMetrics::Decode {
+                    input_bytes: 5000,
+                    width: 800,
+                    height: 600,
+                    pixel_count: 480_000,
+                },
+            },
+            downsample: StageDiagnostics {
+                duration: Duration::from_millis(8),
+                metrics: StageMetrics::Downsample {
+                    original_width: 800,
+                    original_height: 600,
+                    width: 256,
+                    height: 192,
+                    max_dimension: 256,
+                    filter: "Triangle".to_string(),
+                    applied: true,
+                },
+            },
+            grayscale: StageDiagnostics {
+                duration: Duration::from_millis(3),
+                metrics: StageMetrics::Grayscale {
+                    width: 256,
+                    height: 192,
+                },
+            },
+            blur: StageDiagnostics {
+                duration: Duration::from_millis(10),
+                metrics: StageMetrics::Blur { sigma: 1.4 },
+            },
+            edge_detection: StageDiagnostics {
+                duration: Duration::from_millis(20),
+                metrics: StageMetrics::EdgeDetection {
+                    low_threshold: 30.0,
+                    high_threshold: 80.0,
+                    edge_pixel_count: 1200,
+                    total_pixel_count: 49152,
+                },
+            },
+            invert: None,
+            contour_tracing: StageDiagnostics {
+                duration: Duration::from_millis(10),
+                metrics: StageMetrics::ContourTracing {
+                    contour_count: 8,
+                    total_point_count: 150,
+                    min_contour_points: 3,
+                    max_contour_points: 40,
+                    mean_contour_points: 18.75,
+                },
+            },
+            simplification: StageDiagnostics {
+                duration: Duration::from_millis(4),
+                metrics: StageMetrics::Simplification {
+                    tolerance: 2.0,
+                    polyline_count: 8,
+                    points_before: 150,
+                    points_after: 80,
+                    reduction_ratio: 0.467,
+                },
+            },
+            mask: None,
+            join: StageDiagnostics {
+                duration: Duration::from_millis(15),
+                metrics: StageMetrics::Join {
+                    strategy: "Retrace".to_string(),
+                    input_polyline_count: 8,
+                    input_point_count: 80,
+                    output_point_count: 120,
+                    expansion_ratio: 1.5,
+                },
+            },
+            total_duration: Duration::from_millis(80),
+            summary: PipelineSummary {
+                image_width: 256,
+                image_height: 192,
+                pixel_count: 49152,
+                contour_count: 8,
+                final_point_count: 120,
+            },
+        };
+
+        let report = diag.report();
+        assert!(!report.is_empty());
+        // Verify the applied=true formatting path: "AxB -> CxD (target=N, Filter)"
+        assert!(
+            report.contains("800x600 -> 256x192"),
+            "report should contain downsample resize info, got:\n{report}",
+        );
+        assert!(
+            report.contains("Triangle"),
+            "report should mention the filter, got:\n{report}",
+        );
+    }
 }
