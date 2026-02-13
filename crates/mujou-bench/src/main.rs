@@ -66,7 +66,7 @@ struct Cli {
     invert: bool,
 
     /// Working resolution (max dimension in pixels after downsampling).
-    #[arg(long, default_value_t = 256)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_WORKING_RESOLUTION, value_parser = clap::builder::RangedU64ValueParser::<u32>::new().range(1..))]
     working_resolution: u32,
 
     /// Downsample filter (nearest, triangle, catmull-rom, gaussian, lanczos3).

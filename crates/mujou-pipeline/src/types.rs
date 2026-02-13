@@ -208,6 +208,8 @@ impl PipelineConfig {
     pub const DEFAULT_MASK_DIAMETER: f64 = 1.0;
     /// Default edge map inversion state.
     pub const DEFAULT_INVERT: bool = false;
+    /// Default working resolution (max dimension after downsampling).
+    pub const DEFAULT_WORKING_RESOLUTION: u32 = 256;
 }
 
 impl Default for PipelineConfig {
@@ -223,7 +225,7 @@ impl Default for PipelineConfig {
             circular_mask: Self::DEFAULT_CIRCULAR_MASK,
             mask_diameter: Self::DEFAULT_MASK_DIAMETER,
             invert: Self::DEFAULT_INVERT,
-            working_resolution: 256,
+            working_resolution: Self::DEFAULT_WORKING_RESOLUTION,
             downsample_filter: DownsampleFilter::default(),
         }
     }
