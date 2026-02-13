@@ -158,7 +158,7 @@ At 256x256 (65k pixels) vs 1024x1024 (1M pixels), the expensive stages (blur, Ca
 
 Positional precision on gentle curves will be limited to the ~3.3mm grid spacing (850mm / 256px). This may produce visible staircase artifacts on the largest tables. Acceptable for MVP; evaluate with real output.
 
-**Deferred: coarse-then-fine with region masking.** A coarse pass at low resolution identifies where edges exist, producing a binary mask of "interesting" regions. A second fine-resolution pass runs only in unmasked regions, skipping the ~99% of the image that is featureless. This avoids full-image high-res cost while preserving sub-pixel positional precision where edges actually occur. Simpler than a tiling approach (no stitching across tile boundaries). See [Open Questions](open-questions.md#coarse-then-fine-processing).
+**Deferred: coarse-then-fine with region masking.** A coarse pass at low resolution identifies where edges exist, producing a binary mask of "interesting" regions. A second fine-resolution pass runs only in unmasked regions, skipping the ~99% of the image that is featureless. This avoids full-image high-res cost while preserving sub-pixel positional precision where edges actually occur. Simpler than a tiling approach (no stitching across tile boundaries). See [Open Questions](open-questions.md#performance).
 
 ## Project Architecture
 
