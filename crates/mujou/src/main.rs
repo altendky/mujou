@@ -258,14 +258,7 @@ fn app() -> Element {
             href: "https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Noto+Sans+JP:wght@400&display=swap",
         }
 
-        div {
-            class: "min-h-screen bg-(--bg) text-(--text) flex flex-col overflow-x-hidden",
-            // Dismiss the info popover when clicking outside it.
-            onclick: move |_| {
-                if show_info() {
-                    show_info.set(false);
-                }
-            },
+        div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col overflow-x-hidden",
             // Theme toggle (fixed-positioned via shared theme.css;
             // content injected by shared theme-toggle.js)
             button {
@@ -284,7 +277,7 @@ fn app() -> Element {
             // toggle's own offset from the viewport edge.
             header { class: "pl-6 pr-[calc(var(--btn-height)+2rem)] py-4 border-b border-(--border) flex items-center justify-between gap-4",
                 h1 { class: "text-2xl title-brand", "mujou" }
-                div { class: "relative flex items-center gap-3",
+                div { class: "flex items-center gap-3",
                     FileUpload {
                         on_upload: on_upload,
                     }
@@ -292,23 +285,38 @@ fn app() -> Element {
                         class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
                         title: "About this app",
                         aria_label: "About this app",
-                        onclick: move |e| {
-                            e.stop_propagation();
-                            show_info.toggle();
-                        },
+                        onclick: move |_| show_info.toggle(),
                         Icon { width: 20, height: 20, icon: LdInfo }
                     }
-                    // Info popover — positioned below the info button.
-                    if show_info() {
-                        div { class: "absolute top-full right-0 mt-2 z-40 w-72 p-4 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--text)]",
-                            // Prevent clicks inside the popover from dismissing it.
-                            onclick: move |e| e.stop_propagation(),
-                            p { class: "font-medium mb-2",
-                                "Image to vector path converter for sand tables and CNC devices"
-                            }
-                            p { class: "text-[var(--text-secondary)]",
-                                "Upload an image \u{2192} adjust parameters \u{2192} export SVG or G-code for your sand table or CNC device."
-                            }
+                }
+            }
+
+            // Info modal — full-screen overlay with centered card.
+            // Follows the same fixed-inset pattern as the drag-and-drop
+            // overlay in upload.rs. Clicking the backdrop dismisses it.
+            if show_info() {
+                div {
+                    class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]",
+                    // Semi-transparent backdrop — click to dismiss.
+                    onclick: move |_| show_info.set(false),
+                    div { class: "absolute inset-0 bg-black/50" }
+                    // Card — stop propagation so clicking inside doesn't dismiss.
+                    div {
+                        class: "relative z-10 w-full max-w-md mx-4 p-6 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]",
+                        onclick: move |e| e.stop_propagation(),
+                        h2 { class: "text-lg font-semibold mb-3 text-[var(--text-heading)]",
+                            "About mujou"
+                        }
+                        p { class: "mb-3",
+                            "Image to vector path converter for sand tables and CNC devices."
+                        }
+                        p { class: "text-sm text-[var(--text-secondary)] mb-4",
+                            "Upload an image \u{2192} adjust parameters \u{2192} export SVG or G-code for your sand table or CNC device."
+                        }
+                        button {
+                            class: "text-sm px-4 py-1.5 rounded bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] text-white cursor-pointer transition-colors",
+                            onclick: move |_| show_info.set(false),
+                            "Close"
                         }
                     }
                 }
