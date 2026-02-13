@@ -100,6 +100,8 @@ enum Joiner {
 /// Downsample resampling filter selection.
 #[derive(Clone, Copy, ValueEnum)]
 enum Filter {
+    /// Disabled: skip downsampling regardless of image size.
+    Disabled,
     /// Nearest-neighbor (fastest, blocky).
     Nearest,
     /// Bilinear interpolation (fast, decent quality).
@@ -115,6 +117,7 @@ enum Filter {
 /// Maps a [`mujou_pipeline::DownsampleFilter`] to the local CLI [`Filter`] enum.
 const fn filter_from_pipeline(f: mujou_pipeline::DownsampleFilter) -> Filter {
     match f {
+        mujou_pipeline::DownsampleFilter::Disabled => Filter::Disabled,
         mujou_pipeline::DownsampleFilter::Nearest => Filter::Nearest,
         mujou_pipeline::DownsampleFilter::Triangle => Filter::Triangle,
         mujou_pipeline::DownsampleFilter::CatmullRom => Filter::CatmullRom,
@@ -146,6 +149,7 @@ fn main() -> ExitCode {
         invert: cli.invert,
         working_resolution: cli.working_resolution,
         downsample_filter: match cli.downsample_filter {
+            Filter::Disabled => mujou_pipeline::DownsampleFilter::Disabled,
             Filter::Nearest => mujou_pipeline::DownsampleFilter::Nearest,
             Filter::Triangle => mujou_pipeline::DownsampleFilter::Triangle,
             Filter::CatmullRom => mujou_pipeline::DownsampleFilter::CatmullRom,
