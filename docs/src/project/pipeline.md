@@ -108,7 +108,7 @@ MST-based segment-to-segment join algorithm. Finds globally optimal connections 
 
 Algorithm phases:
 
-1. **MST via Boruvka:** Insert all polyline segments into an R\*-tree spatial index (`rstar`). For each component, find the cheapest connection to another component using adaptive point sampling along segments + R-tree nearest-neighbor queries + exact segment-to-segment distance (`geo::Euclidean`). Merge components with `petgraph::UnionFind`. When a connection point falls in the interior of a segment, that segment is split at the connection point.
+1. **MST via Kruskal:** Insert all polyline segments into an R\*-tree spatial index (`rstar`). Sample points along each polyline at adaptive spacing and query the R-tree for K nearest cross-component segments to generate candidate edges with exact segment-to-segment distance (`geo::Euclidean`). Sort candidates by distance and merge via `petgraph::UnionFind` (Kruskal's algorithm). When a connection point falls in the interior of a segment, that segment is split at the connection point.
 2. **Fix parity:** Count odd-degree vertices. Greedily pair each odd vertex with its nearest unmatched odd vertex and duplicate the shortest path between them (Dijkstra). Duplicated edges represent retracing through already-drawn grooves (visually free).
 3. **Hierholzer:** Find an Eulerian path through the augmented graph (original edges + MST connecting edges + duplicated retrace edges).
 4. **Emit:** Convert the vertex sequence to a `Polyline`.

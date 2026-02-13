@@ -3,11 +3,11 @@
 //!
 //! # Algorithm overview
 //!
-//! 1. **Phase 1 — MST via Boruvka:** Build an R\*-tree of all polyline
-//!    segments, then iteratively find the cheapest connection between each
-//!    pair of components using segment-to-segment distances. Merge
-//!    components with `UnionFind` until a single connected component
-//!    remains.
+//! 1. **Phase 1 — MST via Kruskal:** Build an R\*-tree of all polyline
+//!    segments, sample points along each polyline, and query the R-tree
+//!    for K nearest cross-component segments to generate candidate edges.
+//!    Sort candidates by distance and merge via `UnionFind` (Kruskal's
+//!    algorithm) until a single connected component remains.
 //!
 //! 2. **Phase 2 — Fix parity:** An Eulerian path requires exactly 0 or 2
 //!    odd-degree vertices. Greedily pair remaining odd-degree vertices and
