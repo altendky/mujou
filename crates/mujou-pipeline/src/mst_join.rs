@@ -542,11 +542,15 @@ fn odd_degree_vertices(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
 /// Uses Euclidean distance as a fast heuristic for pairing (avoids
 /// running Dijkstra for every pair), then Dijkstra only for path
 /// reconstruction of the selected pairs.
-fn fix_parity(graph: &mut UnGraph<(), f64>, node_coords: &[geo::Coord<f64>]) {
+/// # Errors
+///
+/// Returns an error if shortest-path reconstruction fails for any
+/// odd-degree vertex pair (indicates a graph connectivity bug).
+fn fix_parity(graph: &mut UnGraph<(), f64>, node_coords: &[geo::Coord<f64>]) -> Result<(), String> {
     let mut odd = odd_degree_vertices(graph);
 
     if odd.len() <= 2 {
-        return; // 0 or 2 odd-degree vertices: already Eulerian.
+        return Ok(()); // 0 or 2 odd-degree vertices: already Eulerian.
     }
 
     // Greedy matching using Euclidean distance as heuristic: pair each
@@ -574,7 +578,7 @@ fn fix_parity(graph: &mut UnGraph<(), f64>, node_coords: &[geo::Coord<f64>]) {
         // duplicate each edge along it.
         let start = odd[best_i];
         let end = odd[best_j];
-        let path = shortest_path(graph, start, end);
+        let path = shortest_path(graph, start, end)?;
         for window in path.windows(2) {
             let (a, b) = (window[0], window[1]);
             // Find the weight of the existing edge.
@@ -594,16 +598,32 @@ fn fix_parity(graph: &mut UnGraph<(), f64>, node_coords: &[geo::Coord<f64>]) {
             odd.swap_remove(best_i);
         }
     }
+    Ok(())
 }
 
 /// Reconstruct the shortest path from `start` to `end` using Dijkstra.
 ///
 /// Returns the node sequence `[start, ..., end]`.
-fn shortest_path(graph: &UnGraph<(), f64>, start: NodeIndex, end: NodeIndex) -> Vec<NodeIndex> {
+///
+/// # Errors
+///
+/// Returns an error if `end` is unreachable from `start` or if path
+/// reconstruction fails (e.g. due to a disconnected graph).
+fn shortest_path(
+    graph: &UnGraph<(), f64>,
+    start: NodeIndex,
+    end: NodeIndex,
+) -> Result<Vec<NodeIndex>, String> {
     // Run petgraph's Dijkstra for costs, then reconstruct path greedily.
     let costs = dijkstra(graph as &UnGraph<(), f64>, start, Some(end), |e| {
         *e.weight()
     });
+
+    if !costs.contains_key(&end) {
+        return Err(format!(
+            "shortest_path: end node {end:?} is unreachable from start {start:?}"
+        ));
+    }
 
     // Greedy reconstruction: from end, step to the neighbor with
     // cost[neighbor] + edge_weight == cost[current].
@@ -638,11 +658,24 @@ fn shortest_path(graph: &UnGraph<(), f64>, start: NodeIndex, end: NodeIndex) -> 
             visited.insert(n);
             current = n;
         } else {
-            break; // Unreachable in a connected graph.
+            return Err(format!(
+                "shortest_path: reconstruction stalled at node {current:?} \
+                 (start={start:?}, end={end:?}, path len so far={})",
+                path.len()
+            ));
         }
     }
     path.reverse();
-    path
+
+    if path.first() != Some(&start) || path.last() != Some(&end) || path.len() < 2 {
+        return Err(format!(
+            "shortest_path: reconstruction produced invalid path \
+             (start={start:?}, end={end:?}, path len={})",
+            path.len()
+        ));
+    }
+
+    Ok(path)
 }
 
 // ---------------------------------------------------------------------------
@@ -730,7 +763,14 @@ fn emit_polyline(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> Polylin
 /// 3. Fixes vertex parity for Eulerian path existence by duplicating
 ///    shortest paths (retracing is visually free on sand tables).
 /// 4. Finds an Eulerian path through the augmented graph.
+///
+/// # Panics
+///
+/// Panics if shortest-path reconstruction fails during the parity-fix
+/// phase.  This indicates a bug in MST construction (the graph should
+/// be fully connected after phase 1).
 #[must_use]
+#[allow(clippy::expect_used)] // structural invariant: MST guarantees connectivity
 pub fn join_mst(contours: &[Polyline], k_nearest: usize) -> Polyline {
     // Filter out empty contours.
     let polylines: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
@@ -748,7 +788,8 @@ pub fn join_mst(contours: &[Polyline], k_nearest: usize) -> Polyline {
 
     // Phase 2+3: Build graph, fix parity, find Eulerian path.
     let (mut graph, node_coords) = build_graph(&polylines, &mst_edges);
-    fix_parity(&mut graph, &node_coords);
+    fix_parity(&mut graph, &node_coords)
+        .expect("fix_parity: shortest-path reconstruction failed on MST-connected graph");
     let path = hierholzer(&graph);
 
     // Phase 4: Emit.
@@ -1011,7 +1052,7 @@ mod tests {
             geo::Coord { x: 0.0, y: -1.0 }, // l4
         ];
 
-        fix_parity(&mut g, &node_coords);
+        fix_parity(&mut g, &node_coords).unwrap();
         let odd = odd_degree_vertices(&g);
         assert!(
             odd.len() <= 2,
