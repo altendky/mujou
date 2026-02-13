@@ -830,6 +830,10 @@ fn emit_polyline(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> Polylin
 /// Panics if shortest-path reconstruction fails during the parity-fix
 /// phase.  This indicates a bug in MST construction (the graph should
 /// be fully connected after phase 1).
+///
+/// Also panics if Hierholzer's algorithm returns an empty path on a
+/// non-empty, parity-fixed graph — this would indicate a bug in graph
+/// construction or parity fixing.
 #[must_use]
 #[allow(clippy::expect_used)] // structural invariant: MST guarantees connectivity
 pub fn join_mst(contours: &[Polyline], k_nearest: usize, working_resolution: u32) -> Polyline {
@@ -854,14 +858,13 @@ pub fn join_mst(contours: &[Polyline], k_nearest: usize, working_resolution: u32
     let path = hierholzer(&graph);
 
     // Phase 4: Emit.
-    if path.is_empty() {
-        // Fallback: concatenate all contour points.
-        let all_points: Vec<Point> = polylines
-            .iter()
-            .flat_map(|p| p.points().iter().copied())
-            .collect();
-        return Polyline::new(all_points);
-    }
+    assert!(
+        !path.is_empty(),
+        "hierholzer returned empty path on a graph with {} nodes and {} edges — \
+         this indicates a bug in build_graph or fix_parity",
+        graph.node_count(),
+        graph.edge_count(),
+    );
 
     emit_polyline(&path, &node_coords)
 }
