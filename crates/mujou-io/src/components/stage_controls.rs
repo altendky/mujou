@@ -115,7 +115,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         0.0,
                         10.0,
                         0.1,
-                        2,
+                        1,
                         move |v: f64| {
                             let mut c = config.clone();
                             #[allow(clippy::cast_possible_truncation)]
@@ -146,7 +146,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         1.0,
                         f64::from(canny_max),
                         1.0,
-                        2,
+                        0,
                         move |v: f64| {
                             let mut c = config_low.clone();
                             #[allow(clippy::cast_possible_truncation)]
@@ -163,7 +163,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         1.0,
                         f64::from(canny_max),
                         1.0,
-                        2,
+                        0,
                         move |v: f64| {
                             let mut c = config_high.clone();
                             #[allow(clippy::cast_possible_truncation)]
@@ -180,7 +180,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         0.0,
                         theoretical_max,
                         1.0,
-                        2,
+                        0,
                         move |v: f64| {
                             let mut c = config_max.clone();
                             #[allow(clippy::cast_possible_truncation)]
@@ -241,7 +241,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         0.0,
                         20.0,
                         0.1,
-                        2,
+                        1,
                         move |v: f64| {
                             let mut c = config.clone();
                             c.simplify_tolerance = v;
