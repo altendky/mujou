@@ -283,21 +283,24 @@ fn app() -> Element {
             // gap between the upload button and the toggle, matching the
             // toggle's own offset from the viewport edge.
             header { class: "pl-6 pr-[calc(var(--btn-height)+2rem)] py-4 border-b border-(--border) flex items-center justify-between gap-4",
-                div { class: "relative flex items-center gap-2",
-                    h1 { class: "text-2xl title-brand", "mujou" }
+                h1 { class: "text-2xl title-brand", "mujou" }
+                div { class: "relative flex items-center gap-3",
+                    FileUpload {
+                        on_upload: on_upload,
+                    }
                     button {
-                        class: "inline-flex items-center justify-center w-7 h-7 rounded-full border border-[var(--link-border)] text-[var(--muted)] hover:border-[var(--link-hover)] hover:text-[var(--text)] cursor-pointer transition-colors",
+                        class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
                         title: "About this app",
                         aria_label: "About this app",
                         onclick: move |e| {
                             e.stop_propagation();
                             show_info.toggle();
                         },
-                        Icon { width: 16, height: 16, icon: LdInfo }
+                        Icon { width: 20, height: 20, icon: LdInfo }
                     }
                     // Info popover — positioned below the info button.
                     if show_info() {
-                        div { class: "absolute top-full left-0 mt-2 z-40 w-72 p-4 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--text)]",
+                        div { class: "absolute top-full right-0 mt-2 z-40 w-72 p-4 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--text)]",
                             // Prevent clicks inside the popover from dismissing it.
                             onclick: move |e| e.stop_propagation(),
                             p { class: "font-medium mb-2",
@@ -308,9 +311,6 @@ fn app() -> Element {
                             }
                         }
                     }
-                }
-                FileUpload {
-                    on_upload: on_upload,
                 }
             }
 
