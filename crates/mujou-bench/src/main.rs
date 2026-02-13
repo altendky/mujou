@@ -18,8 +18,10 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
+use mujou_pipeline::diagnostics::{Clock, PipelineDiagnostics};
 
 /// Pipeline parameter experimentation and diagnostics for mujou.
 ///
@@ -32,19 +34,19 @@ struct Cli {
     image_path: PathBuf,
 
     /// Gaussian blur sigma.
-    #[arg(long, default_value_t = 1.4)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_BLUR_SIGMA)]
     blur_sigma: f32,
 
     /// Canny low threshold.
-    #[arg(long, default_value_t = 30.0)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_CANNY_LOW)]
     canny_low: f32,
 
     /// Canny high threshold.
-    #[arg(long, default_value_t = 80.0)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_CANNY_HIGH)]
     canny_high: f32,
 
     /// RDP simplification tolerance in pixels.
-    #[arg(long, default_value_t = 2.0)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_SIMPLIFY_TOLERANCE)]
     simplify_tolerance: f64,
 
     /// Path joining strategy.
@@ -56,7 +58,7 @@ struct Cli {
     no_mask: bool,
 
     /// Mask diameter as fraction of image extent (0.0-1.0).
-    #[arg(long, default_value_t = 1.0)]
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_DIAMETER)]
     mask_diameter: f64,
 
     /// Invert edge map before contour tracing.
@@ -76,7 +78,7 @@ struct Cli {
     svg: Option<PathBuf>,
 
     /// Number of runs for averaging.
-    #[arg(long, default_value_t = 1)]
+    #[arg(long, default_value_t = 1, value_parser = clap::builder::RangedU64ValueParser::<usize>::new().range(1..))]
     runs: usize,
 
     /// Output diagnostics as JSON instead of human-readable report.
@@ -110,11 +112,6 @@ enum Filter {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-
-    if cli.runs == 0 {
-        eprintln!("Error: --runs must be at least 1");
-        return ExitCode::FAILURE;
-    }
 
     let config = mujou_pipeline::PipelineConfig {
         blur_sigma: cli.blur_sigma,
@@ -163,7 +160,11 @@ fn main() -> ExitCode {
             eprintln!("--- Run {}/{} ---", run + 1, cli.runs);
         }
 
-        match mujou_pipeline::process_staged_with_diagnostics(&image_bytes, &config) {
+        match mujou_pipeline::diagnostics::process_staged_with_diagnostics(
+            &image_bytes,
+            &config,
+            &StdClock,
+        ) {
             Ok((staged, diagnostics)) => {
                 if cli.json {
                     match serde_json::to_string_pretty(&diagnostics) {
@@ -218,18 +219,40 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// [`Clock`] implementation backed by [`std::time::Instant`].
+struct StdClock;
+
+impl Clock for StdClock {
+    type Instant = Instant;
+
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+
+    fn elapsed(&self, since: &Instant) -> Duration {
+        since.elapsed()
+    }
+}
+
 /// Function pointer type for extracting a stage duration from diagnostics.
-type StageExtractor = fn(&mujou_pipeline::PipelineDiagnostics) -> Option<std::time::Duration>;
+type StageExtractor = fn(&PipelineDiagnostics) -> Option<std::time::Duration>;
 
 /// Print aggregated statistics across multiple runs.
 #[allow(clippy::cast_precision_loss)]
-fn print_multi_run_summary(all_diagnostics: &[mujou_pipeline::PipelineDiagnostics]) {
+fn print_multi_run_summary(all_diagnostics: &[PipelineDiagnostics]) {
+    debug_assert!(!all_diagnostics.is_empty(), "no diagnostics to summarize");
+
     println!();
     println!(
         "Summary ({} runs)\n{}",
         all_diagnostics.len(),
         "=".repeat(60),
     );
+
+    if all_diagnostics.is_empty() {
+        println!("Warning: no diagnostics to summarize");
+        return;
+    }
 
     let durations: Vec<f64> = all_diagnostics
         .iter()

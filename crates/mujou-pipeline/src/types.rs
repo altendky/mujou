@@ -191,19 +191,38 @@ pub struct PipelineConfig {
     pub downsample_filter: DownsampleFilter,
 }
 
+impl PipelineConfig {
+    /// Default Gaussian blur sigma.
+    pub const DEFAULT_BLUR_SIGMA: f32 = 1.4;
+    /// Default Canny low threshold.
+    pub const DEFAULT_CANNY_LOW: f32 = 30.0;
+    /// Default Canny high threshold.
+    pub const DEFAULT_CANNY_HIGH: f32 = 80.0;
+    /// Default Canny slider maximum.
+    pub const DEFAULT_CANNY_MAX: f32 = 120.0;
+    /// Default RDP simplification tolerance in pixels.
+    pub const DEFAULT_SIMPLIFY_TOLERANCE: f64 = 2.0;
+    /// Default circular mask enabled state.
+    pub const DEFAULT_CIRCULAR_MASK: bool = true;
+    /// Default mask diameter as a fraction of image width.
+    pub const DEFAULT_MASK_DIAMETER: f64 = 1.0;
+    /// Default edge map inversion state.
+    pub const DEFAULT_INVERT: bool = false;
+}
+
 impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
-            blur_sigma: 1.4,
-            canny_low: 30.0,
-            canny_high: 80.0,
-            canny_max: 120.0,
+            blur_sigma: Self::DEFAULT_BLUR_SIGMA,
+            canny_low: Self::DEFAULT_CANNY_LOW,
+            canny_high: Self::DEFAULT_CANNY_HIGH,
+            canny_max: Self::DEFAULT_CANNY_MAX,
             contour_tracer: ContourTracerKind::default(),
-            simplify_tolerance: 2.0,
+            simplify_tolerance: Self::DEFAULT_SIMPLIFY_TOLERANCE,
             path_joiner: PathJoinerKind::default(),
-            circular_mask: true,
-            mask_diameter: 1.0,
-            invert: false,
+            circular_mask: Self::DEFAULT_CIRCULAR_MASK,
+            mask_diameter: Self::DEFAULT_MASK_DIAMETER,
+            invert: Self::DEFAULT_INVERT,
             working_resolution: 256,
             downsample_filter: DownsampleFilter::default(),
         }

@@ -128,7 +128,17 @@ fn handle_message(event: web_sys::MessageEvent) {
     log("worker: config parsed, running pipeline");
 
     // Run the pipeline (synchronous — blocks this worker thread only).
-    let outcome = mujou_pipeline::process_staged(&image_bytes, &config);
+    let outcome = (|| {
+        use mujou_pipeline::pipeline::{Advance, Stage};
+
+        let mut stage: Stage = mujou_pipeline::Pipeline::new(image_bytes, config).into();
+        loop {
+            match stage.advance()? {
+                Advance::Next(next) => stage = next,
+                Advance::Complete(done) => break done.complete(),
+            }
+        }
+    })();
 
     match outcome {
         Ok(staged) => {

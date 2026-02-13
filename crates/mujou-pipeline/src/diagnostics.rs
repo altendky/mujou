@@ -1,17 +1,16 @@
 //! Pipeline diagnostics: timing, counts, and other metrics for each stage.
 //!
-//! These diagnostics are permanent instrumentation intended for
-//! algorithm tuning and parameter experimentation. Every call to
-//! [`process_staged`](crate::process_staged) collects diagnostics
-//! alongside the pipeline results.
+//! These types describe pipeline instrumentation for algorithm tuning
+//! and parameter experimentation. Each pipeline stage reports its own
+//! metrics via [`PipelineStage::metrics()`](crate::pipeline::PipelineStage::metrics).
 //!
-//! Duration measurements use [`std::time::Duration`] (platform-agnostic).
-//! The caller is responsible for providing timestamps; on native targets
-//! this is [`std::time::Instant`], on WASM it can be `performance.now()`.
+//! This crate is sans-IO and does not read the system clock.
+//! [`process_staged_with_diagnostics`] is generic over a [`Clock`]
+//! trait so callers can supply any instant type — `std::time::Instant`
+//! on native, `web_time::Instant` on WASM, or a fake clock in tests.
 //!
-//! Durations are serialized as fractional seconds (`f64`) for JSON
-//! compatibility, since `std::time::Duration` does not implement serde
-//! traits.
+//! Duration fields use [`std::time::Duration`] and are serialized as
+//! fractional seconds (`f64`) for JSON compatibility.
 
 use std::time::Duration;
 
@@ -31,7 +30,11 @@ mod duration_serde {
     /// Deserialize a `Duration` from fractional seconds (`f64`).
     pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Duration, D::Error> {
         let secs = f64::deserialize(deserializer)?;
-        Ok(Duration::from_secs_f64(secs))
+        Duration::try_from_secs_f64(secs).map_err(|_| {
+            serde::de::Error::custom(
+                "duration seconds must be finite, non-negative, and representable as a Duration",
+            )
+        })
     }
 }
 
@@ -53,6 +56,11 @@ pub struct PipelineDiagnostics {
     /// Stage 3: Canny edge detection.
     pub edge_detection: StageDiagnostics,
     /// Stage 4: edge map inversion (only when `config.invert == true`).
+    ///
+    /// **Note:** The invert operation runs inside the edge-detection stage
+    /// transition, so its `duration` is always `Duration::ZERO`. The
+    /// actual inversion cost is included in `edge_detection.duration`.
+    /// This entry exists to report the post-inversion edge pixel count.
     pub invert: Option<StageDiagnostics>,
     /// Stage 5: contour tracing.
     pub contour_tracing: StageDiagnostics,
@@ -200,9 +208,9 @@ pub enum StageMetrics {
 /// High-level summary counts for the entire pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PipelineSummary {
-    /// Source image dimensions.
+    /// Source image width in pixels.
     pub image_width: u32,
-    /// Source image dimensions.
+    /// Source image height in pixels.
     pub image_height: u32,
     /// Total pixel count.
     pub pixel_count: u64,
@@ -384,14 +392,23 @@ fn format_metrics(metrics: &StageMetrics) -> String {
 
 /// Count edge pixels (value == 255) in a grayscale image.
 pub(crate) fn count_edge_pixels(image: &image::GrayImage) -> u64 {
-    image
-        .pixels()
-        .map(|p| u64::from(u8::from(p.0[0] == 255)))
-        .sum()
+    image.pixels().filter(|p| p.0[0] == 255).count() as u64
+}
+
+/// Statistics for a set of contour polylines.
+pub(crate) struct ContourStats {
+    /// Total number of points across all contours.
+    pub total: usize,
+    /// Minimum number of points in any single contour.
+    pub min: usize,
+    /// Maximum number of points in any single contour.
+    pub max: usize,
+    /// Mean number of points per contour.
+    pub mean: f64,
 }
 
 /// Compute contour statistics from a set of polylines.
-pub(crate) fn contour_stats(contours: &[crate::Polyline]) -> (usize, usize, usize, f64) {
+pub(crate) fn contour_stats(contours: &[crate::Polyline]) -> ContourStats {
     let total: usize = contours.iter().map(crate::Polyline::len).sum();
     let min = contours.iter().map(crate::Polyline::len).min().unwrap_or(0);
     let max = contours.iter().map(crate::Polyline::len).max().unwrap_or(0);
@@ -401,15 +418,149 @@ pub(crate) fn contour_stats(contours: &[crate::Polyline]) -> (usize, usize, usiz
     } else {
         total as f64 / contours.len() as f64
     };
-    (total, min, max, mean)
+    ContourStats {
+        total,
+        min,
+        max,
+        mean,
+    }
 }
 
-/// Total points across a slice of polylines.
-pub(crate) fn total_points(polylines: &[crate::Polyline]) -> usize {
-    polylines.iter().map(crate::Polyline::len).sum()
+/// Abstraction over a monotonic clock.
+///
+/// Implement this for your platform's instant type so that
+/// [`process_staged_with_diagnostics`] can measure stage durations
+/// without depending on a specific time crate.
+///
+/// # Examples
+///
+/// ```rust
+/// use std::time::{Duration, Instant};
+/// use mujou_pipeline::diagnostics::Clock;
+///
+/// struct StdClock;
+///
+/// impl Clock for StdClock {
+///     type Instant = Instant;
+///     fn now(&self) -> Instant { Instant::now() }
+///     fn elapsed(&self, since: &Instant) -> Duration { since.elapsed() }
+/// }
+/// ```
+pub trait Clock {
+    /// The instant type returned by [`now`](Self::now).
+    type Instant;
+
+    /// Capture the current instant.
+    fn now(&self) -> Self::Instant;
+
+    /// Measure the duration elapsed since `since`.
+    fn elapsed(&self, since: &Self::Instant) -> Duration;
+}
+
+/// Run the full pipeline with per-stage timing instrumentation.
+///
+/// Each [`Stage::advance()`](crate::pipeline::Stage::advance) call is
+/// timed using the supplied [`Clock`], and the elapsed duration is
+/// paired with the stage's own
+/// [`metrics()`](crate::pipeline::PipelineStage::metrics) to build a
+/// [`PipelineDiagnostics`].
+///
+/// # Errors
+///
+/// Returns [`PipelineError`](crate::PipelineError) if any pipeline
+/// stage fails.
+pub fn process_staged_with_diagnostics<C: Clock>(
+    image_bytes: &[u8],
+    config: &crate::PipelineConfig,
+    clock: &C,
+) -> Result<(crate::StagedResult, PipelineDiagnostics), crate::PipelineError> {
+    use crate::pipeline::{
+        Advance, Blurred, ContoursTraced, Decoded, Downsampled, EdgesDetected, Grayscaled, Joined,
+        Masked, PipelineStage as _, STAGE_COUNT, Simplified, Stage,
+    };
+
+    let pipeline_start = clock.now();
+    let mut stage: Stage = crate::Pipeline::new(image_bytes.to_vec(), config.clone()).into();
+
+    let mut stage_diags: [Option<StageDiagnostics>; STAGE_COUNT] = std::array::from_fn(|_| None);
+    let mut invert_diag = None;
+
+    loop {
+        let t = clock.now();
+        match stage.advance()? {
+            Advance::Next(next) => {
+                let elapsed = clock.elapsed(&t);
+                if let Some(metrics) = next.metrics() {
+                    stage_diags[next.index()] = Some(StageDiagnostics {
+                        duration: elapsed,
+                        metrics,
+                    });
+                }
+                if let Some(inv) = next.invert_metrics() {
+                    invert_diag = Some(StageDiagnostics {
+                        duration: Duration::ZERO,
+                        metrics: inv,
+                    });
+                }
+                stage = next;
+            }
+            Advance::Complete(done) => {
+                let total_duration = clock.elapsed(&pipeline_start);
+                let result = done.complete()?;
+
+                let summary = PipelineSummary {
+                    image_width: result.dimensions.width,
+                    image_height: result.dimensions.height,
+                    pixel_count: u64::from(result.dimensions.width)
+                        * u64::from(result.dimensions.height),
+                    contour_count: result.contours.len(),
+                    final_point_count: result.joined.len(),
+                };
+
+                let diag_missing = |name: &str| {
+                    crate::PipelineError::InvalidConfig(format!(
+                        "diagnostics bug: {name} diagnostics missing"
+                    ))
+                };
+                let pipeline_diagnostics = PipelineDiagnostics {
+                    decode: stage_diags[Decoded::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Decoded::NAME))?,
+                    downsample: stage_diags[Downsampled::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Downsampled::NAME))?,
+                    grayscale: stage_diags[Grayscaled::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Grayscaled::NAME))?,
+                    blur: stage_diags[Blurred::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Blurred::NAME))?,
+                    edge_detection: stage_diags[EdgesDetected::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(EdgesDetected::NAME))?,
+                    invert: invert_diag,
+                    contour_tracing: stage_diags[ContoursTraced::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(ContoursTraced::NAME))?,
+                    simplification: stage_diags[Simplified::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Simplified::NAME))?,
+                    mask: stage_diags[Masked::INDEX].take(),
+                    join: stage_diags[Joined::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Joined::NAME))?,
+                    total_duration,
+                    summary,
+                };
+
+                break Ok((result, pipeline_diagnostics));
+            }
+        }
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -432,11 +583,11 @@ mod tests {
 
     #[test]
     fn contour_stats_empty() {
-        let (total, min, max, mean) = contour_stats(&[]);
-        assert_eq!(total, 0);
-        assert_eq!(min, 0);
-        assert_eq!(max, 0);
-        assert!((mean - 0.0).abs() < f64::EPSILON);
+        let stats = contour_stats(&[]);
+        assert_eq!(stats.total, 0);
+        assert_eq!(stats.min, 0);
+        assert_eq!(stats.max, 0);
+        assert!((stats.mean - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -453,11 +604,166 @@ mod tests {
                 crate::Point::new(3.0, 0.0),
             ]),
         ];
-        let (total, min, max, mean) = contour_stats(&contours);
-        assert_eq!(total, 6);
-        assert_eq!(min, 2);
-        assert_eq!(max, 4);
-        assert!((mean - 3.0).abs() < f64::EPSILON);
+        let stats = contour_stats(&contours);
+        assert_eq!(stats.total, 6);
+        assert_eq!(stats.min, 2);
+        assert_eq!(stats.max, 4);
+        assert!((stats.mean - 3.0).abs() < f64::EPSILON);
+    }
+
+    /// A deterministic clock for testing [`process_staged_with_diagnostics`].
+    ///
+    /// Each [`now()`](Clock::now) call returns a monotonically increasing
+    /// tick value.  [`elapsed()`](Clock::elapsed) returns
+    /// `10ms * (current_tick - since)` so that every stage gets a
+    /// predictable, distinguishable duration.
+    struct FakeClock {
+        tick: std::cell::Cell<u64>,
+    }
+
+    impl FakeClock {
+        const MS_PER_TICK: u64 = 10;
+
+        fn new() -> Self {
+            Self {
+                tick: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    impl Clock for FakeClock {
+        type Instant = u64;
+
+        fn now(&self) -> u64 {
+            let t = self.tick.get();
+            self.tick.set(t + 1);
+            t
+        }
+
+        fn elapsed(&self, since: &u64) -> Duration {
+            let current = self.tick.get();
+            Duration::from_millis((current - since) * Self::MS_PER_TICK)
+        }
+    }
+
+    /// Generate a small PNG with a sharp vertical edge (left half black,
+    /// right half white) that reliably produces contours.
+    fn sharp_edge_png(width: u32, height: u32) -> Vec<u8> {
+        let img = image::RgbaImage::from_fn(width, height, |x, _y| {
+            if x < width / 2 {
+                image::Rgba([0, 0, 0, 255])
+            } else {
+                image::Rgba([255, 255, 255, 255])
+            }
+        });
+        let mut buf = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .unwrap();
+        buf
+    }
+
+    #[test]
+    fn fake_clock_diagnostics_without_invert() {
+        let png = sharp_edge_png(40, 40);
+        let config = crate::PipelineConfig {
+            circular_mask: false,
+            invert: false,
+            ..crate::PipelineConfig::default()
+        };
+        let clock = FakeClock::new();
+
+        let (_result, diag) = process_staged_with_diagnostics(&png, &config, &clock)
+            .expect("pipeline should succeed");
+
+        // Call pattern (no invert, no mask):
+        //   now#0: pipeline_start=0, tick→1
+        //   now#1: t=1, tick→2; advance Pending->Decoded; elapsed(&1) at tick 2 => 10ms
+        //   now#2: t=2, tick→3; advance Decoded->Grayscaled; elapsed(&2) at tick 3 => 10ms
+        //   ...each stage gets 10ms...
+        //   now#8: t=8, tick→9; advance Masked->Joined; elapsed(&8) at tick 9 => 10ms
+        //   now#9: t=9, tick→10; advance Joined->Complete; elapsed(&0) at tick 10 => 100ms
+
+        let ten_ms = Duration::from_millis(10);
+
+        assert_eq!(diag.decode.duration, ten_ms);
+        assert_eq!(diag.downsample.duration, ten_ms);
+        assert_eq!(diag.grayscale.duration, ten_ms);
+        assert_eq!(diag.blur.duration, ten_ms);
+        assert_eq!(diag.edge_detection.duration, ten_ms);
+        assert!(diag.invert.is_none());
+        assert_eq!(diag.contour_tracing.duration, ten_ms);
+        assert_eq!(diag.simplification.duration, ten_ms);
+        // mask disabled -> None
+        assert!(diag.mask.is_none());
+        assert_eq!(diag.join.duration, ten_ms);
+        assert_eq!(diag.total_duration, Duration::from_millis(110));
+
+        // Summary should reflect the 40x40 image.
+        assert_eq!(diag.summary.image_width, 40);
+        assert_eq!(diag.summary.image_height, 40);
+        assert_eq!(diag.summary.pixel_count, 1600);
+        assert!(diag.summary.contour_count > 0);
+        assert!(diag.summary.final_point_count > 0);
+
+        // Report should contain key sections.
+        let report = diag.report();
+        assert!(report.contains("Pipeline Diagnostics Report"));
+        assert!(report.contains("Edge Detection"));
+    }
+
+    #[test]
+    fn fake_clock_diagnostics_with_invert_and_mask() {
+        let png = sharp_edge_png(40, 40);
+        let config = crate::PipelineConfig {
+            circular_mask: true,
+            invert: true,
+            ..crate::PipelineConfig::default()
+        };
+        let clock = FakeClock::new();
+
+        let (_result, diag) = process_staged_with_diagnostics(&png, &config, &clock)
+            .expect("pipeline should succeed");
+
+        let ten_ms = Duration::from_millis(10);
+
+        assert_eq!(diag.decode.duration, ten_ms);
+        assert_eq!(diag.downsample.duration, ten_ms);
+        assert_eq!(diag.grayscale.duration, ten_ms);
+        assert_eq!(diag.blur.duration, ten_ms);
+        assert_eq!(diag.edge_detection.duration, ten_ms);
+
+        // Invert should be present with Duration::ZERO.
+        let invert = diag
+            .invert
+            .as_ref()
+            .expect("invert diagnostics should be Some");
+        assert_eq!(invert.duration, Duration::ZERO);
+        assert!(
+            matches!(invert.metrics, StageMetrics::Invert { .. }),
+            "invert metrics should be Invert variant"
+        );
+
+        assert_eq!(diag.contour_tracing.duration, ten_ms);
+        assert_eq!(diag.simplification.duration, ten_ms);
+
+        // Mask enabled -> Some with timing.
+        let mask = diag.mask.as_ref().expect("mask diagnostics should be Some");
+        assert_eq!(mask.duration, ten_ms);
+
+        assert_eq!(diag.join.duration, ten_ms);
+        assert_eq!(diag.total_duration, Duration::from_millis(110));
+
+        // Summary should reflect the 40x40 image.
+        assert_eq!(diag.summary.image_width, 40);
+        assert_eq!(diag.summary.image_height, 40);
+        assert_eq!(diag.summary.pixel_count, 1600);
     }
 
     #[test]
