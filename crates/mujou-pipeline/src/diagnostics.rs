@@ -51,24 +51,24 @@ pub struct PipelineDiagnostics {
     pub downsample: StageDiagnostics,
     /// Stage 2: grayscale conversion.
     pub grayscale: StageDiagnostics,
-    /// Stage 2: Gaussian blur.
+    /// Stage 3: Gaussian blur.
     pub blur: StageDiagnostics,
-    /// Stage 3: Canny edge detection.
+    /// Stage 4: Canny edge detection.
     pub edge_detection: StageDiagnostics,
-    /// Stage 4: edge map inversion (only when `config.invert == true`).
+    /// Stage 5: edge map inversion (only when `config.invert == true`).
     ///
     /// **Note:** The invert operation runs inside the edge-detection stage
     /// transition, so its `duration` is always `Duration::ZERO`. The
     /// actual inversion cost is included in `edge_detection.duration`.
     /// This entry exists to report the post-inversion edge pixel count.
     pub invert: Option<StageDiagnostics>,
-    /// Stage 5: contour tracing.
+    /// Stage 6: contour tracing.
     pub contour_tracing: StageDiagnostics,
-    /// Stage 6: RDP path simplification.
+    /// Stage 7: RDP path simplification.
     pub simplification: StageDiagnostics,
-    /// Stage 7: circular mask (only when `config.circular_mask == true`).
+    /// Stage 8: circular mask (only when `config.circular_mask == true`).
     pub mask: Option<StageDiagnostics>,
-    /// Stage 8: path ordering + joining.
+    /// Stage 9: path ordering + joining.
     pub join: StageDiagnostics,
     /// Total wall-clock duration of the entire pipeline (seconds).
     #[serde(with = "duration_serde")]
