@@ -1077,4 +1077,97 @@ mod tests {
             odd.len(),
         );
     }
+
+    /// The MST connection between two polylines should split a segment
+    /// when the optimal point is in the segment interior (not at an
+    /// endpoint).
+    #[test]
+    fn interior_segment_split() {
+        // Polyline A: long horizontal segment from (0,0) to (100,0).
+        let a = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(100.0, 0.0)]);
+        // Polyline B: short vertical segment above the midpoint of A.
+        let b = Polyline::new(vec![Point::new(50.0, 5.0), Point::new(50.0, 10.0)]);
+
+        let result = join_mst(&[a, b], TEST_K, TEST_RESOLUTION);
+        let pts = result.points();
+        assert!(
+            pts.len() >= 4,
+            "expected at least 4 points (A split + B), got {}",
+            pts.len(),
+        );
+
+        // The output should contain a point near (50, 0) — the split point
+        // on A's segment — that is NOT one of A's original endpoints.
+        let has_interior_split = pts.iter().any(|p| {
+            let near_x50 = (p.x - 50.0).abs() < 1.0;
+            let near_y0 = p.y.abs() < 1.0;
+            let not_endpoint = (p.x - 0.0).abs() > 1.0 && (p.x - 100.0).abs() > 1.0;
+            near_x50 && near_y0 && not_endpoint
+        });
+        assert!(
+            has_interior_split,
+            "expected a split point near (50, 0) in the output; got: {:?}",
+            pts.iter().map(|p| (p.x, p.y)).collect::<Vec<_>>(),
+        );
+
+        // Original endpoints should still be present.
+        let has_origin = pts.iter().any(|p| p.x.abs() < 1e-6 && p.y.abs() < 1e-6);
+        let has_end = pts
+            .iter()
+            .any(|p| (p.x - 100.0).abs() < 1e-6 && p.y.abs() < 1e-6);
+        assert!(has_origin, "original endpoint (0,0) missing from output");
+        assert!(has_end, "original endpoint (100,0) missing from output");
+    }
+
+    /// When R-tree K-nearest candidates fail to connect all components,
+    /// the brute-force fallback should still produce a valid path.
+    #[test]
+    fn brute_force_fallback_produces_valid_path() {
+        // Two nearby polylines and one very distant one.  With k=1 and
+        // sparse sampling, the R-tree candidates are unlikely to bridge
+        // the huge gap, forcing the brute-force fallback.
+        let close_a = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
+        let close_b = Polyline::new(vec![Point::new(0.0, 5.0), Point::new(10.0, 5.0)]);
+        let far = Polyline::new(vec![
+            Point::new(10000.0, 10000.0),
+            Point::new(10010.0, 10000.0),
+        ]);
+
+        let result = join_mst(
+            &[close_a.clone(), close_b.clone(), far.clone()],
+            1,
+            TEST_RESOLUTION,
+        );
+        let pts = result.points();
+
+        // All input points should be covered.
+        let total_input_pts = close_a.len() + close_b.len() + far.len();
+        assert!(
+            pts.len() >= total_input_pts,
+            "output should cover all input points: got {} but expected >= {}",
+            pts.len(),
+            total_input_pts,
+        );
+
+        // Path should be continuous (already tested elsewhere, but
+        // verify finiteness as a smoke check).
+        for p in pts {
+            assert!(
+                p.x.is_finite() && p.y.is_finite(),
+                "non-finite point: {p:?}"
+            );
+        }
+
+        // All three original polylines' endpoints should appear.
+        let check_endpoint = |x: f64, y: f64| {
+            pts.iter()
+                .any(|p| (p.x - x).abs() < 1.0 && (p.y - y).abs() < 1.0)
+        };
+        assert!(check_endpoint(0.0, 0.0), "close_a start missing");
+        assert!(check_endpoint(10.0, 0.0), "close_a end missing");
+        assert!(check_endpoint(0.0, 5.0), "close_b start missing");
+        assert!(check_endpoint(10.0, 5.0), "close_b end missing");
+        assert!(check_endpoint(10000.0, 10000.0), "far start missing");
+        assert!(check_endpoint(10010.0, 10000.0), "far end missing");
+    }
 }
