@@ -74,7 +74,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         "downsample_filter",
                         "Downsample Filter",
                         &[
-                            ("None", "None (Disabled)"),
+                            ("Disabled", "Disabled"),
                             ("Nearest", "Nearest"),
                             ("Triangle", "Triangle (Bilinear)"),
                             ("CatmullRom", "CatmullRom (Bicubic)"),
@@ -82,7 +82,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             ("Lanczos3", "Lanczos3"),
                         ],
                         match config_filter.downsample_filter {
-                            DownsampleFilter::None => "None",
+                            DownsampleFilter::Disabled => "Disabled",
                             DownsampleFilter::Nearest => "Nearest",
                             DownsampleFilter::Triangle => "Triangle",
                             DownsampleFilter::CatmullRom => "CatmullRom",
@@ -92,7 +92,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         move |v: String| {
                             let mut c = config_filter.clone();
                             c.downsample_filter = match v.as_str() {
-                                "None" => DownsampleFilter::None,
+                                "Disabled" => DownsampleFilter::Disabled,
                                 "Nearest" => DownsampleFilter::Nearest,
                                 "CatmullRom" => DownsampleFilter::CatmullRom,
                                 "Gaussian" => DownsampleFilter::Gaussian,
