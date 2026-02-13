@@ -483,7 +483,7 @@ fn ConfigButtons(
             }
 
             if let Some(ref err) = error_msg() {
-                p { class: "text-[var(--text-error)] text-xs max-w-[var(--btn-height)] break-words",
+                p { class: "text-[var(--text-error)] text-xs break-words",
                     "{err}"
                 }
             }
