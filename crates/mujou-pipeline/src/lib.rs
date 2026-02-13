@@ -11,6 +11,7 @@
 pub mod blur;
 mod canny;
 pub mod contour;
+pub mod diagnostics;
 pub mod edge;
 pub mod grayscale;
 pub mod join;

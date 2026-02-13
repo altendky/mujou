@@ -44,6 +44,7 @@
 use image::DynamicImage;
 
 use crate::contour::ContourTracer;
+use crate::diagnostics::StageMetrics;
 use crate::join::PathJoiner;
 use crate::types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, RgbaImage, StagedResult,
@@ -76,12 +77,14 @@ impl Pending {
     /// empty. Returns [`PipelineError::ImageDecode`] if the image
     /// format is unrecognized or the data is corrupt.
     pub fn decode(self) -> Result<Decoded, PipelineError> {
+        let source_len = self.source.len();
         let image = crate::grayscale::decode(&self.source)?;
         let original = crate::grayscale::to_rgba(&image);
         Ok(Decoded {
             config: self.config,
             image,
             original,
+            source_len,
         })
     }
 }
@@ -98,6 +101,7 @@ pub struct Decoded {
     config: PipelineConfig,
     image: DynamicImage,
     original: RgbaImage,
+    source_len: usize,
 }
 
 impl Decoded {
@@ -190,6 +194,7 @@ impl Blurred {
     pub fn detect_edges(self) -> EdgesDetected {
         let edges_raw =
             crate::edge::canny(&self.smooth, self.config.canny_low, self.config.canny_high);
+        let pre_invert_edge_pixels = crate::diagnostics::count_edge_pixels(&edges_raw);
         let edge_map = if self.config.invert {
             crate::edge::invert_edge_map(&edges_raw)
         } else {
@@ -201,6 +206,7 @@ impl Blurred {
             grayscale: self.grayscale,
             blurred: self.smooth,
             edge_map,
+            pre_invert_edge_pixels,
             dimensions: self.dimensions,
         }
     }
@@ -220,6 +226,8 @@ pub struct EdgesDetected {
     grayscale: GrayImage,
     blurred: GrayImage,
     edge_map: GrayImage,
+    /// Edge pixel count from Canny output, before optional inversion.
+    pre_invert_edge_pixels: u64,
     dimensions: Dimensions,
 }
 
@@ -390,6 +398,7 @@ impl Masked {
         let join_input = self.clipped.as_deref().unwrap_or(&self.simplified);
         let path = self.config.path_joiner.join(join_input);
         Joined {
+            config: self.config,
             original: self.original,
             grayscale: self.grayscale,
             blurred: self.blurred,
@@ -414,6 +423,7 @@ impl Masked {
 /// retaining all prior raster intermediates.
 #[must_use = "call .into_result() to extract the StagedResult"]
 pub struct Joined {
+    config: PipelineConfig,
     original: RgbaImage,
     grayscale: GrayImage,
     blurred: GrayImage,
@@ -553,6 +563,21 @@ pub trait PipelineStage: Sized {
     /// The output this stage produced.
     fn output(&self) -> StageOutput<'_>;
 
+    /// Stage-specific metrics for diagnostics.
+    ///
+    /// Returns `None` for the initial [`Pending`] stage which has not
+    /// yet performed any processing. All other stages return
+    /// `Some(metrics)` describing the work done to reach this state.
+    fn metrics(&self) -> Option<StageMetrics>;
+
+    /// Invert-specific metrics, if this stage performed edge inversion.
+    ///
+    /// Only [`EdgesDetected`] returns `Some` (and only when
+    /// `config.invert` was `true`). All other stages return `None`.
+    fn invert_metrics(&self) -> Option<StageMetrics> {
+        None
+    }
+
     /// Advance to the next stage.
     ///
     /// Returns `Ok(Some(stage))` on success, `Ok(None)` if already at
@@ -585,6 +610,10 @@ impl PipelineStage for Pending {
         }
     }
 
+    fn metrics(&self) -> Option<StageMetrics> {
+        None
+    }
+
     fn next(self) -> Result<Option<Stage>, PipelineError> {
         Ok(Some(Stage::Decoded(self.decode()?)))
     }
@@ -602,6 +631,15 @@ impl PipelineStage for Decoded {
         StageOutput::Decoded {
             original: &self.original,
         }
+    }
+
+    fn metrics(&self) -> Option<StageMetrics> {
+        Some(StageMetrics::Decode {
+            input_bytes: self.source_len,
+            width: self.original.width(),
+            height: self.original.height(),
+            pixel_count: u64::from(self.original.width()) * u64::from(self.original.height()),
+        })
     }
 
     fn next(self) -> Result<Option<Stage>, PipelineError> {
@@ -624,6 +662,13 @@ impl PipelineStage for Grayscaled {
         }
     }
 
+    fn metrics(&self) -> Option<StageMetrics> {
+        Some(StageMetrics::Grayscale {
+            width: self.dimensions.width,
+            height: self.dimensions.height,
+        })
+    }
+
     fn next(self) -> Result<Option<Stage>, PipelineError> {
         Ok(Some(Stage::Blurred(self.blur())))
     }
@@ -643,6 +688,12 @@ impl PipelineStage for Blurred {
         }
     }
 
+    fn metrics(&self) -> Option<StageMetrics> {
+        Some(StageMetrics::Blur {
+            sigma: self.config.blur_sigma,
+        })
+    }
+
     fn next(self) -> Result<Option<Stage>, PipelineError> {
         Ok(Some(Stage::EdgesDetected(self.detect_edges())))
     }
@@ -659,6 +710,29 @@ impl PipelineStage for EdgesDetected {
     fn output(&self) -> StageOutput<'_> {
         StageOutput::EdgesDetected {
             edges: &self.edge_map,
+        }
+    }
+
+    fn metrics(&self) -> Option<StageMetrics> {
+        let total_pixel_count =
+            u64::from(self.edge_map.width()) * u64::from(self.edge_map.height());
+        let (low_threshold, high_threshold) =
+            crate::edge::clamp_thresholds(self.config.canny_low, self.config.canny_high);
+        Some(StageMetrics::EdgeDetection {
+            low_threshold,
+            high_threshold,
+            edge_pixel_count: self.pre_invert_edge_pixels,
+            total_pixel_count,
+        })
+    }
+
+    fn invert_metrics(&self) -> Option<StageMetrics> {
+        if self.config.invert {
+            Some(StageMetrics::Invert {
+                edge_pixel_count: crate::diagnostics::count_edge_pixels(&self.edge_map),
+            })
+        } else {
+            None
         }
     }
 
@@ -681,6 +755,17 @@ impl PipelineStage for ContoursTraced {
         }
     }
 
+    fn metrics(&self) -> Option<StageMetrics> {
+        let stats = crate::diagnostics::contour_stats(&self.contours);
+        Some(StageMetrics::ContourTracing {
+            contour_count: self.contours.len(),
+            total_point_count: stats.total,
+            min_contour_points: stats.min,
+            max_contour_points: stats.max,
+            mean_contour_points: stats.mean,
+        })
+    }
+
     fn next(self) -> Result<Option<Stage>, PipelineError> {
         Ok(Some(Stage::Simplified(self.simplify())))
     }
@@ -698,6 +783,24 @@ impl PipelineStage for Simplified {
         StageOutput::Simplified {
             simplified: &self.reduced,
         }
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn metrics(&self) -> Option<StageMetrics> {
+        let points_before: usize = self.contours.iter().map(Polyline::len).sum();
+        let points_after: usize = self.reduced.iter().map(Polyline::len).sum();
+        let reduction_ratio = if points_before > 0 {
+            1.0 - (points_after as f64 / points_before as f64)
+        } else {
+            0.0
+        };
+        Some(StageMetrics::Simplification {
+            tolerance: self.config.simplify_tolerance,
+            polyline_count: self.reduced.len(),
+            points_before,
+            points_after,
+            reduction_ratio,
+        })
     }
 
     fn next(self) -> Result<Option<Stage>, PipelineError> {
@@ -719,6 +822,20 @@ impl PipelineStage for Masked {
         }
     }
 
+    fn metrics(&self) -> Option<StageMetrics> {
+        let clipped = self.clipped.as_ref()?;
+        let extent = self.dimensions.width.min(self.dimensions.height);
+        let radius_px = f64::from(extent) * self.config.mask_diameter / 2.0;
+        Some(StageMetrics::Mask {
+            diameter: self.config.mask_diameter,
+            radius_px,
+            polylines_before: self.simplified.len(),
+            polylines_after: clipped.len(),
+            points_before: self.simplified.iter().map(Polyline::len).sum(),
+            points_after: clipped.iter().map(Polyline::len).sum(),
+        })
+    }
+
     fn next(self) -> Result<Option<Stage>, PipelineError> {
         Ok(Some(Stage::Joined(self.join())))
     }
@@ -737,6 +854,26 @@ impl PipelineStage for Joined {
             joined: &self.path,
             dimensions: self.dimensions,
         }
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn metrics(&self) -> Option<StageMetrics> {
+        let join_input = self.masked.as_deref().unwrap_or(&self.simplified);
+        let input_polyline_count = join_input.len();
+        let input_point_count: usize = join_input.iter().map(Polyline::len).sum();
+        let output_point_count = self.path.len();
+        let expansion_ratio = if input_point_count > 0 {
+            output_point_count as f64 / input_point_count as f64
+        } else {
+            0.0
+        };
+        Some(StageMetrics::Join {
+            strategy: self.config.path_joiner.to_string(),
+            input_polyline_count,
+            input_point_count,
+            output_point_count,
+            expansion_ratio,
+        })
     }
 
     fn next(self) -> Result<Option<Stage>, PipelineError> {
@@ -850,6 +987,22 @@ impl Stage {
     /// The output this stage produced.
     pub fn output(&self) -> StageOutput<'_> {
         delegate!(self, output)
+    }
+
+    /// Stage-specific metrics for diagnostics.
+    ///
+    /// Returns `None` for the initial `Pending` stage and for optional
+    /// stages that were not executed (e.g. mask when disabled).
+    #[must_use]
+    pub fn metrics(&self) -> Option<StageMetrics> {
+        delegate!(self, metrics)
+    }
+
+    /// Invert-specific metrics, if the edge detection stage performed
+    /// inversion. Returns `None` for all other stages.
+    #[must_use]
+    pub fn invert_metrics(&self) -> Option<StageMetrics> {
+        delegate!(self, invert_metrics)
     }
 
     /// Whether the pipeline is at the final stage.

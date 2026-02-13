@@ -7,6 +7,8 @@
 //! ordering and joining them. This allows strategies like [`Retrace`] to
 //! integrate ordering decisions with backtracking capabilities.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::optimize;
@@ -60,6 +62,15 @@ pub enum PathJoinerKind {
 pub trait PathJoiner {
     /// Order and join the given contours into a single continuous path.
     fn join(&self, contours: &[Polyline]) -> Polyline;
+}
+
+impl fmt::Display for PathJoinerKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::StraightLine => f.write_str("StraightLine"),
+            Self::Retrace => f.write_str("Retrace"),
+        }
+    }
 }
 
 impl PathJoiner for PathJoinerKind {
