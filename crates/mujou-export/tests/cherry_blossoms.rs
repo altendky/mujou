@@ -67,7 +67,7 @@ fn cherry_blossoms_pipeline_to_svg() {
     eprintln!("SVG written to {output_path:?} ({} bytes)", svg.len());
 }
 
-/// Verify the app's default config (`low=30`, `high=80`, Retrace,
+/// Verify the app's default config (`low=15`, `high=40`, Mst,
 /// `circular_mask=true`) can process the cherry blossoms image without OOM.
 /// Lower thresholds produce many more edges that can exhaust WASM memory.
 #[test]
