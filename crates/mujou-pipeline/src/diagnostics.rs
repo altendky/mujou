@@ -385,11 +385,6 @@ pub(crate) fn contour_stats(contours: &[crate::Polyline]) -> ContourStats {
     }
 }
 
-/// Total points across a slice of polylines.
-pub(crate) fn total_points(polylines: &[crate::Polyline]) -> usize {
-    polylines.iter().map(crate::Polyline::len).sum()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
