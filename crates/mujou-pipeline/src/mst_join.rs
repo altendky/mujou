@@ -63,7 +63,7 @@ struct SegmentId {
 type IndexedSegment = GeomWithData<Line<f64>, SegmentId>;
 
 // ---------------------------------------------------------------------------
-// Phase 1: MST via Boruvka
+// Phase 1: MST via Kruskal
 // ---------------------------------------------------------------------------
 
 /// An MST edge connecting two polylines at specific points.
