@@ -259,6 +259,12 @@ fn app() -> Element {
         }
 
         div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col overflow-x-hidden",
+            // Dismiss the info popover on Escape key.
+            onkeydown: move |e: KeyboardEvent| {
+                if e.key() == Key::Escape && show_info() {
+                    show_info.set(false);
+                }
+            },
             // Theme toggle (fixed-positioned via shared theme.css;
             // content injected by shared theme-toggle.js)
             button {
