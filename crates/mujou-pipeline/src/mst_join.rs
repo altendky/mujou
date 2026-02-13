@@ -298,60 +298,59 @@ fn build_mst(polylines: &[&Polyline], k_nearest: usize, working_resolution: u32)
     // brute-force: collect all cross-component endpoint pairs, sort by
     // distance, and continue Kruskal's algorithm.
     if edges.len() < n - 1 {
-        // Collect disconnected component representatives.
-        let disconnected: Vec<usize> = (0..n)
-            .filter(|&i| {
-                let root = uf.find_mut(i);
-                // Include one representative per component that still
-                // needs connecting. We check all polylines.
-                root == i || (0..i).all(|j| uf.find_mut(j) != root)
-            })
-            .collect();
+        // Group all polyline indices by their component root so the
+        // fallback considers every polyline in each component, not just
+        // a single representative.
+        let mut components: std::collections::HashMap<usize, Vec<usize>> =
+            std::collections::HashMap::new();
+        for i in 0..n {
+            components.entry(uf.find_mut(i)).or_default().push(i);
+        }
+        let comp_roots: Vec<usize> = components.keys().copied().collect();
 
         // Gather all cross-component endpoint-pair candidates.
         let mut fallback_candidates: Vec<(f64, MstEdge)> = Vec::new();
-        for (idx_i, &pi) in disconnected.iter().enumerate() {
-            for &pj in disconnected.iter().skip(idx_i + 1) {
-                if uf.find_mut(pi) == uf.find_mut(pj) {
-                    continue;
-                }
-                let pts_a = polylines[pi].points();
-                let pts_b = polylines[pj].points();
-                if pts_a.is_empty() || pts_b.is_empty() {
-                    continue;
-                }
+        for (idx_i, &root_a) in comp_roots.iter().enumerate() {
+            for &root_b in comp_roots.iter().skip(idx_i + 1) {
                 let mut best_dist = f64::INFINITY;
-                let mut best_a = point_to_coord(pts_a[0]);
-                let mut best_b = point_to_coord(pts_b[0]);
-                let mut best_seg_a = 0;
-                let mut best_seg_b = 0;
+                let mut best_edge: Option<MstEdge> = None;
 
-                for &(ai, asi) in &[(0, 0), (pts_a.len() - 1, pts_a.len().saturating_sub(2))] {
-                    for &(bi, bsi) in &[(0, 0), (pts_b.len() - 1, pts_b.len().saturating_sub(2))] {
-                        let ca = point_to_coord(pts_a[ai]);
-                        let cb = point_to_coord(pts_b[bi]);
-                        let d = (ca.x - cb.x).hypot(ca.y - cb.y);
-                        if d < best_dist {
-                            best_dist = d;
-                            best_a = ca;
-                            best_b = cb;
-                            best_seg_a = asi;
-                            best_seg_b = bsi;
+                for &pi in &components[&root_a] {
+                    for &pj in &components[&root_b] {
+                        let pts_a = polylines[pi].points();
+                        let pts_b = polylines[pj].points();
+                        if pts_a.is_empty() || pts_b.is_empty() {
+                            continue;
+                        }
+
+                        for &(ai, asi) in
+                            &[(0, 0), (pts_a.len() - 1, pts_a.len().saturating_sub(2))]
+                        {
+                            for &(bi, bsi) in
+                                &[(0, 0), (pts_b.len() - 1, pts_b.len().saturating_sub(2))]
+                            {
+                                let ca = point_to_coord(pts_a[ai]);
+                                let cb = point_to_coord(pts_b[bi]);
+                                let d = (ca.x - cb.x).hypot(ca.y - cb.y);
+                                if d < best_dist {
+                                    best_dist = d;
+                                    best_edge = Some(MstEdge {
+                                        poly_a: pi,
+                                        poly_b: pj,
+                                        point_a: ca,
+                                        point_b: cb,
+                                        seg_a: asi,
+                                        seg_b: bsi,
+                                    });
+                                }
+                            }
                         }
                     }
                 }
 
-                fallback_candidates.push((
-                    best_dist,
-                    MstEdge {
-                        poly_a: pi,
-                        poly_b: pj,
-                        point_a: best_a,
-                        point_b: best_b,
-                        seg_a: best_seg_a,
-                        seg_b: best_seg_b,
-                    },
-                ));
+                if let Some(edge) = best_edge {
+                    fallback_candidates.push((best_dist, edge));
+                }
             }
         }
 
