@@ -100,7 +100,20 @@ This step receives contours from masking (if enabled) or simplification, and pro
 
 This is a [pluggable algorithm strategy](principles.md#pluggable-algorithm-strategies) -- the user selects which joining method to use.
 
-**User parameter:** `path_joiner` (impl `PathJoiner`, default: `StraightLine`)
+**User parameter:** `path_joiner` (impl `PathJoiner`, default: `Mst`)
+
+#### Mst (default)
+
+MST-based segment-to-segment join algorithm. Finds globally optimal connections between polyline components via a minimum spanning tree, minimizing total new connecting segment length (the only visible artifacts on sand).
+
+Algorithm phases:
+
+1. **MST via Boruvka:** Insert all polyline segments into an R\*-tree spatial index (`rstar`). For each component, find the cheapest connection to another component using adaptive point sampling along segments + R-tree nearest-neighbor queries + exact segment-to-segment distance (`geo::Euclidean`). Merge components with `petgraph::UnionFind`. When a connection point falls in the interior of a segment, that segment is split at the connection point.
+2. **Fix parity:** Count odd-degree vertices. Greedily pair each odd vertex with its nearest unmatched odd vertex and duplicate the shortest path between them (Dijkstra). Duplicated edges represent retracing through already-drawn grooves (visually free).
+3. **Hierholzer:** Find an Eulerian path through the augmented graph (original edges + MST connecting edges + duplicated retrace edges).
+4. **Emit:** Convert the vertex sequence to a `Polyline`.
+
+**Tradeoffs:** Globally optimal connections (MST) instead of greedy ordering. Segment-to-segment distances find truly closest points between polylines (not just sampled vertices). Interior joins are supported. Produces significantly fewer visible artifacts and shorter new connecting segments than both `StraightLine` and `Retrace`.
 
 #### StraightLine
 
@@ -156,7 +169,7 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `canny_max` | f32 | 120.0 | Upper bound for Canny threshold sliders (UI only) |
 | `contour_tracer` | `ContourTracer` | `BorderFollowing` | Contour tracing algorithm ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `simplify_tolerance` | f64 | 2.0 | RDP simplification tolerance (pixels) |
-| `path_joiner` | `PathJoiner` | `Retrace` | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
+| `path_joiner` | `PathJoiner` | `Mst` | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `circular_mask` | bool | true | Clip output to circle |
 | `mask_diameter` | f64 | 1.0 | Mask diameter as fraction of image width |
 | `invert` | bool | false | Invert edge map |

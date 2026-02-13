@@ -259,8 +259,9 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_select(
                         "path_joiner",
                         "Path Joiner",
-                        &[("StraightLine", "Straight Line"), ("Retrace", "Retrace")],
+                        &[("Mst", "MST"), ("Retrace", "Retrace"), ("StraightLine", "Straight Line")],
                         match config.path_joiner {
+                            PathJoinerKind::Mst => "Mst",
                             PathJoinerKind::StraightLine => "StraightLine",
                             PathJoinerKind::Retrace => "Retrace",
                         },
@@ -268,7 +269,8 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             let mut c = config.clone();
                             c.path_joiner = match v.as_str() {
                                 "Retrace" => PathJoinerKind::Retrace,
-                                _ => PathJoinerKind::StraightLine,
+                                "StraightLine" => PathJoinerKind::StraightLine,
+                                _ => PathJoinerKind::Mst,
                             };
                             on_change.call(c);
                         },

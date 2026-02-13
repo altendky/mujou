@@ -24,6 +24,7 @@ imageproc = { version = "0.26", default-features = false }
 
 # WASM support
 getrandom = { version = "0.3", features = ["wasm-bindgen"] }
+getrandom_0_2 = { package = "getrandom", version = "0.2", features = ["js"] }
 web-sys = { version = "0.3", features = [
     "Blob",
     "BlobPropertyBag",
@@ -62,6 +63,11 @@ clap = { version = "4", features = ["derive"] }
 
 # Cross-platform time (uses performance.now() on WASM)
 web-time = "1"
+
+# Geometry, spatial indexing, graph algorithms
+geo = "0.32"
+rstar = "0.12"
+petgraph = "0.8"
 
 # Error handling
 thiserror = "2"

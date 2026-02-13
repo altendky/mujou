@@ -50,7 +50,7 @@ struct Cli {
     simplify_tolerance: f64,
 
     /// Path joining strategy.
-    #[arg(long, value_enum, default_value_t = Joiner::Retrace)]
+    #[arg(long, value_enum, default_value_t = Joiner::Mst)]
     joiner: Joiner,
 
     /// Disable circular mask.
@@ -93,6 +93,8 @@ enum Joiner {
     Straight,
     /// Full-history retrace with integrated ordering.
     Retrace,
+    /// MST-based segment-to-segment join with Eulerian path.
+    Mst,
 }
 
 /// Downsample resampling filter selection.
@@ -137,6 +139,7 @@ fn main() -> ExitCode {
         path_joiner: match cli.joiner {
             Joiner::Straight => mujou_pipeline::PathJoinerKind::StraightLine,
             Joiner::Retrace => mujou_pipeline::PathJoinerKind::Retrace,
+            Joiner::Mst => mujou_pipeline::PathJoinerKind::Mst,
         },
         circular_mask: !cli.no_mask,
         mask_diameter: cli.mask_diameter,

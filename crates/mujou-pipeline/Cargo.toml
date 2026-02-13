@@ -11,8 +11,11 @@ keywords = ["image-processing", "edge-detection", "contour"]
 categories = ["graphics"]
 
 [dependencies]
+geo.workspace = true
 image.workspace = true
 imageproc.workspace = true
+petgraph.workspace = true
+rstar.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

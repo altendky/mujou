@@ -629,7 +629,7 @@ mod tests {
         assert!((config.canny_max - 120.0).abs() < f32::EPSILON);
         assert_eq!(config.contour_tracer, ContourTracerKind::BorderFollowing);
         assert!((config.simplify_tolerance - 2.0).abs() < f64::EPSILON);
-        assert_eq!(config.path_joiner, PathJoinerKind::Retrace);
+        assert_eq!(config.path_joiner, PathJoinerKind::Mst);
         assert!(config.circular_mask);
         assert!((config.mask_diameter - 1.0).abs() < f64::EPSILON);
         assert!(!config.invert);

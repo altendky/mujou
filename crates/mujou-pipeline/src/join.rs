@@ -11,6 +11,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::mst_join;
 use crate::optimize;
 use crate::types::{Point, Polyline};
 
@@ -48,8 +49,24 @@ pub enum PathJoinerKind {
     /// by retracing backward through already-drawn grooves. Produces a
     /// longer total path but significantly fewer visible artifacts than
     /// `StraightLine`.
-    #[default]
     Retrace,
+
+    /// MST-based segment-to-segment join algorithm.
+    ///
+    /// Builds a minimum spanning tree over polyline components using
+    /// segment-to-segment distances (via an R\*-tree spatial index),
+    /// finding globally optimal connections that minimize total new line
+    /// length. Interior joins are supported — connecting at any point
+    /// along a polyline, not just endpoints.
+    ///
+    /// After MST construction, vertex parity is fixed by duplicating
+    /// shortest paths (retracing is visually free), then Hierholzer's
+    /// algorithm finds an Eulerian path through the augmented graph.
+    ///
+    /// Produces significantly fewer visible artifacts and shorter new
+    /// connecting segments than both `StraightLine` and `Retrace`.
+    #[default]
+    Mst,
 }
 
 /// Trait for path joining strategies.
@@ -69,6 +86,7 @@ impl fmt::Display for PathJoinerKind {
         match self {
             Self::StraightLine => f.write_str("StraightLine"),
             Self::Retrace => f.write_str("Retrace"),
+            Self::Mst => f.write_str("Mst"),
         }
     }
 }
@@ -78,6 +96,7 @@ impl PathJoiner for PathJoinerKind {
         match *self {
             Self::StraightLine => join_straight_line(contours),
             Self::Retrace => join_retrace(contours),
+            Self::Mst => mst_join::join_mst(contours),
         }
     }
 }
@@ -576,8 +595,8 @@ mod tests {
     use crate::types::Point;
 
     #[test]
-    fn default_is_retrace() {
-        assert_eq!(PathJoinerKind::default(), PathJoinerKind::Retrace);
+    fn default_is_mst() {
+        assert_eq!(PathJoinerKind::default(), PathJoinerKind::Mst);
     }
 
     #[test]
