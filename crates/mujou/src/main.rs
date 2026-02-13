@@ -2,7 +2,9 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use dioxus_free_icons::Icon;
-use dioxus_free_icons::icons::ld_icons::{LdClipboardCheck, LdClipboardCopy, LdClipboardPaste};
+use dioxus_free_icons::icons::ld_icons::{
+    LdClipboardCheck, LdClipboardCopy, LdClipboardPaste, LdInfo,
+};
 use mujou_io::{
     ExportPanel, FileUpload, Filmstrip, PipelineWorker, StageControls, StageId, StagePreview,
     WorkerResult,
@@ -96,6 +98,12 @@ fn app() -> Element {
     // mid-drag slider positions). This drives the displayed values in
     // StageControls without triggering pipeline re-runs.
     let mut live_config = use_signal(mujou_pipeline::PipelineConfig::default);
+
+    // --- UI toggles ---
+    // Controls visibility of the header info popover.
+    let mut show_info = use_signal(|| false);
+    // Controls visibility of parameter description text in stage controls.
+    let show_descriptions = use_signal(|| false);
 
     // --- File upload handler ---
     let on_upload = move |(bytes, name): (Vec<u8>, String)| {
@@ -250,7 +258,14 @@ fn app() -> Element {
             href: "https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Noto+Sans+JP:wght@400&display=swap",
         }
 
-        div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col overflow-x-hidden",
+        div {
+            class: "min-h-screen bg-(--bg) text-(--text) flex flex-col overflow-x-hidden",
+            // Dismiss the info popover when clicking outside it.
+            onclick: move |_| {
+                if show_info() {
+                    show_info.set(false);
+                }
+            },
             // Theme toggle (fixed-positioned via shared theme.css;
             // content injected by shared theme-toggle.js)
             button {
@@ -267,11 +282,31 @@ fn app() -> Element {
             // toggle (--btn-height wide at right:1rem). The calc gives a 1rem
             // gap between the upload button and the toggle, matching the
             // toggle's own offset from the viewport edge.
-            header { class: "pl-6 pr-[calc(var(--btn-height)+2rem)] py-4 border-b border-(--border) flex items-start justify-between gap-4",
-                div {
+            header { class: "pl-6 pr-[calc(var(--btn-height)+2rem)] py-4 border-b border-(--border) flex items-center justify-between gap-4",
+                div { class: "relative flex items-center gap-2",
                     h1 { class: "text-2xl title-brand", "mujou" }
-                    p { class: "text-(--muted) text-sm",
-                        "Image to vector path converter for sand tables and CNC devices"
+                    button {
+                        class: "inline-flex items-center justify-center w-7 h-7 rounded-full border border-[var(--link-border)] text-[var(--muted)] hover:border-[var(--link-hover)] hover:text-[var(--text)] cursor-pointer transition-colors",
+                        title: "About this app",
+                        aria_label: "About this app",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            show_info.toggle();
+                        },
+                        Icon { width: 16, height: 16, icon: LdInfo }
+                    }
+                    // Info popover — positioned below the info button.
+                    if show_info() {
+                        div { class: "absolute top-full left-0 mt-2 z-40 w-72 p-4 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-sm text-[var(--text)]",
+                            // Prevent clicks inside the popover from dismissing it.
+                            onclick: move |e| e.stop_propagation(),
+                            p { class: "font-medium mb-2",
+                                "Image to vector path converter for sand tables and CNC devices"
+                            }
+                            p { class: "text-[var(--text-secondary)]",
+                                "Upload an image \u{2192} adjust parameters \u{2192} export SVG or G-code for your sand table or CNC device."
+                            }
+                        }
                     }
                 }
                 FileUpload {
@@ -329,6 +364,7 @@ fn app() -> Element {
                             ConfigButtons {
                                 live_config: live_config,
                                 committed_config: committed_config,
+                                show_descriptions: show_descriptions,
                             }
 
                             // Controls (right, fills remaining space)
@@ -340,6 +376,7 @@ fn app() -> Element {
                                     stage: selected_stage(),
                                     config: live_config(),
                                     on_config_change: on_config_change,
+                                    show_descriptions: show_descriptions(),
                                 }
                             }
                         }
@@ -404,16 +441,19 @@ fn app() -> Element {
 /// Feedback duration in milliseconds for the copy-success checkmark.
 const COPY_FEEDBACK_MS: u32 = 1500;
 
-/// Copy/paste config buttons shown alongside the stage controls.
+/// Copy/paste config buttons and description toggle shown alongside the
+/// stage controls.
 ///
-/// Renders a vertical column of two square buttons (matching the upload
+/// Renders a vertical column of square buttons (matching the upload
 /// button sizing) that copy the current `PipelineConfig` as JSON to the
-/// clipboard and paste a JSON config from the clipboard.
+/// clipboard, paste a JSON config from the clipboard, and toggle
+/// parameter description visibility.
 #[component]
 #[allow(clippy::needless_pass_by_value)]
 fn ConfigButtons(
     live_config: Signal<mujou_pipeline::PipelineConfig>,
     committed_config: Signal<mujou_pipeline::PipelineConfig>,
+    show_descriptions: Signal<bool>,
 ) -> Element {
     let mut copied = use_signal(|| false);
     let mut copy_generation = use_signal(|| 0u32);
@@ -483,6 +523,17 @@ fn ConfigButtons(
                 aria_label: "Paste config from clipboard",
                 onclick: handle_paste,
                 Icon { width: 20, height: 20, icon: LdClipboardPaste }
+            }
+            button {
+                class: if show_descriptions() {
+                    "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] rounded cursor-pointer transition-colors bg-[var(--btn-primary)] text-white ring-2 ring-[var(--border-accent)] ring-offset-1"
+                } else {
+                    btn_class
+                },
+                title: "Toggle parameter descriptions",
+                aria_label: "Toggle parameter descriptions",
+                onclick: move |_| show_descriptions.toggle(),
+                Icon { width: 20, height: 20, icon: LdInfo }
             }
 
             if let Some(ref err) = error_msg() {

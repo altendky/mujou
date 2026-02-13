@@ -21,6 +21,8 @@ pub struct StageControlsProps {
     config: PipelineConfig,
     /// Callback fired when any parameter changes.
     on_config_change: EventHandler<PipelineConfig>,
+    /// Whether to display description text below each parameter control.
+    show_descriptions: bool,
 }
 
 /// Renders parameter controls for the currently selected pipeline stage.
@@ -40,6 +42,11 @@ pub fn StageControls(props: StageControlsProps) -> Element {
     let config = &props.config;
     let on_change = props.on_config_change;
 
+    // When descriptions are hidden, pass an empty string so the helpers
+    // skip rendering the <p> element entirely.
+    let desc =
+        |text: &'static str| -> &'static str { if props.show_descriptions { text } else { "" } };
+
     match props.stage {
         StageId::Original | StageId::Grayscale => {
             rsx! {
@@ -58,6 +65,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "working_resolution",
                         "Working Resolution",
+                        desc("Max pixel dimension for processing. Lower is faster."),
                         f64::from(value),
                         64.0,
                         1024.0,
@@ -73,6 +81,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_select(
                         "downsample_filter",
                         "Downsample Filter",
+                        desc("Resampling algorithm used when resizing."),
                         &[
                             ("Disabled", "Disabled"),
                             ("Nearest", "Nearest"),
@@ -114,6 +123,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "blur_sigma",
                         "Blur Sigma",
+                        desc("Gaussian blur strength. Smooths noise but softens edges."),
                         f64::from(value),
                         0.0,
                         10.0,
@@ -145,6 +155,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "canny_low",
                         "Canny Low",
+                        desc("Weak edges below this threshold are discarded."),
                         f64::from(canny_low),
                         1.0,
                         f64::from(canny_max),
@@ -162,6 +173,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "canny_high",
                         "Canny High",
+                        desc("Strong edges above this are always kept."),
                         f64::from(canny_high),
                         1.0,
                         f64::from(canny_max),
@@ -179,6 +191,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "canny_max",
                         "Canny Max",
+                        desc("Upper bound for the Canny threshold sliders."),
                         f64::from(canny_max),
                         0.0,
                         theoretical_max,
@@ -198,6 +211,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_toggle(
                         "invert",
                         "Invert",
+                        desc("Swap black and white before edge detection."),
                         invert,
                         move |v: bool| {
                             let mut c = config_invert.clone();
@@ -216,6 +230,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_select(
                         "contour_tracer",
                         "Contour Tracer",
+                        desc("Algorithm for tracing edges into vector contours."),
                         &[("BorderFollowing", "Border Following")],
                         match config.contour_tracer {
                             ContourTracerKind::BorderFollowing => "BorderFollowing",
@@ -240,6 +255,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "simplify_tolerance",
                         "Simplify Tolerance",
+                        desc("Point reduction strength. Higher means fewer points."),
                         value,
                         0.0,
                         20.0,
@@ -264,6 +280,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_select(
                         "path_joiner",
                         "Path Joiner",
+                        desc("Strategy for connecting contours into a continuous path."),
                         &[("Mst", "MST"), ("Retrace", "Retrace"), ("StraightLine", "Straight Line")],
                         match config_select.path_joiner {
                             PathJoinerKind::Mst => "Mst",
@@ -285,6 +302,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         {render_slider(
                             "mst_neighbours",
                             "MST Neighbours",
+                            desc("Nearest neighbours considered when building the spanning tree."),
                             #[allow(clippy::cast_precision_loss)]
                             { config_slider.mst_neighbours as f64 },
                             1.0,
@@ -313,6 +331,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_toggle(
                         "circular_mask",
                         "Circular Mask",
+                        desc("Clip output to a circle for round sand tables."),
                         mask_enabled,
                         move |v: bool| {
                             let mut c = config_toggle.clone();
@@ -325,6 +344,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         {render_slider(
                             "mask_diameter",
                             "Mask Diameter",
+                            desc("Circle diameter as a fraction of image size."),
                             diameter,
                             0.1,
                             1.0,
@@ -343,11 +363,12 @@ pub fn StageControls(props: StageControlsProps) -> Element {
     }
 }
 
-/// Render a labeled range slider.
+/// Render a labeled range slider with an optional description.
 #[allow(clippy::too_many_arguments)]
 fn render_slider(
     id: &str,
     label: &str,
+    description: &str,
     value: f64,
     min: f64,
     max: f64,
@@ -358,6 +379,7 @@ fn render_slider(
     let display = format!("{value:.decimals$}");
     let id = id.to_string();
     let label = label.to_string();
+    let description = description.to_string();
 
     rsx! {
         div { class: "flex flex-col gap-1",
@@ -369,6 +391,9 @@ fn render_slider(
                 span { class: "text-[var(--text-secondary)] tabular-nums",
                     "{display}"
                 }
+            }
+            if !description.is_empty() {
+                p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
             }
             input {
                 r#type: "range",
@@ -394,45 +419,55 @@ fn render_slider(
     }
 }
 
-/// Render a labeled toggle (checkbox styled as switch).
+/// Render a labeled toggle (checkbox styled as switch) with an optional
+/// description.
 fn render_toggle(
     id: &str,
     label: &str,
+    description: &str,
     checked: bool,
     on_change: impl Fn(bool) + 'static,
 ) -> Element {
     let id = id.to_string();
     let label = label.to_string();
+    let description = description.to_string();
 
     rsx! {
-        div { class: "flex items-center justify-between",
-            label { r#for: "{id}",
-                class: "text-sm text-[var(--text-heading)] font-medium",
-                "{label}"
+        div { class: "flex flex-col gap-1",
+            div { class: "flex items-center justify-between",
+                label { r#for: "{id}",
+                    class: "text-sm text-[var(--text-heading)] font-medium",
+                    "{label}"
+                }
+                input {
+                    r#type: "checkbox",
+                    id: "{id}",
+                    checked: checked,
+                    class: "w-5 h-5 accent-[var(--btn-primary)]",
+                    onchange: move |e| {
+                        on_change(e.checked());
+                    },
+                }
             }
-            input {
-                r#type: "checkbox",
-                id: "{id}",
-                checked: checked,
-                class: "w-5 h-5 accent-[var(--btn-primary)]",
-                onchange: move |e| {
-                    on_change(e.checked());
-                },
+            if !description.is_empty() {
+                p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
             }
         }
     }
 }
 
-/// Render a labeled select dropdown.
+/// Render a labeled select dropdown with an optional description.
 fn render_select(
     id: &str,
     label: &str,
+    description: &str,
     options: &[(&str, &str)],
     selected: &str,
     on_change: impl Fn(String) + 'static,
 ) -> Element {
     let id = id.to_string();
     let label = label.to_string();
+    let description = description.to_string();
     let options: Vec<(String, String)> = options
         .iter()
         .map(|(v, l)| ((*v).to_string(), (*l).to_string()))
@@ -444,6 +479,9 @@ fn render_select(
             label { r#for: "{id}",
                 class: "text-sm text-[var(--text-heading)] font-medium",
                 "{label}"
+            }
+            if !description.is_empty() {
+                p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
             }
             select {
                 id: "{id}",
