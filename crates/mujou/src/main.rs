@@ -449,11 +449,14 @@ fn ConfigButtons(
         spawn(async move {
             match mujou_io::clipboard::read_text().await {
                 Ok(text) => match serde_json::from_str::<mujou_pipeline::PipelineConfig>(&text) {
-                    Ok(config) => {
-                        live_config.set(config.clone());
-                        committed_config.set(config);
-                        error_msg.set(None);
-                    }
+                    Ok(config) => match config.validate() {
+                        Ok(()) => {
+                            live_config.set(config.clone());
+                            committed_config.set(config);
+                            error_msg.set(None);
+                        }
+                        Err(e) => error_msg.set(Some(format!("Invalid config: {e}"))),
+                    },
                     Err(e) => error_msg.set(Some(format!("Invalid config JSON: {e}"))),
                 },
                 Err(e) => error_msg.set(Some(format!("{e}"))),
