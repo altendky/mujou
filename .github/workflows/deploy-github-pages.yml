@@ -41,7 +41,7 @@ jobs:
       - name: Install Dioxus CLI
         uses: taiki-e/install-action@v2
         with:
-          tool: dioxus-cli@0.7.2
+          tool: dioxus-cli@0.7.3
 
       - name: Build WASM app
         run: dx bundle --release --package mujou --platform web --base-path app
