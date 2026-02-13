@@ -84,7 +84,10 @@ pub fn process_staged_with_diagnostics(
     config: &PipelineConfig,
 ) -> Result<(StagedResult, PipelineDiagnostics), PipelineError> {
     use diagnostics::{PipelineSummary, StageDiagnostics};
-    use pipeline::{Advance, STAGE_COUNT, Stage};
+    use pipeline::{
+        Advance, Blurred, ContoursTraced, Decoded, EdgesDetected, Grayscaled, Joined, Masked,
+        PipelineStage as _, STAGE_COUNT, Simplified, Stage,
+    };
     use web_time::Instant;
 
     let pipeline_start = Instant::now();
@@ -133,25 +136,29 @@ pub fn process_staged_with_diagnostics(
                     ))
                 };
                 let pipeline_diagnostics = PipelineDiagnostics {
-                    decode: stage_diags[1]
+                    decode: stage_diags[Decoded::INDEX]
                         .take()
-                        .ok_or_else(|| diag_missing("decode"))?,
-                    grayscale: stage_diags[2]
+                        .ok_or_else(|| diag_missing(Decoded::NAME))?,
+                    grayscale: stage_diags[Grayscaled::INDEX]
                         .take()
-                        .ok_or_else(|| diag_missing("grayscale"))?,
-                    blur: stage_diags[3].take().ok_or_else(|| diag_missing("blur"))?,
-                    edge_detection: stage_diags[4]
+                        .ok_or_else(|| diag_missing(Grayscaled::NAME))?,
+                    blur: stage_diags[Blurred::INDEX]
                         .take()
-                        .ok_or_else(|| diag_missing("edge detection"))?,
+                        .ok_or_else(|| diag_missing(Blurred::NAME))?,
+                    edge_detection: stage_diags[EdgesDetected::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(EdgesDetected::NAME))?,
                     invert: invert_diag,
-                    contour_tracing: stage_diags[5]
+                    contour_tracing: stage_diags[ContoursTraced::INDEX]
                         .take()
-                        .ok_or_else(|| diag_missing("contour tracing"))?,
-                    simplification: stage_diags[6]
+                        .ok_or_else(|| diag_missing(ContoursTraced::NAME))?,
+                    simplification: stage_diags[Simplified::INDEX]
                         .take()
-                        .ok_or_else(|| diag_missing("simplification"))?,
-                    mask: stage_diags[7].take(),
-                    join: stage_diags[8].take().ok_or_else(|| diag_missing("join"))?,
+                        .ok_or_else(|| diag_missing(Simplified::NAME))?,
+                    mask: stage_diags[Masked::INDEX].take(),
+                    join: stage_diags[Joined::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Joined::NAME))?,
                     total_duration,
                     summary,
                 };
