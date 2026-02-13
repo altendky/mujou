@@ -151,6 +151,15 @@ fn closest_coord_on_line(line: &Line<f64>, query: &geo::Point<f64>) -> geo::Coor
 /// self-segments.
 const MAX_NN_ITERATIONS: usize = 200;
 
+/// Number of pixels (at working resolution) between sample points used
+/// for R-tree nearest-neighbor queries during MST candidate generation.
+///
+/// Lower values produce more samples and better MST quality at the cost
+/// of more R-tree queries.  At the default `working_resolution` of 256
+/// this yields ~51 samples across the longest axis, matching the
+/// previous hard-coded divisor of 50.
+const SAMPLE_SPACING_PIXELS: f64 = 5.0;
+
 /// Build an MST connecting all polylines using Kruskal's algorithm with
 /// R-tree-accelerated candidate edge generation.
 ///
@@ -161,7 +170,7 @@ const MAX_NN_ITERATIONS: usize = 200;
 ///
 /// Returns a list of [`MstEdge`]s (one fewer than the number of polylines).
 #[allow(clippy::too_many_lines)]
-fn build_mst(polylines: &[&Polyline], k_nearest: usize) -> Vec<MstEdge> {
+fn build_mst(polylines: &[&Polyline], k_nearest: usize, working_resolution: u32) -> Vec<MstEdge> {
     let n = polylines.len();
     if n <= 1 {
         return Vec::new();
@@ -190,9 +199,12 @@ fn build_mst(polylines: &[&Polyline], k_nearest: usize) -> Vec<MstEdge> {
     let tree = RTree::bulk_load(segments);
 
     // Pre-compute sample points for each polyline (adaptive spacing).
+    // Derive sample spacing from working_resolution so density scales
+    // with the image resolution rather than being a fixed count.
     let (min_x, min_y, max_x, max_y) = polyline_bounding_box(polylines);
     let extent = (max_x - min_x).max(max_y - min_y).max(1.0);
-    let sample_spacing = extent / 50.0;
+    let pixel_size = extent / f64::from(working_resolution).max(1.0);
+    let sample_spacing = pixel_size * SAMPLE_SPACING_PIXELS;
 
     let all_samples: Vec<Vec<(geo::Point<f64>, usize, usize)>> = polylines
         .iter()
@@ -771,7 +783,7 @@ fn emit_polyline(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> Polylin
 /// be fully connected after phase 1).
 #[must_use]
 #[allow(clippy::expect_used)] // structural invariant: MST guarantees connectivity
-pub fn join_mst(contours: &[Polyline], k_nearest: usize) -> Polyline {
+pub fn join_mst(contours: &[Polyline], k_nearest: usize, working_resolution: u32) -> Polyline {
     // Filter out empty contours.
     let polylines: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
 
@@ -784,7 +796,7 @@ pub fn join_mst(contours: &[Polyline], k_nearest: usize) -> Polyline {
     }
 
     // Phase 1: Build MST.
-    let mst_edges = build_mst(&polylines, k_nearest.max(1));
+    let mst_edges = build_mst(&polylines, k_nearest.max(1), working_resolution);
 
     // Phase 2+3: Build graph, fix parity, find Eulerian path.
     let (mut graph, node_coords) = build_graph(&polylines, &mst_edges);
@@ -812,11 +824,12 @@ mod tests {
     use crate::types::PipelineConfig;
 
     const TEST_K: usize = PipelineConfig::DEFAULT_MST_NEIGHBOURS;
+    const TEST_RESOLUTION: u32 = PipelineConfig::DEFAULT_WORKING_RESOLUTION;
     use crate::types::Point;
 
     #[test]
     fn mst_join_empty() {
-        let result = join_mst(&[], TEST_K);
+        let result = join_mst(&[], TEST_K, TEST_RESOLUTION);
         assert!(result.is_empty());
     }
 
@@ -827,14 +840,14 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let result = join_mst(std::slice::from_ref(&contour), TEST_K);
+        let result = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
         assert_eq!(result, contour);
     }
 
     #[test]
     fn mst_join_single_point_contour() {
         let contour = Polyline::new(vec![Point::new(5.0, 5.0)]);
-        let result = join_mst(std::slice::from_ref(&contour), TEST_K);
+        let result = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
         assert_eq!(result.len(), 1);
     }
 
@@ -842,7 +855,7 @@ mod tests {
     fn mst_join_two_contours_produces_single_path() {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let result = join_mst(&[c1, c2], TEST_K);
+        let result = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION);
 
         // Must be non-empty and cover all original points.
         assert!(
@@ -857,7 +870,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let empty = Polyline::new(Vec::new());
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let result = join_mst(&[c1, empty, c2], TEST_K);
+        let result = join_mst(&[c1, empty, c2], TEST_K, TEST_RESOLUTION);
         assert!(result.len() >= 4);
     }
 
@@ -876,7 +889,11 @@ mod tests {
             Point::new(60.0, 60.0),
         ]);
 
-        let result = join_mst(&[c1.clone(), c2.clone(), c3.clone()], TEST_K);
+        let result = join_mst(
+            &[c1.clone(), c2.clone(), c3.clone()],
+            TEST_K,
+            TEST_RESOLUTION,
+        );
         let output_set: std::collections::HashSet<(u64, u64)> = result
             .points()
             .iter()
@@ -903,7 +920,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(25.0, 0.0)]);
 
-        let result = join_mst(&[c1, c2, c3], TEST_K);
+        let result = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
         assert!(!result.is_empty());
         // All points should be finite.
         for p in result.points() {
@@ -918,7 +935,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(6.0, 0.0), Point::new(7.0, 0.0)]);
 
-        let result = join_mst(&[c1, c2, c3], TEST_K);
+        let result = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
         // Output should contain all 6 original points plus MST connections
         // and any retrace edges.
         assert!(
@@ -944,7 +961,7 @@ mod tests {
             .collect();
 
         let total_points: usize = contours.iter().map(Polyline::len).sum();
-        let result = join_mst(&contours, TEST_K);
+        let result = join_mst(&contours, TEST_K, TEST_RESOLUTION);
 
         assert!(
             result.len() >= total_points,

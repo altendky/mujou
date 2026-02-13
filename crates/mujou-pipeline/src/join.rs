@@ -96,7 +96,9 @@ impl PathJoiner for PathJoinerKind {
         match *self {
             Self::StraightLine => join_straight_line(contours),
             Self::Retrace => join_retrace(contours),
-            Self::Mst => mst_join::join_mst(contours, config.mst_neighbours),
+            Self::Mst => {
+                mst_join::join_mst(contours, config.mst_neighbours, config.working_resolution)
+            }
         }
     }
 }
