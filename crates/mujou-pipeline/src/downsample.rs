@@ -15,9 +15,12 @@ use serde::{Deserialize, Serialize};
 
 /// Resampling filter used when downsampling.
 ///
-/// Ordered from fastest/lowest-quality to slowest/highest-quality.
+/// Ordered from fastest/lowest-quality to slowest/highest-quality,
+/// with a `None` variant to skip downsampling entirely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DownsampleFilter {
+    /// Disabled: skip downsampling regardless of image size.
+    None,
     /// Nearest-neighbor: fastest, blocky artifacts.
     Nearest,
     /// Bilinear interpolation: fast, decent quality.
@@ -38,13 +41,17 @@ impl Default for DownsampleFilter {
 
 impl DownsampleFilter {
     /// Convert to the `image` crate's `FilterType`.
-    const fn to_image_filter(self) -> image::imageops::FilterType {
+    ///
+    /// Returns `Option::None` for [`DownsampleFilter::None`] since
+    /// there is no corresponding resampling filter.
+    const fn to_image_filter(self) -> Option<image::imageops::FilterType> {
         match self {
-            Self::Nearest => image::imageops::FilterType::Nearest,
-            Self::Triangle => image::imageops::FilterType::Triangle,
-            Self::CatmullRom => image::imageops::FilterType::CatmullRom,
-            Self::Gaussian => image::imageops::FilterType::Gaussian,
-            Self::Lanczos3 => image::imageops::FilterType::Lanczos3,
+            Self::None => Option::None,
+            Self::Nearest => Some(image::imageops::FilterType::Nearest),
+            Self::Triangle => Some(image::imageops::FilterType::Triangle),
+            Self::CatmullRom => Some(image::imageops::FilterType::CatmullRom),
+            Self::Gaussian => Some(image::imageops::FilterType::Gaussian),
+            Self::Lanczos3 => Some(image::imageops::FilterType::Lanczos3),
         }
     }
 }
@@ -52,6 +59,7 @@ impl DownsampleFilter {
 impl fmt::Display for DownsampleFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::None => f.write_str("None"),
             Self::Nearest => f.write_str("Nearest"),
             Self::Triangle => f.write_str("Triangle"),
             Self::CatmullRom => f.write_str("CatmullRom"),
@@ -72,6 +80,10 @@ pub fn downsample(
     max_dimension: u32,
     filter: DownsampleFilter,
 ) -> (DynamicImage, bool) {
+    let Some(image_filter) = filter.to_image_filter() else {
+        return (image.clone(), false);
+    };
+
     let (w, h) = (image.width(), image.height());
     let long_axis = w.max(h);
 
@@ -79,7 +91,7 @@ pub fn downsample(
         return (image.clone(), false);
     }
 
-    let resized = image.resize(max_dimension, max_dimension, filter.to_image_filter());
+    let resized = image.resize(max_dimension, max_dimension, image_filter);
     (resized, true)
 }
 
@@ -147,5 +159,14 @@ mod tests {
         assert!(applied);
         assert_eq!(result.width(), 256);
         assert_eq!(result.height(), 256);
+    }
+
+    #[test]
+    fn none_filter_skips_even_large_image() {
+        let img = test_image(1024, 768);
+        let (result, applied) = downsample(&img, 256, DownsampleFilter::None);
+        assert!(!applied);
+        assert_eq!(result.width(), 1024);
+        assert_eq!(result.height(), 768);
     }
 }
