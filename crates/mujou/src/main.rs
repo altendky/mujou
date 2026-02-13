@@ -416,6 +416,7 @@ fn ConfigButtons(
     committed_config: Signal<mujou_pipeline::PipelineConfig>,
 ) -> Element {
     let mut copied = use_signal(|| false);
+    let mut copy_generation = use_signal(|| 0u32);
     let mut error_msg = use_signal(|| Option::<String>::None);
 
     let btn_class = "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors";
@@ -428,8 +429,12 @@ fn ConfigButtons(
                     Ok(()) => {
                         error_msg.set(None);
                         copied.set(true);
+                        copy_generation += 1;
+                        let my_gen = *copy_generation.peek();
                         gloo_timers::future::TimeoutFuture::new(COPY_FEEDBACK_MS).await;
-                        copied.set(false);
+                        if *copy_generation.peek() == my_gen {
+                            copied.set(false);
+                        }
                     }
                     Err(e) => error_msg.set(Some(format!("{e}"))),
                 },
