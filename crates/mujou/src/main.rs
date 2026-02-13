@@ -1,6 +1,8 @@
 use std::rc::Rc;
 
 use dioxus::prelude::*;
+use dioxus_free_icons::Icon;
+use dioxus_free_icons::icons::ld_icons::{LdClipboardCheck, LdClipboardCopy, LdClipboardPaste};
 use mujou_io::{
     ExportPanel, FileUpload, Filmstrip, PipelineWorker, StageControls, StageId, StagePreview,
     WorkerResult,
@@ -321,15 +323,24 @@ fn app() -> Element {
                             on_select: on_stage_select,
                         }
 
-                        // Per-stage controls (always visible, never destroyed)
-                        div { class: "bg-[var(--surface)] rounded p-4",
-                            h3 { class: "text-sm font-semibold text-[var(--text-heading)] mb-2",
-                                "{selected_stage()} Controls"
+                        // Per-stage controls with copy/paste config buttons
+                        div { class: "flex gap-2",
+                            // Config clipboard buttons (left column)
+                            ConfigButtons {
+                                live_config: live_config,
+                                committed_config: committed_config,
                             }
-                            StageControls {
-                                stage: selected_stage(),
-                                config: live_config(),
-                                on_config_change: on_config_change,
+
+                            // Controls (right, fills remaining space)
+                            div { class: "flex-1 bg-[var(--surface)] rounded p-4",
+                                h3 { class: "text-sm font-semibold text-[var(--text-heading)] mb-2",
+                                    "{selected_stage()} Controls"
+                                }
+                                StageControls {
+                                    stage: selected_stage(),
+                                    config: live_config(),
+                                    on_config_change: on_config_change,
+                                }
                             }
                         }
                     } else if processing() {
@@ -386,6 +397,91 @@ fn app() -> Element {
             }
 
 
+        }
+    }
+}
+
+/// Feedback duration in milliseconds for the copy-success checkmark.
+const COPY_FEEDBACK_MS: u32 = 1500;
+
+/// Copy/paste config buttons shown alongside the stage controls.
+///
+/// Renders a vertical column of two square buttons (matching the upload
+/// button sizing) that copy the current `PipelineConfig` as JSON to the
+/// clipboard and paste a JSON config from the clipboard.
+#[component]
+#[allow(clippy::needless_pass_by_value)]
+fn ConfigButtons(
+    live_config: Signal<mujou_pipeline::PipelineConfig>,
+    committed_config: Signal<mujou_pipeline::PipelineConfig>,
+) -> Element {
+    let mut copied = use_signal(|| false);
+    let mut error_msg = use_signal(|| Option::<String>::None);
+
+    let btn_class = "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors";
+
+    let handle_copy = move |_| {
+        let config = live_config();
+        spawn(async move {
+            match serde_json::to_string_pretty(&config) {
+                Ok(json) => match mujou_io::clipboard::write_text(&json).await {
+                    Ok(()) => {
+                        error_msg.set(None);
+                        copied.set(true);
+                        gloo_timers::future::TimeoutFuture::new(COPY_FEEDBACK_MS).await;
+                        copied.set(false);
+                    }
+                    Err(e) => error_msg.set(Some(format!("{e}"))),
+                },
+                Err(e) => error_msg.set(Some(format!("Serialize error: {e}"))),
+            }
+        });
+    };
+
+    let mut live_config = live_config;
+    let mut committed_config = committed_config;
+    let handle_paste = move |_| {
+        spawn(async move {
+            match mujou_io::clipboard::read_text().await {
+                Ok(text) => match serde_json::from_str::<mujou_pipeline::PipelineConfig>(&text) {
+                    Ok(config) => {
+                        live_config.set(config.clone());
+                        committed_config.set(config);
+                        error_msg.set(None);
+                    }
+                    Err(e) => error_msg.set(Some(format!("Invalid config JSON: {e}"))),
+                },
+                Err(e) => error_msg.set(Some(format!("{e}"))),
+            }
+        });
+    };
+
+    rsx! {
+        div { class: "flex flex-col gap-2",
+            button {
+                class: btn_class,
+                title: if copied() { "Copied!" } else { "Copy config to clipboard" },
+                aria_label: if copied() { "Copied!" } else { "Copy config to clipboard" },
+                onclick: handle_copy,
+                if copied() {
+                    Icon { width: 20, height: 20, icon: LdClipboardCheck }
+                } else {
+                    Icon { width: 20, height: 20, icon: LdClipboardCopy }
+                }
+            }
+            button {
+                class: btn_class,
+                title: "Paste config from clipboard",
+                aria_label: "Paste config from clipboard",
+                onclick: handle_paste,
+                Icon { width: 20, height: 20, icon: LdClipboardPaste }
+            }
+
+            if let Some(ref err) = error_msg() {
+                p { class: "text-[var(--text-error)] text-xs max-w-[var(--btn-height)] break-words",
+                    "{err}"
+                }
+            }
         }
     }
 }

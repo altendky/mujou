@@ -12,6 +12,7 @@ categories = ["graphics"]
 
 [dependencies]
 dioxus.workspace = true
+dioxus-free-icons.workspace = true
 getrandom_0_2.workspace = true
 gloo-timers.workspace = true
 js-sys.workspace = true
