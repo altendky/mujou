@@ -3,8 +3,11 @@
 //! These types describe pipeline instrumentation for algorithm tuning
 //! and parameter experimentation. Each pipeline stage reports its own
 //! metrics via [`PipelineStage::metrics()`](crate::pipeline::PipelineStage::metrics).
-//! Timing is the caller's responsibility — this crate is sans-IO and
-//! does not read the system clock.
+//!
+//! This crate is sans-IO and does not read the system clock.
+//! [`process_staged_with_diagnostics`] is generic over a [`Clock`]
+//! trait so callers can supply any instant type — `std::time::Instant`
+//! on native, `web_time::Instant` on WASM, or a fake clock in tests.
 //!
 //! Duration fields use [`std::time::Duration`] and are serialized as
 //! fractional seconds (`f64`) for JSON compatibility.
@@ -378,6 +381,136 @@ pub(crate) fn contour_stats(contours: &[crate::Polyline]) -> ContourStats {
         min,
         max,
         mean,
+    }
+}
+
+/// Abstraction over a monotonic clock.
+///
+/// Implement this for your platform's instant type so that
+/// [`process_staged_with_diagnostics`] can measure stage durations
+/// without depending on a specific time crate.
+///
+/// # Examples
+///
+/// ```rust
+/// use std::time::{Duration, Instant};
+/// use mujou_pipeline::diagnostics::Clock;
+///
+/// struct StdClock;
+///
+/// impl Clock for StdClock {
+///     type Instant = Instant;
+///     fn now(&self) -> Instant { Instant::now() }
+///     fn elapsed(&self, since: &Instant) -> Duration { since.elapsed() }
+/// }
+/// ```
+pub trait Clock {
+    /// The instant type returned by [`now`](Self::now).
+    type Instant;
+
+    /// Capture the current instant.
+    fn now(&self) -> Self::Instant;
+
+    /// Measure the duration elapsed since `since`.
+    fn elapsed(&self, since: &Self::Instant) -> Duration;
+}
+
+/// Run the full pipeline with per-stage timing instrumentation.
+///
+/// Each [`Stage::advance()`](crate::pipeline::Stage::advance) call is
+/// timed using the supplied [`Clock`], and the elapsed duration is
+/// paired with the stage's own
+/// [`metrics()`](crate::pipeline::PipelineStage::metrics) to build a
+/// [`PipelineDiagnostics`].
+///
+/// # Errors
+///
+/// Returns [`PipelineError`](crate::PipelineError) if any pipeline
+/// stage fails.
+pub fn process_staged_with_diagnostics<C: Clock>(
+    image_bytes: &[u8],
+    config: &crate::PipelineConfig,
+    clock: &C,
+) -> Result<(crate::StagedResult, PipelineDiagnostics), crate::PipelineError> {
+    use crate::pipeline::{
+        Advance, Blurred, ContoursTraced, Decoded, EdgesDetected, Grayscaled, Joined, Masked,
+        PipelineStage as _, STAGE_COUNT, Simplified, Stage,
+    };
+
+    let pipeline_start = clock.now();
+    let mut stage: Stage = crate::Pipeline::new(image_bytes.to_vec(), config.clone()).into();
+
+    let mut stage_diags: [Option<StageDiagnostics>; STAGE_COUNT] = std::array::from_fn(|_| None);
+    let mut invert_diag = None;
+
+    loop {
+        let t = clock.now();
+        match stage.advance()? {
+            Advance::Next(next) => {
+                let elapsed = clock.elapsed(&t);
+                if let Some(metrics) = next.metrics() {
+                    stage_diags[next.index()] = Some(StageDiagnostics {
+                        duration: elapsed,
+                        metrics,
+                    });
+                }
+                if let Some(inv) = next.invert_metrics() {
+                    invert_diag = Some(StageDiagnostics {
+                        duration: Duration::ZERO,
+                        metrics: inv,
+                    });
+                }
+                stage = next;
+            }
+            Advance::Complete(done) => {
+                let total_duration = clock.elapsed(&pipeline_start);
+                let result = done.complete()?;
+
+                let summary = PipelineSummary {
+                    image_width: result.dimensions.width,
+                    image_height: result.dimensions.height,
+                    pixel_count: u64::from(result.dimensions.width)
+                        * u64::from(result.dimensions.height),
+                    contour_count: result.contours.len(),
+                    final_point_count: result.joined.len(),
+                };
+
+                let diag_missing = |name: &str| {
+                    crate::PipelineError::InvalidConfig(format!(
+                        "diagnostics bug: {name} diagnostics missing"
+                    ))
+                };
+                let pipeline_diagnostics = PipelineDiagnostics {
+                    decode: stage_diags[Decoded::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Decoded::NAME))?,
+                    grayscale: stage_diags[Grayscaled::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Grayscaled::NAME))?,
+                    blur: stage_diags[Blurred::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Blurred::NAME))?,
+                    edge_detection: stage_diags[EdgesDetected::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(EdgesDetected::NAME))?,
+                    invert: invert_diag,
+                    contour_tracing: stage_diags[ContoursTraced::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(ContoursTraced::NAME))?,
+                    simplification: stage_diags[Simplified::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Simplified::NAME))?,
+                    mask: stage_diags[Masked::INDEX].take(),
+                    join: stage_diags[Joined::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Joined::NAME))?,
+                    total_duration,
+                    summary,
+                };
+
+                break Ok((result, pipeline_diagnostics));
+            }
+        }
     }
 }
 

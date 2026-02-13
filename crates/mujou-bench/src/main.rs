@@ -18,14 +18,10 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use clap::{Parser, ValueEnum};
-use mujou_pipeline::diagnostics::{PipelineDiagnostics, PipelineSummary, StageDiagnostics};
-use mujou_pipeline::pipeline::{
-    Advance, Blurred, ContoursTraced, Decoded, EdgesDetected, Grayscaled, Joined, Masked,
-    PipelineStage as _, STAGE_COUNT, Simplified, Stage,
-};
+use mujou_pipeline::diagnostics::{Clock, PipelineDiagnostics};
 
 /// Pipeline parameter experimentation and diagnostics for mujou.
 ///
@@ -133,7 +129,11 @@ fn main() -> ExitCode {
             eprintln!("--- Run {}/{} ---", run + 1, cli.runs);
         }
 
-        match run_with_diagnostics(&image_bytes, &config) {
+        match mujou_pipeline::diagnostics::process_staged_with_diagnostics(
+            &image_bytes,
+            &config,
+            &StdClock,
+        ) {
             Ok((staged, diagnostics)) => {
                 if cli.json {
                     match serde_json::to_string_pretty(&diagnostics) {
@@ -188,91 +188,18 @@ fn main() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Run the full pipeline with per-stage timing instrumentation.
-///
-/// Each [`Stage::advance()`] call is timed with [`std::time::Instant`],
-/// and the elapsed duration is paired with the stage's own
-/// [`metrics()`](PipelineStage::metrics) to build a
-/// [`PipelineDiagnostics`].
-fn run_with_diagnostics(
-    image_bytes: &[u8],
-    config: &mujou_pipeline::PipelineConfig,
-) -> Result<(mujou_pipeline::StagedResult, PipelineDiagnostics), mujou_pipeline::PipelineError> {
-    let pipeline_start = Instant::now();
-    let mut stage: Stage =
-        mujou_pipeline::Pipeline::new(image_bytes.to_vec(), config.clone()).into();
+/// [`Clock`] implementation backed by [`std::time::Instant`].
+struct StdClock;
 
-    let mut stage_diags: [Option<StageDiagnostics>; STAGE_COUNT] = std::array::from_fn(|_| None);
-    let mut invert_diag = None;
+impl Clock for StdClock {
+    type Instant = Instant;
 
-    loop {
-        let t = Instant::now();
-        match stage.advance()? {
-            Advance::Next(next) => {
-                let elapsed = t.elapsed();
-                if let Some(metrics) = next.metrics() {
-                    stage_diags[next.index()] = Some(StageDiagnostics {
-                        duration: elapsed,
-                        metrics,
-                    });
-                }
-                if let Some(inv) = next.invert_metrics() {
-                    invert_diag = Some(StageDiagnostics {
-                        duration: std::time::Duration::ZERO,
-                        metrics: inv,
-                    });
-                }
-                stage = next;
-            }
-            Advance::Complete(done) => {
-                let total_duration = pipeline_start.elapsed();
-                let result = done.complete()?;
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
 
-                let summary = PipelineSummary {
-                    image_width: result.dimensions.width,
-                    image_height: result.dimensions.height,
-                    pixel_count: u64::from(result.dimensions.width)
-                        * u64::from(result.dimensions.height),
-                    contour_count: result.contours.len(),
-                    final_point_count: result.joined.len(),
-                };
-
-                let diag_missing = |name: &str| {
-                    mujou_pipeline::PipelineError::InvalidConfig(format!(
-                        "diagnostics bug: {name} diagnostics missing"
-                    ))
-                };
-                let pipeline_diagnostics = PipelineDiagnostics {
-                    decode: stage_diags[Decoded::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Decoded::NAME))?,
-                    grayscale: stage_diags[Grayscaled::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Grayscaled::NAME))?,
-                    blur: stage_diags[Blurred::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Blurred::NAME))?,
-                    edge_detection: stage_diags[EdgesDetected::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(EdgesDetected::NAME))?,
-                    invert: invert_diag,
-                    contour_tracing: stage_diags[ContoursTraced::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(ContoursTraced::NAME))?,
-                    simplification: stage_diags[Simplified::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Simplified::NAME))?,
-                    mask: stage_diags[Masked::INDEX].take(),
-                    join: stage_diags[Joined::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Joined::NAME))?,
-                    total_duration,
-                    summary,
-                };
-
-                break Ok((result, pipeline_diagnostics));
-            }
-        }
+    fn elapsed(&self, since: &Instant) -> Duration {
+        since.elapsed()
     }
 }
 
