@@ -242,7 +242,7 @@ impl PipelineConfig {
     /// Default working resolution (max dimension after downsampling).
     pub const DEFAULT_WORKING_RESOLUTION: u32 = 256;
     /// Default downsample filter.
-    pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::None;
+    pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Disabled;
     /// Default MST nearest-neighbour candidate count per sample point.
     pub const DEFAULT_MST_NEIGHBOURS: usize = 100;
 
@@ -750,7 +750,7 @@ mod tests {
         assert!((config.mask_diameter - 1.0).abs() < f64::EPSILON);
         assert!(!config.invert);
         assert_eq!(config.working_resolution, 256);
-        assert_eq!(config.downsample_filter, DownsampleFilter::None);
+        assert_eq!(config.downsample_filter, DownsampleFilter::Disabled);
         assert_eq!(config.mst_neighbours, 100);
     }
 
