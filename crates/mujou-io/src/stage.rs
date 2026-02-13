@@ -16,26 +16,29 @@ use std::fmt;
 pub enum StageId {
     /// Stage 0: original source image (RGBA, pre-processing).
     Original,
-    /// Stage 1: decode + grayscale conversion.
+    /// Stage 1: downsampled to working resolution.
+    Downsampled,
+    /// Stage 2: decode + grayscale conversion.
     Grayscale,
-    /// Stage 2: Gaussian blur.
+    /// Stage 3: Gaussian blur.
     Blur,
-    /// Stages 3+4: Canny edge detection + optional inversion.
+    /// Stages 4+5: Canny edge detection + optional inversion.
     Edges,
-    /// Stage 5: contour tracing.
+    /// Stage 6: contour tracing.
     Contours,
-    /// Stage 6: RDP simplification.
+    /// Stage 7: RDP simplification.
     Simplified,
-    /// Stage 7: circular mask.
+    /// Stage 8: circular mask.
     Masked,
-    /// Stage 8: path joining.
+    /// Stage 9: path joining.
     Path,
 }
 
 impl StageId {
     /// All stages in pipeline order, for iterating the filmstrip.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Original,
+        Self::Downsampled,
         Self::Grayscale,
         Self::Blur,
         Self::Edges,
@@ -50,6 +53,7 @@ impl StageId {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Original => "Original",
+            Self::Downsampled => "Downsampled",
             Self::Grayscale => "Grayscale",
             Self::Blur => "Blur",
             Self::Edges => "Edges",
@@ -65,6 +69,7 @@ impl StageId {
     pub const fn abbreviation(self) -> &'static str {
         match self {
             Self::Original => "O",
+            Self::Downsampled => "D",
             Self::Grayscale => "G",
             Self::Blur => "B",
             Self::Edges => "E",
@@ -91,7 +96,7 @@ mod tests {
         // If you add a variant to StageId, update ALL and this count.
         assert_eq!(
             StageId::ALL.len(),
-            8,
+            9,
             "StageId::ALL length must match variant count"
         );
         // Verify no duplicates.

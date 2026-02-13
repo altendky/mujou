@@ -10,6 +10,7 @@
 //! let config = PipelineConfig::default();
 //! let pipeline = Pipeline::new(png, config)
 //!     .decode()?
+//!     .downsample()
 //!     .grayscale()
 //!     .blur()
 //!     .detect_edges()
@@ -111,6 +112,55 @@ impl Decoded {
         &self.original
     }
 
+    /// Advance to the downsample stage.
+    pub fn downsample(self) -> Downsampled {
+        let (downsampled_dynamic, applied) = crate::downsample::downsample(
+            &self.image,
+            self.config.working_resolution,
+            self.config.downsample_filter,
+        );
+        let downsampled = crate::grayscale::to_rgba(&downsampled_dynamic);
+        Downsampled {
+            config: self.config,
+            original: self.original,
+            image: downsampled_dynamic,
+            rgba: downsampled,
+            applied,
+        }
+    }
+}
+
+// ───────────────────────── Stage 2: Downsampled ──────────────────────
+
+/// Pipeline state after downsampling to working resolution.
+///
+/// The decoded image has been downsampled so the longest axis matches
+/// `config.working_resolution`. Call [`grayscale`](Self::grayscale) to
+/// advance to the next stage.
+#[must_use = "pipeline stages are consumed by advancing — call .grayscale() to continue"]
+#[allow(clippy::struct_field_names)]
+pub struct Downsampled {
+    config: PipelineConfig,
+    original: RgbaImage,
+    image: DynamicImage,
+    rgba: RgbaImage,
+    applied: bool,
+}
+
+impl Downsampled {
+    /// The downsampled RGBA image.
+    #[must_use]
+    pub const fn downsampled(&self) -> &RgbaImage {
+        &self.rgba
+    }
+
+    /// Whether downsampling was actually applied (image was larger than
+    /// `working_resolution`).
+    #[must_use]
+    pub const fn applied(&self) -> bool {
+        self.applied
+    }
+
     /// Advance to the grayscale stage.
     pub fn grayscale(self) -> Grayscaled {
         let gray = crate::grayscale::to_grayscale(&self.image);
@@ -121,13 +171,14 @@ impl Decoded {
         Grayscaled {
             config: self.config,
             original: self.original,
+            downsampled: self.rgba,
             gray,
             dimensions,
         }
     }
 }
 
-// ───────────────────────── Stage 2: Grayscaled ───────────────────────
+// ───────────────────────── Stage 3: Grayscaled ───────────────────────
 
 /// Pipeline state after grayscale conversion.
 ///
@@ -136,6 +187,7 @@ impl Decoded {
 pub struct Grayscaled {
     config: PipelineConfig,
     original: RgbaImage,
+    downsampled: RgbaImage,
     gray: GrayImage,
     dimensions: Dimensions,
 }
@@ -159,6 +211,7 @@ impl Grayscaled {
         Blurred {
             config: self.config,
             original: self.original,
+            downsampled: self.downsampled,
             grayscale: self.gray,
             smooth,
             dimensions: self.dimensions,
@@ -175,6 +228,7 @@ impl Grayscaled {
 pub struct Blurred {
     config: PipelineConfig,
     original: RgbaImage,
+    downsampled: RgbaImage,
     grayscale: GrayImage,
     smooth: GrayImage,
     dimensions: Dimensions,
@@ -203,6 +257,7 @@ impl Blurred {
         EdgesDetected {
             config: self.config,
             original: self.original,
+            downsampled: self.downsampled,
             grayscale: self.grayscale,
             blurred: self.smooth,
             edge_map,
@@ -223,6 +278,7 @@ impl Blurred {
 pub struct EdgesDetected {
     config: PipelineConfig,
     original: RgbaImage,
+    downsampled: RgbaImage,
     grayscale: GrayImage,
     blurred: GrayImage,
     edge_map: GrayImage,
@@ -252,6 +308,7 @@ impl EdgesDetected {
         Ok(ContoursTraced {
             config: self.config,
             original: self.original,
+            downsampled: self.downsampled,
             grayscale: self.grayscale,
             blurred: self.blurred,
             edges: self.edge_map,
@@ -273,6 +330,7 @@ impl EdgesDetected {
 pub struct ContoursTraced {
     config: PipelineConfig,
     original: RgbaImage,
+    downsampled: RgbaImage,
     grayscale: GrayImage,
     blurred: GrayImage,
     edges: GrayImage,
@@ -294,6 +352,7 @@ impl ContoursTraced {
         Simplified {
             config: self.config,
             original: self.original,
+            downsampled: self.downsampled,
             grayscale: self.grayscale,
             blurred: self.blurred,
             edges: self.edges,
@@ -316,6 +375,7 @@ impl ContoursTraced {
 pub struct Simplified {
     config: PipelineConfig,
     original: RgbaImage,
+    downsampled: RgbaImage,
     grayscale: GrayImage,
     blurred: GrayImage,
     edges: GrayImage,
@@ -354,6 +414,7 @@ impl Simplified {
         Masked {
             config: self.config,
             original: self.original,
+            downsampled: self.downsampled,
             grayscale: self.grayscale,
             blurred: self.blurred,
             edges: self.edges,
@@ -377,6 +438,7 @@ impl Simplified {
 pub struct Masked {
     config: PipelineConfig,
     original: RgbaImage,
+    downsampled: RgbaImage,
     grayscale: GrayImage,
     blurred: GrayImage,
     edges: GrayImage,
@@ -400,6 +462,7 @@ impl Masked {
         Joined {
             config: self.config,
             original: self.original,
+            downsampled: self.downsampled,
             grayscale: self.grayscale,
             blurred: self.blurred,
             edges: self.edges,
@@ -425,6 +488,7 @@ impl Masked {
 pub struct Joined {
     config: PipelineConfig,
     original: RgbaImage,
+    downsampled: RgbaImage,
     grayscale: GrayImage,
     blurred: GrayImage,
     edges: GrayImage,
@@ -453,6 +517,7 @@ impl Joined {
     pub fn into_result(self) -> StagedResult {
         StagedResult {
             original: self.original,
+            downsampled: self.downsampled,
             grayscale: self.grayscale,
             blurred: self.blurred,
             edges: self.edges,
@@ -468,7 +533,7 @@ impl Joined {
 // ──────────────────── PipelineStage trait + Stage enum ────────────────
 
 /// Total number of stages in the pipeline.
-pub const STAGE_COUNT: usize = 9;
+pub const STAGE_COUNT: usize = 10;
 
 /// The output produced by a single pipeline stage.
 ///
@@ -486,6 +551,11 @@ pub enum StageOutput<'a> {
     Decoded {
         /// The original image.
         original: &'a RgbaImage,
+    },
+    /// Downsampled RGBA image (working resolution).
+    Downsampled {
+        /// The downsampled image.
+        downsampled: &'a RgbaImage,
     },
     /// Grayscale conversion result.
     Grayscaled {
@@ -556,7 +626,7 @@ pub trait PipelineStage: Sized {
     /// Human-readable name of this stage (e.g. `"source"`, `"blur"`).
     const NAME: &str;
 
-    /// Zero-based index of this stage (`0` for Pending through `8` for
+    /// Zero-based index of this stage (`0` for Pending through `9` for
     /// Joined).
     const INDEX: usize;
 
@@ -643,6 +713,37 @@ impl PipelineStage for Decoded {
     }
 
     fn next(self) -> Result<Option<Stage>, PipelineError> {
+        Ok(Some(Stage::Downsampled(self.downsample())))
+    }
+
+    fn complete(self) -> Result<StagedResult, PipelineError> {
+        self.downsample().complete()
+    }
+}
+
+impl PipelineStage for Downsampled {
+    const NAME: &str = "downsample";
+    const INDEX: usize = 2;
+
+    fn output(&self) -> StageOutput<'_> {
+        StageOutput::Downsampled {
+            downsampled: &self.rgba,
+        }
+    }
+
+    fn metrics(&self) -> Option<StageMetrics> {
+        Some(StageMetrics::Downsample {
+            original_width: self.original.width(),
+            original_height: self.original.height(),
+            width: self.rgba.width(),
+            height: self.rgba.height(),
+            max_dimension: self.config.working_resolution,
+            filter: self.config.downsample_filter.to_string(),
+            applied: self.applied,
+        })
+    }
+
+    fn next(self) -> Result<Option<Stage>, PipelineError> {
         Ok(Some(Stage::Grayscaled(self.grayscale())))
     }
 
@@ -653,7 +754,7 @@ impl PipelineStage for Decoded {
 
 impl PipelineStage for Grayscaled {
     const NAME: &str = "grayscale";
-    const INDEX: usize = 2;
+    const INDEX: usize = 3;
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::Grayscaled {
@@ -680,7 +781,7 @@ impl PipelineStage for Grayscaled {
 
 impl PipelineStage for Blurred {
     const NAME: &str = "blur";
-    const INDEX: usize = 3;
+    const INDEX: usize = 4;
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::Blurred {
@@ -705,7 +806,7 @@ impl PipelineStage for Blurred {
 
 impl PipelineStage for EdgesDetected {
     const NAME: &str = "edges";
-    const INDEX: usize = 4;
+    const INDEX: usize = 5;
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::EdgesDetected {
@@ -747,7 +848,7 @@ impl PipelineStage for EdgesDetected {
 
 impl PipelineStage for ContoursTraced {
     const NAME: &str = "contours";
-    const INDEX: usize = 5;
+    const INDEX: usize = 6;
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::ContoursTraced {
@@ -777,7 +878,7 @@ impl PipelineStage for ContoursTraced {
 
 impl PipelineStage for Simplified {
     const NAME: &str = "simplify";
-    const INDEX: usize = 6;
+    const INDEX: usize = 7;
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::Simplified {
@@ -814,7 +915,7 @@ impl PipelineStage for Simplified {
 
 impl PipelineStage for Masked {
     const NAME: &str = "mask";
-    const INDEX: usize = 7;
+    const INDEX: usize = 8;
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::Masked {
@@ -847,7 +948,7 @@ impl PipelineStage for Masked {
 
 impl PipelineStage for Joined {
     const NAME: &str = "join";
-    const INDEX: usize = 8;
+    const INDEX: usize = 9;
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::Joined {
@@ -911,6 +1012,8 @@ pub enum Stage {
     Pending(Pending),
     /// See [`Decoded`].
     Decoded(Decoded),
+    /// See [`Downsampled`].
+    Downsampled(Downsampled),
     /// See [`Grayscaled`].
     Grayscaled(Grayscaled),
     /// See [`Blurred`].
@@ -934,6 +1037,7 @@ const fn _stage_count_guard(s: &Stage) {
     match s {
         Stage::Pending(_)
         | Stage::Decoded(_)
+        | Stage::Downsampled(_)
         | Stage::Grayscaled(_)
         | Stage::Blurred(_)
         | Stage::EdgesDetected(_)
@@ -960,6 +1064,7 @@ macro_rules! delegate {
         match $self {
             Self::Pending(s) => s.$method($($arg),*),
             Self::Decoded(s) => s.$method($($arg),*),
+            Self::Downsampled(s) => s.$method($($arg),*),
             Self::Grayscaled(s) => s.$method($($arg),*),
             Self::Blurred(s) => s.$method($($arg),*),
             Self::EdgesDetected(s) => s.$method($($arg),*),
@@ -1105,6 +1210,12 @@ impl From<Decoded> for Stage {
     }
 }
 
+impl From<Downsampled> for Stage {
+    fn from(s: Downsampled) -> Self {
+        Self::Downsampled(s)
+    }
+}
+
 impl From<Grayscaled> for Stage {
     fn from(s: Grayscaled) -> Self {
         Self::Grayscaled(s)
@@ -1160,6 +1271,7 @@ impl From<Joined> for Stage {
 /// # fn run(png: Vec<u8>) -> Result<(), PipelineError> {
 /// let result = Pipeline::new(png, PipelineConfig::default())
 ///     .decode()?
+///     .downsample()
 ///     .grayscale()
 ///     .blur()
 ///     .detect_edges()
@@ -1252,11 +1364,25 @@ mod tests {
     }
 
     #[test]
+    fn downsampled_exposes_downsampled() {
+        let png = sharp_edge_png(20, 20);
+        let downsampled = Pipeline::new(png, PipelineConfig::default())
+            .decode()
+            .unwrap()
+            .downsample();
+        // 20x20 is below the default 256 working resolution, so no actual downsampling.
+        assert!(!downsampled.applied());
+        assert_eq!(downsampled.downsampled().width(), 20);
+        assert_eq!(downsampled.downsampled().height(), 20);
+    }
+
+    #[test]
     fn grayscaled_exposes_grayscale_and_dimensions() {
         let png = sharp_edge_png(20, 20);
         let grayscaled = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale();
         assert_eq!(grayscaled.grayscale().width(), 20);
         assert_eq!(grayscaled.grayscale().height(), 20);
@@ -1275,6 +1401,7 @@ mod tests {
         let blurred = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur();
         assert_eq!(blurred.blurred().width(), 20);
@@ -1287,6 +1414,7 @@ mod tests {
         let edges = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges();
@@ -1300,6 +1428,7 @@ mod tests {
         let contours = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1325,6 +1454,7 @@ mod tests {
         let result = Pipeline::new(buf, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1338,6 +1468,7 @@ mod tests {
         let simplified = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1358,6 +1489,7 @@ mod tests {
         let masked = Pipeline::new(png, config)
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1378,6 +1510,7 @@ mod tests {
         let masked = Pipeline::new(png, config)
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1394,6 +1527,7 @@ mod tests {
         let joined = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1414,6 +1548,7 @@ mod tests {
         let pipeline_result = Pipeline::new(png, config)
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1425,6 +1560,7 @@ mod tests {
             .into_result();
 
         assert_eq!(staged.original, pipeline_result.original);
+        assert_eq!(staged.downsampled, pipeline_result.downsampled);
         assert_eq!(staged.grayscale, pipeline_result.grayscale);
         assert_eq!(staged.blurred, pipeline_result.blurred);
         assert_eq!(staged.edges, pipeline_result.edges);
@@ -1447,6 +1583,7 @@ mod tests {
         let pipeline_result = Pipeline::new(png, config)
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1474,6 +1611,7 @@ mod tests {
         let pipeline_result = Pipeline::new(png, config)
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1494,6 +1632,7 @@ mod tests {
         let joined = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1541,13 +1680,14 @@ mod tests {
         let expected = [
             (0, "source"),
             (1, "decode"),
-            (2, "grayscale"),
-            (3, "blur"),
-            (4, "edges"),
-            (5, "contours"),
-            (6, "simplify"),
-            (7, "mask"),
-            (8, "join"),
+            (2, "downsample"),
+            (3, "grayscale"),
+            (4, "blur"),
+            (5, "edges"),
+            (6, "contours"),
+            (7, "simplify"),
+            (8, "mask"),
+            (9, "join"),
         ];
         assert_eq!(log.as_slice(), &expected);
     }
@@ -1561,6 +1701,7 @@ mod tests {
         let chained = Pipeline::new(png.clone(), config.clone())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1577,6 +1718,7 @@ mod tests {
         let looped = final_stage.complete().unwrap();
 
         assert_eq!(chained.original, looped.original);
+        assert_eq!(chained.downsampled, looped.downsampled);
         assert_eq!(chained.grayscale, looped.grayscale);
         assert_eq!(chained.blurred, looped.blurred);
         assert_eq!(chained.edges, looped.edges);
@@ -1611,6 +1753,7 @@ mod tests {
         let blurred = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur();
         let result = blurred.complete().unwrap();
@@ -1623,6 +1766,7 @@ mod tests {
         let joined = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1641,6 +1785,7 @@ mod tests {
         let joined = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale()
             .blur()
             .detect_edges()
@@ -1674,13 +1819,14 @@ mod tests {
             let variant_idx = match stage.output() {
                 StageOutput::Source { .. } => 0,
                 StageOutput::Decoded { .. } => 1,
-                StageOutput::Grayscaled { .. } => 2,
-                StageOutput::Blurred { .. } => 3,
-                StageOutput::EdgesDetected { .. } => 4,
-                StageOutput::ContoursTraced { .. } => 5,
-                StageOutput::Simplified { .. } => 6,
-                StageOutput::Masked { .. } => 7,
-                StageOutput::Joined { .. } => 8,
+                StageOutput::Downsampled { .. } => 2,
+                StageOutput::Grayscaled { .. } => 3,
+                StageOutput::Blurred { .. } => 4,
+                StageOutput::EdgesDetected { .. } => 5,
+                StageOutput::ContoursTraced { .. } => 6,
+                StageOutput::Simplified { .. } => 7,
+                StageOutput::Masked { .. } => 8,
+                StageOutput::Joined { .. } => 9,
             };
             assert_eq!(idx, variant_idx, "output variant mismatch at index {idx}");
             visited += 1;
@@ -1705,12 +1851,20 @@ mod tests {
         let stage: Stage = decoded.into();
         assert_eq!(stage.index(), 1);
 
+        let downsampled = Pipeline::new(png.clone(), PipelineConfig::default())
+            .decode()
+            .unwrap()
+            .downsample();
+        let stage: Stage = downsampled.into();
+        assert_eq!(stage.index(), 2);
+
         let grayscaled = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
+            .downsample()
             .grayscale();
         let stage: Stage = grayscaled.into();
-        assert_eq!(stage.index(), 2);
+        assert_eq!(stage.index(), 3);
     }
 
     #[test]
@@ -1728,7 +1882,7 @@ mod tests {
 
         let (_, log) = drive_to_end(start).unwrap();
         let indices: Vec<usize> = log.iter().map(|(idx, _)| *idx).collect();
-        assert_eq!(indices, vec![0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(indices, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
     #[test]

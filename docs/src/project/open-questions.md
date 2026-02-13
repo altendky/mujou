@@ -3,7 +3,7 @@
 ## Pending
 
 - [ ] WebP decoding in WASM -- Does the `image` crate's WebP decoder work in `wasm32-unknown-unknown`? May need to limit input formats to PNG/JPEG/BMP if not.
-- [ ] Maximum image size -- What's a reasonable size limit before auto-downsampling? 4MP? 8MP? Needs performance testing in WASM.
+- [x] Maximum image size / working resolution -- Decided: downsample to ~256px on the long axis early in the pipeline. Based on reference target device analysis (34" table, ~5mm track width, ~170 resolvable lines). See [Decisions](decisions.md#reference-target-device).
 - [x] Contour tracing suitability -- Decided: design as a [pluggable algorithm strategy](principles.md#pluggable-algorithm-strategies) via the `ContourTracer` trait. MVP ships with `BorderFollowing` (Suzuki-Abe via `imageproc`). On 1px-wide Canny edges this produces doubled borders that RDP collapses in practice (same approach as Image2Sand). `MarchingSquares` is a deferred alternative for cleaner single-line geometry. See [Pipeline](pipeline.md#5-contour-tracing).
 - [ ] Spiral in/out for .thr -- Should we generate spiral-in/out paths for sand tables that need the ball to start/end at center/edge, or is that the table firmware's responsibility? Image2Sand does not generate spirals.
 - [ ] Point interpolation for .thr -- Image2Sand interpolates additional points along segments for smoother polar coordinate conversion. Do we need this, or is the point density from contour tracing sufficient?
@@ -21,8 +21,9 @@ Items to address after MVP:
 ### Performance
 
 - [x] Web worker offloading -- Pipeline processing runs in a dedicated web worker with cancel support and elapsed time indicator (see #47)
+- [ ] Coarse-then-fine processing -- Run a low-res pass to identify edge regions, then mask the fine-res pass to only process those regions (~1% of pixels are edges). Avoids full-image high-res cost while preserving positional precision for smooth curves on large tables. Evaluate if 256px MVP produces visible staircase artifacts. See [Decisions](decisions.md#reference-target-device).
 - [ ] SIMD acceleration -- Enable `wasm32-simd128` target feature for faster image processing
-- [ ] Image downsampling -- Auto-downsample images above a size threshold before processing
+- [x] Image downsampling -- Decided: always downsample to ~256px working resolution after decode. See [Decisions](decisions.md#reference-target-device)
 
 ### Validation
 

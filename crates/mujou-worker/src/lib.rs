@@ -41,6 +41,7 @@ pub struct VectorResult {
 /// - `ok`: `true`
 /// - `vectorJson`: `String` — JSON-serialized `VectorResult`
 /// - `originalPng`: `Uint8Array` — pre-encoded RGBA PNG
+/// - `downsampledPng`: `Uint8Array` — pre-encoded RGBA PNG (working resolution)
 /// - `grayscalePng`: `Uint8Array` — pre-encoded grayscale PNG
 /// - `blurredPng`: `Uint8Array` — pre-encoded grayscale PNG
 /// - `edgesLightPng`: `Uint8Array` — themed edge PNG (light mode)
@@ -81,6 +82,8 @@ pub fn worker_main() {
     clippy::similar_names
 )]
 fn handle_message(event: web_sys::MessageEvent) {
+    log("worker: received message");
+
     let data = event.data();
 
     // Extract fields from the message object.
@@ -104,6 +107,11 @@ fn handle_message(event: web_sys::MessageEvent) {
         .as_f64()
         .expect_throw("generation is not a number");
 
+    log(&format!(
+        "worker: gen={generation} image={} bytes config={config_json}",
+        image_bytes.len(),
+    ));
+
     // Extract theme colors for edge image rendering.
     let (light_bg, light_fg) = (get_rgb(&data, "lightBg"), get_rgb(&data, "lightFg"));
     let (dark_bg, dark_fg) = (get_rgb(&data, "darkBg"), get_rgb(&data, "darkFg"));
@@ -112,10 +120,12 @@ fn handle_message(event: web_sys::MessageEvent) {
     let config: mujou_pipeline::PipelineConfig = match serde_json::from_str(&config_json) {
         Ok(c) => c,
         Err(e) => {
+            log(&format!("worker: config parse failed: {e}"));
             post_error_response(generation, &format!("failed to parse config: {e}"));
             return;
         }
     };
+    log("worker: config parsed, running pipeline");
 
     // Run the pipeline (synchronous — blocks this worker thread only).
     let outcome = (|| {
@@ -132,9 +142,15 @@ fn handle_message(event: web_sys::MessageEvent) {
 
     match outcome {
         Ok(staged) => {
+            log(&format!(
+                "worker: pipeline ok, {}x{}, encoding PNGs",
+                staged.dimensions.width, staged.dimensions.height,
+            ));
             post_success_response(generation, &staged, light_bg, light_fg, dark_bg, dark_fg);
+            log("worker: response posted");
         }
         Err(e) => {
+            log(&format!("worker: pipeline error: {e}"));
             let error_json = serde_json::to_string(&e).unwrap_or_else(|ser_err| {
                 serde_json::to_string(&format!("serialization error: {ser_err}"))
                     .unwrap_or_else(|_| "\"unknown error\"".into())
@@ -142,6 +158,11 @@ fn handle_message(event: web_sys::MessageEvent) {
             post_error_json(generation, &error_json);
         }
     }
+}
+
+/// Log a message to the browser console.
+fn log(msg: &str) {
+    web_sys::console::log_1(&JsValue::from_str(msg));
 }
 
 /// Extract an RGB color triple from a JS object field.
@@ -206,6 +227,7 @@ fn post_success_response(
         };
     }
     let original_png = encode_or_error!(encode_rgba_png(&staged.original));
+    let downsampled_png = encode_or_error!(encode_rgba_png(&staged.downsampled));
     let grayscale_png = encode_or_error!(encode_gray_png(&staged.grayscale));
     let blurred_png = encode_or_error!(encode_gray_png(&staged.blurred));
     // Dilate once — both themes use the same dilated edge image.
@@ -229,6 +251,10 @@ fn post_success_response(
     set(
         "originalPng",
         &js_sys::Uint8Array::from(original_png.as_slice()),
+    );
+    set(
+        "downsampledPng",
+        &js_sys::Uint8Array::from(downsampled_png.as_slice()),
     );
     set(
         "grayscalePng",

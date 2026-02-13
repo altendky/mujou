@@ -47,26 +47,28 @@ mod duration_serde {
 pub struct PipelineDiagnostics {
     /// Stage 0: image decoding.
     pub decode: StageDiagnostics,
-    /// Stage 1: grayscale conversion.
+    /// Stage 1: downsampling to working resolution.
+    pub downsample: StageDiagnostics,
+    /// Stage 2: grayscale conversion.
     pub grayscale: StageDiagnostics,
-    /// Stage 2: Gaussian blur.
+    /// Stage 3: Gaussian blur.
     pub blur: StageDiagnostics,
-    /// Stage 3: Canny edge detection.
+    /// Stage 4: Canny edge detection.
     pub edge_detection: StageDiagnostics,
-    /// Stage 4: edge map inversion (only when `config.invert == true`).
+    /// Stage 5: edge map inversion (only when `config.invert == true`).
     ///
     /// **Note:** The invert operation runs inside the edge-detection stage
     /// transition, so its `duration` is always `Duration::ZERO`. The
     /// actual inversion cost is included in `edge_detection.duration`.
     /// This entry exists to report the post-inversion edge pixel count.
     pub invert: Option<StageDiagnostics>,
-    /// Stage 5: contour tracing.
+    /// Stage 6: contour tracing.
     pub contour_tracing: StageDiagnostics,
-    /// Stage 6: RDP path simplification.
+    /// Stage 7: RDP path simplification.
     pub simplification: StageDiagnostics,
-    /// Stage 7: circular mask (only when `config.circular_mask == true`).
+    /// Stage 8: circular mask (only when `config.circular_mask == true`).
     pub mask: Option<StageDiagnostics>,
-    /// Stage 8: path ordering + joining.
+    /// Stage 9: path ordering + joining.
     pub join: StageDiagnostics,
     /// Total wall-clock duration of the entire pipeline (seconds).
     #[serde(with = "duration_serde")]
@@ -101,6 +103,23 @@ pub enum StageMetrics {
         height: u32,
         /// Total pixel count (`width * height`).
         pixel_count: u64,
+    },
+    /// Image downsampling metrics.
+    Downsample {
+        /// Original image width before downsampling.
+        original_width: u32,
+        /// Original image height before downsampling.
+        original_height: u32,
+        /// Image width after downsampling.
+        width: u32,
+        /// Image height after downsampling.
+        height: u32,
+        /// Target max dimension.
+        max_dimension: u32,
+        /// Resampling filter used.
+        filter: String,
+        /// Whether downsampling was actually applied.
+        applied: bool,
     },
     /// Grayscale conversion metrics.
     Grayscale {
@@ -230,6 +249,7 @@ impl PipelineDiagnostics {
         let stages: Vec<(&str, &StageDiagnostics)> = {
             let mut s = vec![
                 ("Decode", &self.decode),
+                ("Downsample", &self.downsample),
                 ("Grayscale", &self.grayscale),
                 ("Blur", &self.blur),
                 ("Edge Detection", &self.edge_detection),
@@ -282,6 +302,23 @@ fn format_metrics(metrics: &StageMetrics) -> String {
             ..
         } => {
             format!("{input_bytes} bytes -> {width}x{height}")
+        }
+        StageMetrics::Downsample {
+            original_width,
+            original_height,
+            width,
+            height,
+            max_dimension,
+            filter,
+            applied,
+        } => {
+            if *applied {
+                format!(
+                    "{original_width}x{original_height} -> {width}x{height} (target={max_dimension}, {filter})",
+                )
+            } else {
+                format!("{original_width}x{original_height} (no change, <= {max_dimension})",)
+            }
         }
         StageMetrics::Grayscale { width, height } => format!("{width}x{height}"),
         StageMetrics::Blur { sigma } => format!("sigma={sigma:.2}"),
@@ -438,8 +475,8 @@ pub fn process_staged_with_diagnostics<C: Clock>(
     clock: &C,
 ) -> Result<(crate::StagedResult, PipelineDiagnostics), crate::PipelineError> {
     use crate::pipeline::{
-        Advance, Blurred, ContoursTraced, Decoded, EdgesDetected, Grayscaled, Joined, Masked,
-        PipelineStage as _, STAGE_COUNT, Simplified, Stage,
+        Advance, Blurred, ContoursTraced, Decoded, Downsampled, EdgesDetected, Grayscaled, Joined,
+        Masked, PipelineStage as _, STAGE_COUNT, Simplified, Stage,
     };
 
     let pipeline_start = clock.now();
@@ -489,6 +526,9 @@ pub fn process_staged_with_diagnostics<C: Clock>(
                     decode: stage_diags[Decoded::INDEX]
                         .take()
                         .ok_or_else(|| diag_missing(Decoded::NAME))?,
+                    downsample: stage_diags[Downsampled::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Downsampled::NAME))?,
                     grayscale: stage_diags[Grayscaled::INDEX]
                         .take()
                         .ok_or_else(|| diag_missing(Grayscaled::NAME))?,
@@ -653,6 +693,7 @@ mod tests {
         let ten_ms = Duration::from_millis(10);
 
         assert_eq!(diag.decode.duration, ten_ms);
+        assert_eq!(diag.downsample.duration, ten_ms);
         assert_eq!(diag.grayscale.duration, ten_ms);
         assert_eq!(diag.blur.duration, ten_ms);
         assert_eq!(diag.edge_detection.duration, ten_ms);
@@ -662,7 +703,7 @@ mod tests {
         // mask disabled -> None
         assert!(diag.mask.is_none());
         assert_eq!(diag.join.duration, ten_ms);
-        assert_eq!(diag.total_duration, Duration::from_millis(100));
+        assert_eq!(diag.total_duration, Duration::from_millis(110));
 
         // Summary should reflect the 40x40 image.
         assert_eq!(diag.summary.image_width, 40);
@@ -693,6 +734,7 @@ mod tests {
         let ten_ms = Duration::from_millis(10);
 
         assert_eq!(diag.decode.duration, ten_ms);
+        assert_eq!(diag.downsample.duration, ten_ms);
         assert_eq!(diag.grayscale.duration, ten_ms);
         assert_eq!(diag.blur.duration, ten_ms);
         assert_eq!(diag.edge_detection.duration, ten_ms);
@@ -716,7 +758,7 @@ mod tests {
         assert_eq!(mask.duration, ten_ms);
 
         assert_eq!(diag.join.duration, ten_ms);
-        assert_eq!(diag.total_duration, Duration::from_millis(100));
+        assert_eq!(diag.total_duration, Duration::from_millis(110));
 
         // Summary should reflect the 40x40 image.
         assert_eq!(diag.summary.image_width, 40);
@@ -734,6 +776,18 @@ mod tests {
                     width: 100,
                     height: 100,
                     pixel_count: 10000,
+                },
+            },
+            downsample: StageDiagnostics {
+                duration: Duration::from_millis(0),
+                metrics: StageMetrics::Downsample {
+                    original_width: 100,
+                    original_height: 100,
+                    width: 100,
+                    height: 100,
+                    max_dimension: 256,
+                    filter: "Triangle".to_string(),
+                    applied: false,
                 },
             },
             grayscale: StageDiagnostics {
@@ -803,5 +857,104 @@ mod tests {
         assert!(report.contains("Pipeline Diagnostics Report"));
         assert!(report.contains("Edge Detection"));
         assert!(report.contains("Retrace"));
+    }
+
+    #[test]
+    fn report_downsample_applied_true() {
+        let diag = PipelineDiagnostics {
+            decode: StageDiagnostics {
+                duration: Duration::from_millis(10),
+                metrics: StageMetrics::Decode {
+                    input_bytes: 5000,
+                    width: 800,
+                    height: 600,
+                    pixel_count: 480_000,
+                },
+            },
+            downsample: StageDiagnostics {
+                duration: Duration::from_millis(8),
+                metrics: StageMetrics::Downsample {
+                    original_width: 800,
+                    original_height: 600,
+                    width: 256,
+                    height: 192,
+                    max_dimension: 256,
+                    filter: "Triangle".to_string(),
+                    applied: true,
+                },
+            },
+            grayscale: StageDiagnostics {
+                duration: Duration::from_millis(3),
+                metrics: StageMetrics::Grayscale {
+                    width: 256,
+                    height: 192,
+                },
+            },
+            blur: StageDiagnostics {
+                duration: Duration::from_millis(10),
+                metrics: StageMetrics::Blur { sigma: 1.4 },
+            },
+            edge_detection: StageDiagnostics {
+                duration: Duration::from_millis(20),
+                metrics: StageMetrics::EdgeDetection {
+                    low_threshold: 30.0,
+                    high_threshold: 80.0,
+                    edge_pixel_count: 1200,
+                    total_pixel_count: 49152,
+                },
+            },
+            invert: None,
+            contour_tracing: StageDiagnostics {
+                duration: Duration::from_millis(10),
+                metrics: StageMetrics::ContourTracing {
+                    contour_count: 8,
+                    total_point_count: 150,
+                    min_contour_points: 3,
+                    max_contour_points: 40,
+                    mean_contour_points: 18.75,
+                },
+            },
+            simplification: StageDiagnostics {
+                duration: Duration::from_millis(4),
+                metrics: StageMetrics::Simplification {
+                    tolerance: 2.0,
+                    polyline_count: 8,
+                    points_before: 150,
+                    points_after: 80,
+                    reduction_ratio: 0.467,
+                },
+            },
+            mask: None,
+            join: StageDiagnostics {
+                duration: Duration::from_millis(15),
+                metrics: StageMetrics::Join {
+                    strategy: "Retrace".to_string(),
+                    input_polyline_count: 8,
+                    input_point_count: 80,
+                    output_point_count: 120,
+                    expansion_ratio: 1.5,
+                },
+            },
+            total_duration: Duration::from_millis(80),
+            summary: PipelineSummary {
+                image_width: 256,
+                image_height: 192,
+                pixel_count: 49152,
+                contour_count: 8,
+                final_point_count: 120,
+            },
+        };
+
+        let report = diag.report();
+        assert!(!report.is_empty());
+        // Verify the applied=true formatting path: "AxB -> CxD (target=N, Filter)"
+        assert!(
+            report.contains("800x600 -> 256x192"),
+            "report should contain downsample resize info, got:\n{report}",
+        );
+        assert!(
+            report.contains("Triangle"),
+            "report should mention the filter, got:\n{report}",
+        );
     }
 }

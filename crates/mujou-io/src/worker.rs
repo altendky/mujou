@@ -38,6 +38,8 @@ struct VectorResult {
 pub struct WorkerResult {
     /// Blob URL for the original RGBA image.
     pub original_url: raster::CachedBlobUrl,
+    /// Blob URL for the downsampled RGBA image (working resolution).
+    pub downsampled_url: raster::CachedBlobUrl,
     /// Blob URL for the grayscale image.
     pub grayscale_url: raster::CachedBlobUrl,
     /// Blob URL for the blurred image.
@@ -304,6 +306,7 @@ fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
 
     // Create Blob URLs from pre-encoded PNG bytes (near-instant).
     let original_url = png_to_blob_url(data, "originalPng")?;
+    let downsampled_url = png_to_blob_url(data, "downsampledPng")?;
     let grayscale_url = png_to_blob_url(data, "grayscalePng")?;
     let blur_url = png_to_blob_url(data, "blurredPng")?;
     let edges_light_url = png_to_blob_url(data, "edgesLightPng")?;
@@ -311,6 +314,7 @@ fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
 
     Ok(WorkerResult {
         original_url,
+        downsampled_url,
         grayscale_url,
         blur_url,
         edges_light_url,

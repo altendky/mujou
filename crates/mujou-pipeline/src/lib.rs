@@ -12,6 +12,7 @@ pub mod blur;
 mod canny;
 pub mod contour;
 pub mod diagnostics;
+pub mod downsample;
 pub mod edge;
 pub mod grayscale;
 pub mod join;
@@ -22,6 +23,8 @@ pub mod simplify;
 pub mod types;
 
 pub use contour::{ContourTracer, ContourTracerKind};
+pub use diagnostics::PipelineDiagnostics;
+pub use downsample::DownsampleFilter;
 pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
 pub use pipeline::Pipeline;
@@ -39,15 +42,17 @@ pub use types::{
 ///
 /// # Pipeline steps
 ///
-/// 1. Decode image and convert to grayscale
-/// 2. Gaussian blur (noise reduction)
-/// 3. Canny edge detection
-/// 4. Optional edge map inversion
-/// 5. Contour tracing (pluggable strategy)
-/// 6. Path simplification (Ramer-Douglas-Peucker)
-/// 7. Optional circular mask
-/// 8. Path ordering + joining into single continuous path (pluggable strategy;
-///    each joiner handles its own ordering internally)
+/// 1. Decode image
+/// 2. Downsample to working resolution
+/// 3. Convert to grayscale
+/// 4. Gaussian blur (noise reduction)
+/// 5. Canny edge detection
+/// 6. Optional edge map inversion
+/// 7. Contour tracing (pluggable strategy)
+/// 8. Path simplification (Ramer-Douglas-Peucker)
+/// 9. Optional circular mask
+/// 10. Path ordering + joining into single continuous path (pluggable strategy;
+///     each joiner handles its own ordering internally)
 ///
 /// # Errors
 ///
