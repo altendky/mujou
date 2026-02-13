@@ -146,6 +146,48 @@ fn closest_coord_on_line(line: &Line<f64>, query: &geo::Point<f64>) -> geo::Coor
     }
 }
 
+/// Tolerance for snapping coordinates to segment endpoints.
+///
+/// Split-point deduplication uses this tolerance to remove points that
+/// are "close enough" to endpoints, but node identity in [`CoordKey`]
+/// uses bit-exact `f64` comparison.  To prevent orphan nodes we snap
+/// any coordinate within this distance of an endpoint to the endpoint's
+/// exact value *before* it enters the splits map or the graph.
+const SNAP_TOLERANCE: f64 = 1e-10;
+
+/// Snap `coord` to `start` or `end` if within [`SNAP_TOLERANCE`],
+/// ensuring bit-exact equality with the endpoint used in graph
+/// construction.
+fn snap_to_endpoint(
+    coord: geo::Coord<f64>,
+    start: geo::Coord<f64>,
+    end: geo::Coord<f64>,
+) -> geo::Coord<f64> {
+    if (coord.x - start.x).hypot(coord.y - start.y) < SNAP_TOLERANCE {
+        return start;
+    }
+    if (coord.x - end.x).hypot(coord.y - end.y) < SNAP_TOLERANCE {
+        return end;
+    }
+    coord
+}
+
+/// Snap `coord` to the endpoints of the given segment within a polyline.
+///
+/// Convenience wrapper around [`snap_to_endpoint`] that looks up the
+/// segment's start and end coordinates from the polyline.
+fn snap_to_segment_endpoints(
+    coord: geo::Coord<f64>,
+    polyline: &Polyline,
+    segment_idx: usize,
+) -> geo::Coord<f64> {
+    let pts = polyline.points();
+    let start = point_to_coord(pts[segment_idx]);
+    let end_idx = (segment_idx + 1).min(pts.len().saturating_sub(1));
+    let end = point_to_coord(pts[end_idx]);
+    snap_to_endpoint(coord, start, end)
+}
+
 /// Hard cap on total R-tree nearest-neighbor iterations per sample
 /// point to prevent degenerate O(N) scans when a polyline has many
 /// self-segments.
@@ -426,17 +468,28 @@ fn build_graph(
 
     // Collect all segment split points from MST edges.
     // For each (polyline_idx, segment_idx), record the split point(s).
+    //
+    // Before inserting, snap each point to the segment's endpoints when
+    // within `SNAP_TOLERANCE` so that the coord stored here is bit-exact
+    // with the endpoint value used later in graph construction.  Without
+    // this snapping, the tolerance-based `retain`/`dedup_by` below could
+    // discard a split point that is *close* to an endpoint but not
+    // bit-equal, while `get_or_insert` later creates a new (orphan) node
+    // for the unsnapped coord.
     let mut splits: std::collections::HashMap<(usize, usize), Vec<geo::Coord<f64>>> =
         std::collections::HashMap::new();
     for edge in mst_edges {
+        let snapped_a = snap_to_segment_endpoints(edge.point_a, polylines[edge.poly_a], edge.seg_a);
+        let snapped_b = snap_to_segment_endpoints(edge.point_b, polylines[edge.poly_b], edge.seg_b);
+
         splits
             .entry((edge.poly_a, edge.seg_a))
             .or_default()
-            .push(edge.point_a);
+            .push(snapped_a);
         splits
             .entry((edge.poly_b, edge.seg_b))
             .or_default()
-            .push(edge.point_b);
+            .push(snapped_b);
     }
 
     // Add polyline segments, splitting at MST connection points.
@@ -460,12 +513,12 @@ fn build_graph(
                 });
                 // Deduplicate split points that are the same as endpoints.
                 ordered_splits.retain(|sp| {
-                    let at_start = (sp.x - seg_start.x).hypot(sp.y - seg_start.y) < 1e-10;
-                    let at_end = (sp.x - seg_end.x).hypot(sp.y - seg_end.y) < 1e-10;
+                    let at_start = (sp.x - seg_start.x).hypot(sp.y - seg_start.y) < SNAP_TOLERANCE;
+                    let at_end = (sp.x - seg_end.x).hypot(sp.y - seg_end.y) < SNAP_TOLERANCE;
                     !at_start && !at_end
                 });
                 // Deduplicate near-identical split points.
-                ordered_splits.dedup_by(|a, b| (a.x - b.x).hypot(a.y - b.y) < 1e-10);
+                ordered_splits.dedup_by(|a, b| (a.x - b.x).hypot(a.y - b.y) < SNAP_TOLERANCE);
 
                 // Build sub-segments: start -> split1 -> split2 -> ... -> end.
                 let mut prev = seg_start;
@@ -505,20 +558,17 @@ fn build_graph(
     }
 
     // Add MST connecting edges.
+    //
+    // Use the same snapped coordinates as the split-point insertion above
+    // so that `get_or_insert` resolves to the same `CoordKey` as the
+    // polyline sub-segment endpoints.
     for edge in mst_edges {
-        let na = get_or_insert(
-            edge.point_a,
-            &mut graph,
-            &mut coord_to_node,
-            &mut node_coords,
-        );
-        let nb = get_or_insert(
-            edge.point_b,
-            &mut graph,
-            &mut coord_to_node,
-            &mut node_coords,
-        );
-        let dist = (edge.point_a.x - edge.point_b.x).hypot(edge.point_a.y - edge.point_b.y);
+        let snapped_a = snap_to_segment_endpoints(edge.point_a, polylines[edge.poly_a], edge.seg_a);
+        let snapped_b = snap_to_segment_endpoints(edge.point_b, polylines[edge.poly_b], edge.seg_b);
+
+        let na = get_or_insert(snapped_a, &mut graph, &mut coord_to_node, &mut node_coords);
+        let nb = get_or_insert(snapped_b, &mut graph, &mut coord_to_node, &mut node_coords);
+        let dist = (snapped_a.x - snapped_b.x).hypot(snapped_a.y - snapped_b.y);
         if dist > 1e-12 {
             graph.add_edge(na, nb, dist);
         } else {
