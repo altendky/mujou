@@ -17,6 +17,7 @@ pub mod edge;
 pub mod grayscale;
 pub mod join;
 pub mod mask;
+pub mod mst_join;
 pub mod optimize;
 pub mod pipeline;
 pub mod simplify;

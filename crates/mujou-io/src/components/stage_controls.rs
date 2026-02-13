@@ -253,26 +253,49 @@ pub fn StageControls(props: StageControlsProps) -> Element {
         }
 
         StageId::Path => {
-            let config = config.clone();
+            let config_select = config.clone();
+            let config_slider = config.clone();
+            let is_mst = matches!(config.path_joiner, PathJoinerKind::Mst);
             rsx! {
                 div { class: "space-y-2",
                     {render_select(
                         "path_joiner",
                         "Path Joiner",
-                        &[("StraightLine", "Straight Line"), ("Retrace", "Retrace")],
-                        match config.path_joiner {
+                        &[("Mst", "MST"), ("Retrace", "Retrace"), ("StraightLine", "Straight Line")],
+                        match config_select.path_joiner {
+                            PathJoinerKind::Mst => "Mst",
                             PathJoinerKind::StraightLine => "StraightLine",
                             PathJoinerKind::Retrace => "Retrace",
                         },
                         move |v: String| {
-                            let mut c = config.clone();
+                            let mut c = config_select.clone();
                             c.path_joiner = match v.as_str() {
                                 "Retrace" => PathJoinerKind::Retrace,
-                                _ => PathJoinerKind::StraightLine,
+                                "StraightLine" => PathJoinerKind::StraightLine,
+                                _ => PathJoinerKind::Mst,
                             };
                             on_change.call(c);
                         },
                     )}
+
+                    if is_mst {
+                        {render_slider(
+                            "mst_neighbours",
+                            "MST Neighbours",
+                            #[allow(clippy::cast_precision_loss)]
+                            { config_slider.mst_neighbours as f64 },
+                            1.0,
+                            100.0,
+                            1.0,
+                            0,
+                            move |v: f64| {
+                                let mut c = config_slider.clone();
+                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                                { c.mst_neighbours = v as usize; }
+                                on_change.call(c);
+                            },
+                        )}
+                    }
                 }
             }
         }
