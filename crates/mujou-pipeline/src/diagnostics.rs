@@ -520,6 +520,7 @@ pub fn process_staged_with_diagnostics<C: Clock>(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -568,6 +569,159 @@ mod tests {
         assert_eq!(stats.min, 2);
         assert_eq!(stats.max, 4);
         assert!((stats.mean - 3.0).abs() < f64::EPSILON);
+    }
+
+    /// A deterministic clock for testing [`process_staged_with_diagnostics`].
+    ///
+    /// Each [`now()`](Clock::now) call returns a monotonically increasing
+    /// tick value.  [`elapsed()`](Clock::elapsed) returns
+    /// `10ms * (current_tick - since)` so that every stage gets a
+    /// predictable, distinguishable duration.
+    struct FakeClock {
+        tick: std::cell::Cell<u64>,
+    }
+
+    impl FakeClock {
+        const MS_PER_TICK: u64 = 10;
+
+        fn new() -> Self {
+            Self {
+                tick: std::cell::Cell::new(0),
+            }
+        }
+    }
+
+    impl Clock for FakeClock {
+        type Instant = u64;
+
+        fn now(&self) -> u64 {
+            let t = self.tick.get();
+            self.tick.set(t + 1);
+            t
+        }
+
+        fn elapsed(&self, since: &u64) -> Duration {
+            let current = self.tick.get();
+            Duration::from_millis((current - since) * Self::MS_PER_TICK)
+        }
+    }
+
+    /// Generate a small PNG with a sharp vertical edge (left half black,
+    /// right half white) that reliably produces contours.
+    fn sharp_edge_png(width: u32, height: u32) -> Vec<u8> {
+        let img = image::RgbaImage::from_fn(width, height, |x, _y| {
+            if x < width / 2 {
+                image::Rgba([0, 0, 0, 255])
+            } else {
+                image::Rgba([255, 255, 255, 255])
+            }
+        });
+        let mut buf = Vec::new();
+        let encoder = image::codecs::png::PngEncoder::new(&mut buf);
+        image::ImageEncoder::write_image(
+            encoder,
+            img.as_raw(),
+            img.width(),
+            img.height(),
+            image::ExtendedColorType::Rgba8,
+        )
+        .unwrap();
+        buf
+    }
+
+    #[test]
+    fn fake_clock_diagnostics_without_invert() {
+        let png = sharp_edge_png(40, 40);
+        let config = crate::PipelineConfig {
+            circular_mask: false,
+            invert: false,
+            ..crate::PipelineConfig::default()
+        };
+        let clock = FakeClock::new();
+
+        let (_result, diag) = process_staged_with_diagnostics(&png, &config, &clock)
+            .expect("pipeline should succeed");
+
+        // Call pattern (no invert, no mask):
+        //   now#0: pipeline_start=0, tick→1
+        //   now#1: t=1, tick→2; advance Pending->Decoded; elapsed(&1) at tick 2 => 10ms
+        //   now#2: t=2, tick→3; advance Decoded->Grayscaled; elapsed(&2) at tick 3 => 10ms
+        //   ...each stage gets 10ms...
+        //   now#8: t=8, tick→9; advance Masked->Joined; elapsed(&8) at tick 9 => 10ms
+        //   now#9: t=9, tick→10; advance Joined->Complete; elapsed(&0) at tick 10 => 100ms
+
+        let ten_ms = Duration::from_millis(10);
+
+        assert_eq!(diag.decode.duration, ten_ms);
+        assert_eq!(diag.grayscale.duration, ten_ms);
+        assert_eq!(diag.blur.duration, ten_ms);
+        assert_eq!(diag.edge_detection.duration, ten_ms);
+        assert!(diag.invert.is_none());
+        assert_eq!(diag.contour_tracing.duration, ten_ms);
+        assert_eq!(diag.simplification.duration, ten_ms);
+        // mask disabled -> None
+        assert!(diag.mask.is_none());
+        assert_eq!(diag.join.duration, ten_ms);
+        assert_eq!(diag.total_duration, Duration::from_millis(100));
+
+        // Summary should reflect the 40x40 image.
+        assert_eq!(diag.summary.image_width, 40);
+        assert_eq!(diag.summary.image_height, 40);
+        assert_eq!(diag.summary.pixel_count, 1600);
+        assert!(diag.summary.contour_count > 0);
+        assert!(diag.summary.final_point_count > 0);
+
+        // Report should contain key sections.
+        let report = diag.report();
+        assert!(report.contains("Pipeline Diagnostics Report"));
+        assert!(report.contains("Edge Detection"));
+    }
+
+    #[test]
+    fn fake_clock_diagnostics_with_invert_and_mask() {
+        let png = sharp_edge_png(40, 40);
+        let config = crate::PipelineConfig {
+            circular_mask: true,
+            invert: true,
+            ..crate::PipelineConfig::default()
+        };
+        let clock = FakeClock::new();
+
+        let (_result, diag) = process_staged_with_diagnostics(&png, &config, &clock)
+            .expect("pipeline should succeed");
+
+        let ten_ms = Duration::from_millis(10);
+
+        assert_eq!(diag.decode.duration, ten_ms);
+        assert_eq!(diag.grayscale.duration, ten_ms);
+        assert_eq!(diag.blur.duration, ten_ms);
+        assert_eq!(diag.edge_detection.duration, ten_ms);
+
+        // Invert should be present with Duration::ZERO.
+        let invert = diag
+            .invert
+            .as_ref()
+            .expect("invert diagnostics should be Some");
+        assert_eq!(invert.duration, Duration::ZERO);
+        assert!(
+            matches!(invert.metrics, StageMetrics::Invert { .. }),
+            "invert metrics should be Invert variant"
+        );
+
+        assert_eq!(diag.contour_tracing.duration, ten_ms);
+        assert_eq!(diag.simplification.duration, ten_ms);
+
+        // Mask enabled -> Some with timing.
+        let mask = diag.mask.as_ref().expect("mask diagnostics should be Some");
+        assert_eq!(mask.duration, ten_ms);
+
+        assert_eq!(diag.join.duration, ten_ms);
+        assert_eq!(diag.total_duration, Duration::from_millis(100));
+
+        // Summary should reflect the 40x40 image.
+        assert_eq!(diag.summary.image_width, 40);
+        assert_eq!(diag.summary.image_height, 40);
+        assert_eq!(diag.summary.pixel_count, 1600);
     }
 
     #[test]
