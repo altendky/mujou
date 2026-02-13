@@ -146,9 +146,10 @@ fn closest_coord_on_line(line: &Line<f64>, query: &geo::Point<f64>) -> geo::Coor
     }
 }
 
-/// Maximum number of R-tree nearest-neighbor candidates to examine per
-/// sample point. Keeps Kruskal candidate generation bounded.
-const K_NEAREST: usize = 10;
+/// Hard cap on total R-tree nearest-neighbor iterations per sample
+/// point to prevent degenerate O(N) scans when a polyline has many
+/// self-segments.
+const MAX_NN_ITERATIONS: usize = 200;
 
 /// Build an MST connecting all polylines using Kruskal's algorithm with
 /// R-tree-accelerated candidate edge generation.
@@ -160,7 +161,7 @@ const K_NEAREST: usize = 10;
 ///
 /// Returns a list of [`MstEdge`]s (one fewer than the number of polylines).
 #[allow(clippy::too_many_lines)]
-fn build_mst(polylines: &[&Polyline]) -> Vec<MstEdge> {
+fn build_mst(polylines: &[&Polyline], k_nearest: usize) -> Vec<MstEdge> {
     let n = polylines.len();
     if n <= 1 {
         return Vec::new();
@@ -213,10 +214,17 @@ fn build_mst(polylines: &[&Polyline]) -> Vec<MstEdge> {
                 point_to_coord(my_pts[my_seg_end]),
             );
 
-            for candidate in tree.nearest_neighbor_iter(&query_pt).take(K_NEAREST) {
+            let mut cross_count = 0;
+            let mut iter_count = 0;
+            for candidate in tree.nearest_neighbor_iter(&query_pt) {
+                iter_count += 1;
+                if iter_count > MAX_NN_ITERATIONS {
+                    break;
+                }
+
                 let cand_poly = candidate.data.polyline_idx;
                 if cand_poly == poly_idx {
-                    continue; // Same polyline, skip.
+                    continue; // Same polyline, skip without counting.
                 }
 
                 let cand_line = *candidate.geom();
@@ -245,6 +253,11 @@ fn build_mst(polylines: &[&Polyline]) -> Vec<MstEdge> {
                         seg_b: candidate.data.segment_idx,
                     },
                 ));
+
+                cross_count += 1;
+                if cross_count >= k_nearest {
+                    break;
+                }
             }
         }
     }
@@ -269,16 +282,27 @@ fn build_mst(polylines: &[&Polyline]) -> Vec<MstEdge> {
         }
     }
 
-    // If R-tree candidates didn't cover all components (very unlikely but
-    // possible with extreme geometry), fall back to brute-force for
-    // remaining disconnected components.
+    // If R-tree candidates didn't cover all components, fall back to
+    // brute-force: collect all cross-component endpoint pairs, sort by
+    // distance, and continue Kruskal's algorithm.
     if edges.len() < n - 1 {
-        for pi in 0..n {
-            for pj in (pi + 1)..n {
+        // Collect disconnected component representatives.
+        let disconnected: Vec<usize> = (0..n)
+            .filter(|&i| {
+                let root = uf.find_mut(i);
+                // Include one representative per component that still
+                // needs connecting. We check all polylines.
+                root == i || (0..i).all(|j| uf.find_mut(j) != root)
+            })
+            .collect();
+
+        // Gather all cross-component endpoint-pair candidates.
+        let mut fallback_candidates: Vec<(f64, MstEdge)> = Vec::new();
+        for (idx_i, &pi) in disconnected.iter().enumerate() {
+            for &pj in disconnected.iter().skip(idx_i + 1) {
                 if uf.find_mut(pi) == uf.find_mut(pj) {
                     continue;
                 }
-                // Brute-force: find closest points between endpoints.
                 let pts_a = polylines[pi].points();
                 let pts_b = polylines[pj].points();
                 if pts_a.is_empty() || pts_b.is_empty() {
@@ -290,7 +314,6 @@ fn build_mst(polylines: &[&Polyline]) -> Vec<MstEdge> {
                 let mut best_seg_a = 0;
                 let mut best_seg_b = 0;
 
-                // Check endpoint pairs.
                 for &(ai, asi) in &[(0, 0), (pts_a.len() - 1, pts_a.len().saturating_sub(2))] {
                     for &(bi, bsi) in &[(0, 0), (pts_b.len() - 1, pts_b.len().saturating_sub(2))] {
                         let ca = point_to_coord(pts_a[ai]);
@@ -306,21 +329,33 @@ fn build_mst(polylines: &[&Polyline]) -> Vec<MstEdge> {
                     }
                 }
 
-                uf.union(pi, pj);
-                edges.push(MstEdge {
-                    poly_a: pi,
-                    poly_b: pj,
-                    point_a: best_a,
-                    point_b: best_b,
-                    seg_a: best_seg_a,
-                    seg_b: best_seg_b,
-                });
+                fallback_candidates.push((
+                    best_dist,
+                    MstEdge {
+                        poly_a: pi,
+                        poly_b: pj,
+                        point_a: best_a,
+                        point_b: best_b,
+                        seg_a: best_seg_a,
+                        seg_b: best_seg_b,
+                    },
+                ));
+            }
+        }
+
+        // Sort by distance and apply Kruskal's to the fallback candidates.
+        fallback_candidates
+            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        for (_, edge) in fallback_candidates {
+            let ra = uf.find_mut(edge.poly_a);
+            let rb = uf.find_mut(edge.poly_b);
+            if ra != rb {
+                uf.union(ra, rb);
+                edges.push(edge);
                 if edges.len() == n - 1 {
                     break;
                 }
-            }
-            if edges.len() == n - 1 {
-                break;
             }
         }
     }
@@ -591,13 +626,24 @@ fn shortest_path(graph: &UnGraph<(), f64>, start: NodeIndex, end: NodeIndex) -> 
 
     // Greedy reconstruction: from end, step to the neighbor with
     // cost[neighbor] + edge_weight == cost[current].
+    //
+    // A visited set prevents infinite cycling on multigraphs where
+    // `fix_parity` has added parallel edges.  Without this guard, two
+    // nodes A–B with duplicate edges can satisfy the cost check in both
+    // directions, causing the loop to oscillate A→B→A→… forever and
+    // eventually trigger a capacity overflow panic.
+    let mut visited = std::collections::HashSet::new();
     let mut path = vec![end];
+    visited.insert(end);
     let mut current = end;
     while current != start {
         let current_cost = costs.get(&current).copied().unwrap_or(f64::INFINITY);
         let mut next = None;
         for edge in graph.edges(current) {
             let neighbor = edge.target();
+            if visited.contains(&neighbor) {
+                continue;
+            }
             let neighbor_cost = costs.get(&neighbor).copied().unwrap_or(f64::INFINITY);
             let edge_weight = *edge.weight();
             // Check if this neighbor is on the shortest path.
@@ -608,6 +654,7 @@ fn shortest_path(graph: &UnGraph<(), f64>, start: NodeIndex, end: NodeIndex) -> 
         }
         if let Some(n) = next {
             path.push(n);
+            visited.insert(n);
             current = n;
         } else {
             break; // Unreachable in a connected graph.
@@ -703,7 +750,7 @@ fn emit_polyline(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> Polylin
 ///    shortest paths (retracing is visually free on sand tables).
 /// 4. Finds an Eulerian path through the augmented graph.
 #[must_use]
-pub fn join_mst(contours: &[Polyline]) -> Polyline {
+pub fn join_mst(contours: &[Polyline], k_nearest: usize) -> Polyline {
     // Filter out empty contours.
     let polylines: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
 
@@ -716,7 +763,7 @@ pub fn join_mst(contours: &[Polyline]) -> Polyline {
     }
 
     // Phase 1: Build MST.
-    let mst_edges = build_mst(&polylines);
+    let mst_edges = build_mst(&polylines, k_nearest.max(1));
 
     // Phase 2+3: Build graph, fix parity, find Eulerian path.
     let (mut graph, node_coords) = build_graph(&polylines, &mst_edges);
@@ -740,11 +787,14 @@ pub fn join_mst(contours: &[Polyline]) -> Polyline {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
+    use crate::types::PipelineConfig;
+
+    const TEST_K: usize = PipelineConfig::DEFAULT_MST_NEIGHBOURS;
     use crate::types::Point;
 
     #[test]
     fn mst_join_empty() {
-        let result = join_mst(&[]);
+        let result = join_mst(&[], TEST_K);
         assert!(result.is_empty());
     }
 
@@ -755,14 +805,14 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let result = join_mst(std::slice::from_ref(&contour));
+        let result = join_mst(std::slice::from_ref(&contour), TEST_K);
         assert_eq!(result, contour);
     }
 
     #[test]
     fn mst_join_single_point_contour() {
         let contour = Polyline::new(vec![Point::new(5.0, 5.0)]);
-        let result = join_mst(std::slice::from_ref(&contour));
+        let result = join_mst(std::slice::from_ref(&contour), TEST_K);
         assert_eq!(result.len(), 1);
     }
 
@@ -770,7 +820,7 @@ mod tests {
     fn mst_join_two_contours_produces_single_path() {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let result = join_mst(&[c1, c2]);
+        let result = join_mst(&[c1, c2], TEST_K);
 
         // Must be non-empty and cover all original points.
         assert!(
@@ -785,7 +835,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let empty = Polyline::new(Vec::new());
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let result = join_mst(&[c1, empty, c2]);
+        let result = join_mst(&[c1, empty, c2], TEST_K);
         assert!(result.len() >= 4);
     }
 
@@ -804,7 +854,7 @@ mod tests {
             Point::new(60.0, 60.0),
         ]);
 
-        let result = join_mst(&[c1.clone(), c2.clone(), c3.clone()]);
+        let result = join_mst(&[c1.clone(), c2.clone(), c3.clone()], TEST_K);
         let output_set: std::collections::HashSet<(u64, u64)> = result
             .points()
             .iter()
@@ -831,7 +881,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(25.0, 0.0)]);
 
-        let result = join_mst(&[c1, c2, c3]);
+        let result = join_mst(&[c1, c2, c3], TEST_K);
         assert!(!result.is_empty());
         // All points should be finite.
         for p in result.points() {
@@ -846,7 +896,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(6.0, 0.0), Point::new(7.0, 0.0)]);
 
-        let result = join_mst(&[c1, c2, c3]);
+        let result = join_mst(&[c1, c2, c3], TEST_K);
         // Output should contain all 6 original points plus MST connections
         // and any retrace edges.
         assert!(
@@ -872,7 +922,7 @@ mod tests {
             .collect();
 
         let total_points: usize = contours.iter().map(Polyline::len).sum();
-        let result = join_mst(&contours);
+        let result = join_mst(&contours, TEST_K);
 
         assert!(
             result.len() >= total_points,

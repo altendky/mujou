@@ -58,6 +58,8 @@ pub struct VectorResult {
 /// worker context.
 #[wasm_bindgen(start)]
 pub fn worker_main() {
+    console_error_panic_hook::set_once();
+
     // Get the worker global scope.
     let global: web_sys::DedicatedWorkerGlobalScope = js_sys::global()
         .dyn_into()

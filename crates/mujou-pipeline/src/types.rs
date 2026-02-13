@@ -189,6 +189,14 @@ pub struct PipelineConfig {
     /// blur stage that follows. Lanczos3 is sharper but significantly
     /// slower.
     pub downsample_filter: DownsampleFilter,
+
+    /// Number of cross-polyline nearest-neighbour candidates examined per
+    /// sample point during MST construction.
+    ///
+    /// Higher values improve MST quality for images with many small
+    /// isolated contours (e.g. scattered petals) at the cost of more
+    /// candidate edge generation. Only affects the MST path joiner.
+    pub mst_neighbours: usize,
 }
 
 impl PipelineConfig {
@@ -212,6 +220,8 @@ impl PipelineConfig {
     pub const DEFAULT_WORKING_RESOLUTION: u32 = 256;
     /// Default downsample filter.
     pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Triangle;
+    /// Default MST nearest-neighbour candidate count per sample point.
+    pub const DEFAULT_MST_NEIGHBOURS: usize = 30;
 }
 
 impl Default for PipelineConfig {
@@ -229,6 +239,7 @@ impl Default for PipelineConfig {
             invert: Self::DEFAULT_INVERT,
             working_resolution: Self::DEFAULT_WORKING_RESOLUTION,
             downsample_filter: Self::DEFAULT_DOWNSAMPLE_FILTER,
+            mst_neighbours: Self::DEFAULT_MST_NEIGHBOURS,
         }
     }
 }
@@ -255,6 +266,7 @@ impl PipelineConfig {
             invert,
             working_resolution,
             downsample_filter,
+            mst_neighbours,
         } = self;
 
         *blur_sigma == other.blur_sigma
@@ -268,6 +280,7 @@ impl PipelineConfig {
             && *invert == other.invert
             && *working_resolution == other.working_resolution
             && *downsample_filter == other.downsample_filter
+            && *mst_neighbours == other.mst_neighbours
     }
 }
 
@@ -633,6 +646,7 @@ mod tests {
         assert!(config.circular_mask);
         assert!((config.mask_diameter - 1.0).abs() < f64::EPSILON);
         assert!(!config.invert);
+        assert_eq!(config.mst_neighbours, 30);
     }
 
     #[test]
@@ -696,6 +710,13 @@ mod tests {
         assert!(
             !a.pipeline_eq(&b),
             "mask_diameter change should be detected"
+        );
+
+        let mut b = a.clone();
+        b.mst_neighbours += 10;
+        assert!(
+            !a.pipeline_eq(&b),
+            "mst_neighbours change should be detected"
         );
     }
 
@@ -770,6 +791,7 @@ mod tests {
             invert: true,
             working_resolution: 256,
             downsample_filter: DownsampleFilter::Triangle,
+            mst_neighbours: 20,
         };
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: PipelineConfig = serde_json::from_str(&json).unwrap();

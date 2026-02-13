@@ -458,7 +458,7 @@ impl Masked {
     /// Advance to the joining stage — the final pipeline step.
     pub fn join(self) -> Joined {
         let join_input = self.clipped.as_deref().unwrap_or(&self.simplified);
-        let path = self.config.path_joiner.join(join_input);
+        let path = self.config.path_joiner.join(join_input, &self.config);
         Joined {
             config: self.config,
             original: self.original,

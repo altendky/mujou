@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::mst_join;
 use crate::optimize;
-use crate::types::{Point, Polyline};
+use crate::types::{PipelineConfig, Point, Polyline};
 
 /// Selects which path joining strategy to use.
 ///
@@ -78,7 +78,7 @@ pub enum PathJoinerKind {
 /// of joining them.
 pub trait PathJoiner {
     /// Order and join the given contours into a single continuous path.
-    fn join(&self, contours: &[Polyline]) -> Polyline;
+    fn join(&self, contours: &[Polyline], config: &PipelineConfig) -> Polyline;
 }
 
 impl fmt::Display for PathJoinerKind {
@@ -92,11 +92,11 @@ impl fmt::Display for PathJoinerKind {
 }
 
 impl PathJoiner for PathJoinerKind {
-    fn join(&self, contours: &[Polyline]) -> Polyline {
+    fn join(&self, contours: &[Polyline], config: &PipelineConfig) -> Polyline {
         match *self {
             Self::StraightLine => join_straight_line(contours),
             Self::Retrace => join_retrace(contours),
-            Self::Mst => mst_join::join_mst(contours),
+            Self::Mst => mst_join::join_mst(contours, config.mst_neighbours),
         }
     }
 }
@@ -594,6 +594,10 @@ mod tests {
     use super::*;
     use crate::types::Point;
 
+    fn default_config() -> PipelineConfig {
+        PipelineConfig::default()
+    }
+
     #[test]
     fn default_is_mst() {
         assert_eq!(PathJoinerKind::default(), PathJoinerKind::Mst);
@@ -601,7 +605,7 @@ mod tests {
 
     #[test]
     fn join_empty_contours() {
-        let result = PathJoinerKind::StraightLine.join(&[]);
+        let result = PathJoinerKind::StraightLine.join(&[], &default_config());
         assert!(result.is_empty());
     }
 
@@ -612,13 +616,14 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let result = PathJoinerKind::StraightLine.join(std::slice::from_ref(&contour));
+        let result =
+            PathJoinerKind::StraightLine.join(std::slice::from_ref(&contour), &default_config());
         assert_eq!(result, contour);
     }
 
     #[test]
     fn retrace_empty_contours() {
-        let result = PathJoinerKind::Retrace.join(&[]);
+        let result = PathJoinerKind::Retrace.join(&[], &default_config());
         assert!(result.is_empty());
     }
 
@@ -629,7 +634,8 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let result = PathJoinerKind::Retrace.join(std::slice::from_ref(&contour));
+        let result =
+            PathJoinerKind::Retrace.join(std::slice::from_ref(&contour), &default_config());
         // Single contour: no joining needed, output equals input.
         assert_eq!(result, contour);
     }
@@ -642,7 +648,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(50.0, 0.0), Point::new(11.0, 0.0)]);
 
-        let result = PathJoinerKind::Retrace.join(&[c1, c2]);
+        let result = PathJoinerKind::Retrace.join(&[c1, c2], &default_config());
         let pts = result.points();
 
         // c2 should be emitted reversed: (11,0) then (50,0).
@@ -664,7 +670,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(100.0, 0.0), Point::new(101.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(2.0, 0.0), Point::new(3.0, 0.0)]);
 
-        let result = PathJoinerKind::Retrace.join(&[c0, c1, c2]);
+        let result = PathJoinerKind::Retrace.join(&[c0, c1, c2], &default_config());
         let pts = result.points();
 
         // c0 emitted first, then c2 (nearby), then c1 (far).
@@ -696,7 +702,7 @@ mod tests {
             .collect();
 
         let total_contour_points: usize = contours.iter().map(Polyline::len).sum();
-        let result = PathJoinerKind::Retrace.join(&contours);
+        let result = PathJoinerKind::Retrace.join(&contours, &default_config());
 
         assert!(
             result.len() >= total_contour_points,
@@ -725,7 +731,7 @@ mod tests {
                 .collect(),
         );
 
-        let result = PathJoinerKind::Retrace.join(&[c0.clone(), c1.clone()]);
+        let result = PathJoinerKind::Retrace.join(&[c0.clone(), c1.clone()], &default_config());
         let output_pts = result.points();
 
         // All of c1's points must appear in the output.
