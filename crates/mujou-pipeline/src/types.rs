@@ -245,6 +245,86 @@ impl PipelineConfig {
     pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Triangle;
     /// Default MST nearest-neighbour candidate count per sample point.
     pub const DEFAULT_MST_NEIGHBOURS: usize = 30;
+
+    /// Validate that all fields satisfy the documented invariants.
+    ///
+    /// Returns `Ok(())` if the config is valid, or
+    /// [`PipelineError::InvalidConfig`] describing the first violated
+    /// constraint.
+    ///
+    /// # Checked invariants
+    ///
+    /// - `blur_sigma > 0`
+    /// - `canny_low >= edge::MIN_THRESHOLD` (1.0)
+    /// - `canny_low <= canny_high`
+    /// - `canny_high <= canny_max`
+    /// - `canny_max <= edge::max_gradient_magnitude()`
+    /// - `simplify_tolerance >= 0`
+    /// - `mask_diameter` in `[0.0, 1.0]`
+    /// - `working_resolution > 0`
+    /// - `mst_neighbours > 0`
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PipelineError::InvalidConfig`] with a human-readable
+    /// message if any invariant is violated.
+    pub fn validate(&self) -> Result<(), PipelineError> {
+        if self.blur_sigma <= 0.0 {
+            return Err(PipelineError::InvalidConfig(format!(
+                "blur_sigma must be positive, got {}",
+                self.blur_sigma,
+            )));
+        }
+        if self.canny_low < crate::edge::MIN_THRESHOLD {
+            return Err(PipelineError::InvalidConfig(format!(
+                "canny_low must be at least {}, got {}",
+                crate::edge::MIN_THRESHOLD,
+                self.canny_low,
+            )));
+        }
+        if self.canny_low > self.canny_high {
+            return Err(PipelineError::InvalidConfig(format!(
+                "canny_low ({}) must not exceed canny_high ({})",
+                self.canny_low, self.canny_high,
+            )));
+        }
+        if self.canny_high > self.canny_max {
+            return Err(PipelineError::InvalidConfig(format!(
+                "canny_high ({}) must not exceed canny_max ({})",
+                self.canny_high, self.canny_max,
+            )));
+        }
+        let max_mag = crate::edge::max_gradient_magnitude();
+        if self.canny_max > max_mag {
+            return Err(PipelineError::InvalidConfig(format!(
+                "canny_max ({}) must not exceed max gradient magnitude ({max_mag})",
+                self.canny_max,
+            )));
+        }
+        if self.simplify_tolerance < 0.0 {
+            return Err(PipelineError::InvalidConfig(format!(
+                "simplify_tolerance must be non-negative, got {}",
+                self.simplify_tolerance,
+            )));
+        }
+        if !(0.0..=1.0).contains(&self.mask_diameter) {
+            return Err(PipelineError::InvalidConfig(format!(
+                "mask_diameter must be in [0.0, 1.0], got {}",
+                self.mask_diameter,
+            )));
+        }
+        if self.working_resolution == 0 {
+            return Err(PipelineError::InvalidConfig(
+                "working_resolution must be positive".to_owned(),
+            ));
+        }
+        if self.mst_neighbours == 0 {
+            return Err(PipelineError::InvalidConfig(
+                "mst_neighbours must be positive".to_owned(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl Default for PipelineConfig {
