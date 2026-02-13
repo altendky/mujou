@@ -169,4 +169,13 @@ mod tests {
         assert_eq!(result.width(), 1024);
         assert_eq!(result.height(), 768);
     }
+
+    #[test]
+    fn none_filter_skips_small_image() {
+        let img = test_image(100, 80);
+        let (result, applied) = downsample(&img, 256, DownsampleFilter::None);
+        assert!(!applied);
+        assert_eq!(result.width(), 100);
+        assert_eq!(result.height(), 80);
+    }
 }
