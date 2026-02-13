@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::mst_join;
 use crate::optimize;
-use crate::types::{PipelineConfig, Point, Polyline};
+use crate::types::{PipelineConfig, Point, Polyline, polyline_bounding_box};
 
 /// Selects which path joining strategy to use.
 ///
@@ -288,41 +288,6 @@ fn arc_length_sample_indices(contour: &Polyline, resolution: f64) -> Vec<usize> 
 }
 
 // ---------------------------------------------------------------------------
-// Bounding box helper
-// ---------------------------------------------------------------------------
-
-/// Compute the axis-aligned bounding box of all points across contours.
-fn contour_bounding_box(contours: &[&Polyline]) -> (f64, f64, f64, f64) {
-    debug_assert!(
-        contours.iter().any(|c| !c.is_empty()),
-        "contour_bounding_box requires at least one non-empty contour"
-    );
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-
-    for c in contours {
-        for p in c.points() {
-            if p.x < min_x {
-                min_x = p.x;
-            }
-            if p.y < min_y {
-                min_y = p.y;
-            }
-            if p.x > max_x {
-                max_x = p.x;
-            }
-            if p.y > max_y {
-                max_y = p.y;
-            }
-        }
-    }
-
-    (min_x, min_y, max_x, max_y)
-}
-
-// ---------------------------------------------------------------------------
 // Emit helpers: push points to output and index them in the spatial grid
 // ---------------------------------------------------------------------------
 
@@ -447,7 +412,11 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
     }
 
     // Derive cell size from bounding box.
-    let (min_x, min_y, max_x, max_y) = contour_bounding_box(&candidates);
+    debug_assert!(
+        candidates.iter().any(|c| !c.is_empty()),
+        "join_retrace requires at least one non-empty contour"
+    );
+    let (min_x, min_y, max_x, max_y) = polyline_bounding_box(&candidates);
     let canvas_extent = (max_x - min_x).max(max_y - min_y).max(1.0);
     let cell_size = canvas_extent / GRID_CELLS_PER_AXIS;
 

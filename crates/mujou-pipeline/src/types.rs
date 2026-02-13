@@ -95,6 +95,29 @@ impl Polyline {
     }
 }
 
+/// Compute the axis-aligned bounding box of all points across polylines.
+///
+/// Returns `(min_x, min_y, max_x, max_y)`.  When all polylines are empty
+/// the returned rectangle has inverted infinities (min > max).
+#[must_use]
+pub(crate) fn polyline_bounding_box(polylines: &[&Polyline]) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for poly in polylines {
+        for p in poly.points() {
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        }
+    }
+
+    (min_x, min_y, max_x, max_y)
+}
+
 /// Image dimensions in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Dimensions {

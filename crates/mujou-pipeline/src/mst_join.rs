@@ -28,7 +28,7 @@ use petgraph::visit::EdgeRef;
 use rstar::RTree;
 use rstar::primitives::GeomWithData;
 
-use crate::types::{Point, Polyline};
+use crate::types::{Point, Polyline, polyline_bounding_box};
 
 // ---------------------------------------------------------------------------
 // Type conversions at the module boundary
@@ -190,7 +190,7 @@ fn build_mst(polylines: &[&Polyline], k_nearest: usize) -> Vec<MstEdge> {
     let tree = RTree::bulk_load(segments);
 
     // Pre-compute sample points for each polyline (adaptive spacing).
-    let (min_x, min_y, max_x, max_y) = bounding_box(polylines);
+    let (min_x, min_y, max_x, max_y) = polyline_bounding_box(polylines);
     let extent = (max_x - min_x).max(max_y - min_y).max(1.0);
     let sample_spacing = extent / 50.0;
 
@@ -361,25 +361,6 @@ fn build_mst(polylines: &[&Polyline], k_nearest: usize) -> Vec<MstEdge> {
     }
 
     edges
-}
-
-/// Compute the AABB of all points across polylines.
-fn bounding_box(polylines: &[&Polyline]) -> (f64, f64, f64, f64) {
-    let mut min_x = f64::INFINITY;
-    let mut min_y = f64::INFINITY;
-    let mut max_x = f64::NEG_INFINITY;
-    let mut max_y = f64::NEG_INFINITY;
-
-    for poly in polylines {
-        for p in poly.points() {
-            min_x = min_x.min(p.x);
-            min_y = min_y.min(p.y);
-            max_x = max_x.max(p.x);
-            max_y = max_y.max(p.y);
-        }
-    }
-
-    (min_x, min_y, max_x, max_y)
 }
 
 // ---------------------------------------------------------------------------
