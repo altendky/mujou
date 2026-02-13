@@ -539,7 +539,7 @@ fn ConfigButtons(
             }
             button {
                 class: "{btn_class}",
-                class: if show_descriptions() { "ring-2 ring-[var(--border-accent)] ring-offset-1" },
+                class: if show_descriptions() { "ring-2 ring-[var(--border-accent)] ring-offset-1 ring-offset-[var(--surface)]" },
                 title: "Toggle parameter descriptions",
                 aria_label: "Toggle parameter descriptions",
                 onclick: move |_| show_descriptions.toggle(),
