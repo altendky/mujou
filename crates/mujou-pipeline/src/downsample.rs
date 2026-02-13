@@ -16,11 +16,11 @@ use serde::{Deserialize, Serialize};
 /// Resampling filter used when downsampling.
 ///
 /// Ordered from fastest/lowest-quality to slowest/highest-quality,
-/// with a `None` variant to skip downsampling entirely.
+/// with a `Disabled` variant to skip downsampling entirely.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DownsampleFilter {
     /// Disabled: skip downsampling regardless of image size.
-    None,
+    Disabled,
     /// Nearest-neighbor: fastest, blocky artifacts.
     Nearest,
     /// Bilinear interpolation: fast, decent quality.
@@ -42,11 +42,11 @@ impl Default for DownsampleFilter {
 impl DownsampleFilter {
     /// Convert to the `image` crate's `FilterType`.
     ///
-    /// Returns `Option::None` for [`DownsampleFilter::None`] since
+    /// Returns `None` for [`DownsampleFilter::Disabled`] since
     /// there is no corresponding resampling filter.
     const fn to_image_filter(self) -> Option<image::imageops::FilterType> {
         match self {
-            Self::None => Option::None,
+            Self::Disabled => None,
             Self::Nearest => Some(image::imageops::FilterType::Nearest),
             Self::Triangle => Some(image::imageops::FilterType::Triangle),
             Self::CatmullRom => Some(image::imageops::FilterType::CatmullRom),
@@ -59,7 +59,7 @@ impl DownsampleFilter {
 impl fmt::Display for DownsampleFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::None => f.write_str("None"),
+            Self::Disabled => f.write_str("Disabled"),
             Self::Nearest => f.write_str("Nearest"),
             Self::Triangle => f.write_str("Triangle"),
             Self::CatmullRom => f.write_str("CatmullRom"),
@@ -162,18 +162,18 @@ mod tests {
     }
 
     #[test]
-    fn none_filter_skips_even_large_image() {
+    fn disabled_filter_skips_even_large_image() {
         let img = test_image(1024, 768);
-        let (result, applied) = downsample(&img, 256, DownsampleFilter::None);
+        let (result, applied) = downsample(&img, 256, DownsampleFilter::Disabled);
         assert!(!applied);
         assert_eq!(result.width(), 1024);
         assert_eq!(result.height(), 768);
     }
 
     #[test]
-    fn none_filter_skips_small_image() {
+    fn disabled_filter_skips_small_image() {
         let img = test_image(100, 80);
-        let (result, applied) = downsample(&img, 256, DownsampleFilter::None);
+        let (result, applied) = downsample(&img, 256, DownsampleFilter::Disabled);
         assert!(!applied);
         assert_eq!(result.width(), 100);
         assert_eq!(result.height(), 80);
