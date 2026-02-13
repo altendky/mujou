@@ -54,6 +54,11 @@ pub struct PipelineDiagnostics {
     /// Stage 3: Canny edge detection.
     pub edge_detection: StageDiagnostics,
     /// Stage 4: edge map inversion (only when `config.invert == true`).
+    ///
+    /// **Note:** The invert operation runs inside the edge-detection stage
+    /// transition, so its `duration` is always `Duration::ZERO`. The
+    /// actual inversion cost is included in `edge_detection.duration`.
+    /// This entry exists to report the post-inversion edge pixel count.
     pub invert: Option<StageDiagnostics>,
     /// Stage 5: contour tracing.
     pub contour_tracing: StageDiagnostics,
