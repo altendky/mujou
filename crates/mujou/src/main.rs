@@ -297,9 +297,8 @@ fn app() -> Element {
             if show_info() {
                 div {
                     class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]",
-                    // Semi-transparent backdrop — click to dismiss.
+                    // Backdrop — click outside the card to dismiss.
                     onclick: move |_| show_info.set(false),
-                    div { class: "absolute inset-0 bg-black/50" }
                     // Card — stop propagation so clicking inside doesn't dismiss.
                     div {
                         class: "relative z-10 w-full max-w-md mx-4 p-6 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]",
