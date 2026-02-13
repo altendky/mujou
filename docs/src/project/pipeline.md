@@ -38,8 +38,8 @@ Internally, Canny performs:
 
 **User parameters:**
 
-- `canny_low` (f32, default: 50.0)
-- `canny_high` (f32, default: 150.0)
+- `canny_low` (f32, default: 15.0)
+- `canny_high` (f32, default: 40.0)
 
 Maximum sensible threshold is approximately 1140.39 (`sqrt(5) * 2 * 255`).
 
@@ -89,7 +89,7 @@ Contours entirely outside the mask are discarded before joining, so the join ste
 
 **User parameters:**
 
-- `circular_mask` (bool, default: false)
+- `circular_mask` (bool, default: true)
 - `mask_diameter` (f64, fraction of image width, default: 1.0)
 
 ### 8. Path Ordering + Joining
@@ -164,9 +164,9 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `blur_sigma` | f32 | 1.4 | Gaussian blur kernel sigma |
-| `canny_low` | f32 | 30.0 | Canny low threshold |
-| `canny_high` | f32 | 80.0 | Canny high threshold |
-| `canny_max` | f32 | 120.0 | Upper bound for Canny threshold sliders (UI only) |
+| `canny_low` | f32 | 15.0 | Canny low threshold |
+| `canny_high` | f32 | 40.0 | Canny high threshold |
+| `canny_max` | f32 | 60.0 | Upper bound for Canny threshold sliders (UI only) |
 | `contour_tracer` | `ContourTracer` | `BorderFollowing` | Contour tracing algorithm ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `simplify_tolerance` | f64 | 2.0 | RDP simplification tolerance (pixels) |
 | `path_joiner` | `PathJoiner` | `Mst` | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |

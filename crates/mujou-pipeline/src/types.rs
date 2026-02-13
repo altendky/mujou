@@ -226,11 +226,11 @@ impl PipelineConfig {
     /// Default Gaussian blur sigma.
     pub const DEFAULT_BLUR_SIGMA: f32 = 1.4;
     /// Default Canny low threshold.
-    pub const DEFAULT_CANNY_LOW: f32 = 30.0;
+    pub const DEFAULT_CANNY_LOW: f32 = 15.0;
     /// Default Canny high threshold.
-    pub const DEFAULT_CANNY_HIGH: f32 = 80.0;
+    pub const DEFAULT_CANNY_HIGH: f32 = 40.0;
     /// Default Canny slider maximum.
-    pub const DEFAULT_CANNY_MAX: f32 = 120.0;
+    pub const DEFAULT_CANNY_MAX: f32 = 60.0;
     /// Default RDP simplification tolerance in pixels.
     pub const DEFAULT_SIMPLIFY_TOLERANCE: f64 = 2.0;
     /// Default circular mask enabled state.
@@ -242,9 +242,9 @@ impl PipelineConfig {
     /// Default working resolution (max dimension after downsampling).
     pub const DEFAULT_WORKING_RESOLUTION: u32 = 256;
     /// Default downsample filter.
-    pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Triangle;
+    pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::None;
     /// Default MST nearest-neighbour candidate count per sample point.
-    pub const DEFAULT_MST_NEIGHBOURS: usize = 30;
+    pub const DEFAULT_MST_NEIGHBOURS: usize = 100;
 
     /// Validate that all fields satisfy the documented invariants.
     ///
@@ -740,16 +740,18 @@ mod tests {
     fn pipeline_config_defaults_match_spec() {
         let config = PipelineConfig::default();
         assert!((config.blur_sigma - 1.4).abs() < f32::EPSILON);
-        assert!((config.canny_low - 30.0).abs() < f32::EPSILON);
-        assert!((config.canny_high - 80.0).abs() < f32::EPSILON);
-        assert!((config.canny_max - 120.0).abs() < f32::EPSILON);
+        assert!((config.canny_low - 15.0).abs() < f32::EPSILON);
+        assert!((config.canny_high - 40.0).abs() < f32::EPSILON);
+        assert!((config.canny_max - 60.0).abs() < f32::EPSILON);
         assert_eq!(config.contour_tracer, ContourTracerKind::BorderFollowing);
         assert!((config.simplify_tolerance - 2.0).abs() < f64::EPSILON);
         assert_eq!(config.path_joiner, PathJoinerKind::Mst);
         assert!(config.circular_mask);
         assert!((config.mask_diameter - 1.0).abs() < f64::EPSILON);
         assert!(!config.invert);
-        assert_eq!(config.mst_neighbours, 30);
+        assert_eq!(config.working_resolution, 256);
+        assert_eq!(config.downsample_filter, DownsampleFilter::None);
+        assert_eq!(config.mst_neighbours, 100);
     }
 
     #[test]
