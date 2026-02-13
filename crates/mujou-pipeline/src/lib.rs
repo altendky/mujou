@@ -22,7 +22,6 @@ pub mod simplify;
 pub mod types;
 
 pub use contour::{ContourTracer, ContourTracerKind};
-pub use diagnostics::PipelineDiagnostics;
 pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
 pub use pipeline::Pipeline;
@@ -59,112 +58,13 @@ pub fn process_staged(
     image_bytes: &[u8],
     config: &PipelineConfig,
 ) -> Result<StagedResult, PipelineError> {
-    let (staged, _diagnostics) = process_staged_with_diagnostics(image_bytes, config)?;
-    Ok(staged)
-}
+    use pipeline::{Advance, Stage};
 
-/// Run the full pipeline and return both the staged result and diagnostics.
-///
-/// This is the instrumented entry point. Diagnostics include per-stage
-/// wall-clock durations, item counts, and derived statistics useful for
-/// algorithm tuning.
-///
-/// Each stage reports its own metrics via [`PipelineStage::metrics()`].
-/// This function provides the timing: it measures each
-/// [`advance()`](pipeline::Stage::advance) call and pairs the elapsed
-/// duration with the resulting stage's metrics.
-///
-/// # Errors
-///
-/// Same as [`process_staged`].
-///
-/// [`PipelineStage::metrics()`]: pipeline::PipelineStage::metrics
-pub fn process_staged_with_diagnostics(
-    image_bytes: &[u8],
-    config: &PipelineConfig,
-) -> Result<(StagedResult, PipelineDiagnostics), PipelineError> {
-    use diagnostics::{PipelineSummary, StageDiagnostics};
-    use pipeline::{
-        Advance, Blurred, ContoursTraced, Decoded, EdgesDetected, Grayscaled, Joined, Masked,
-        PipelineStage as _, STAGE_COUNT, Simplified, Stage,
-    };
-    use web_time::Instant;
-
-    let pipeline_start = Instant::now();
     let mut stage: Stage = Pipeline::new(image_bytes.to_vec(), config.clone()).into();
-
-    // Indexed by stage INDEX (0..STAGE_COUNT). Each advance() produces
-    // a new stage whose index tells us where to store its diagnostics.
-    let mut stage_diags: [Option<StageDiagnostics>; STAGE_COUNT] = std::array::from_fn(|_| None);
-    let mut invert_diag = None;
-
     loop {
-        let t = Instant::now();
         match stage.advance()? {
-            Advance::Next(next) => {
-                let elapsed = t.elapsed();
-                if let Some(metrics) = next.metrics() {
-                    stage_diags[next.index()] = Some(StageDiagnostics {
-                        duration: elapsed,
-                        metrics,
-                    });
-                }
-                if let Some(inv) = next.invert_metrics() {
-                    invert_diag = Some(StageDiagnostics {
-                        duration: std::time::Duration::ZERO,
-                        metrics: inv,
-                    });
-                }
-                stage = next;
-            }
-            Advance::Complete(done) => {
-                let total_duration = pipeline_start.elapsed();
-                let result = done.complete()?;
-
-                let summary = PipelineSummary {
-                    image_width: result.dimensions.width,
-                    image_height: result.dimensions.height,
-                    pixel_count: u64::from(result.dimensions.width)
-                        * u64::from(result.dimensions.height),
-                    contour_count: result.contours.len(),
-                    final_point_count: result.joined.len(),
-                };
-
-                let diag_missing = |name: &str| {
-                    PipelineError::InvalidConfig(format!(
-                        "diagnostics bug: {name} diagnostics missing"
-                    ))
-                };
-                let pipeline_diagnostics = PipelineDiagnostics {
-                    decode: stage_diags[Decoded::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Decoded::NAME))?,
-                    grayscale: stage_diags[Grayscaled::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Grayscaled::NAME))?,
-                    blur: stage_diags[Blurred::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Blurred::NAME))?,
-                    edge_detection: stage_diags[EdgesDetected::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(EdgesDetected::NAME))?,
-                    invert: invert_diag,
-                    contour_tracing: stage_diags[ContoursTraced::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(ContoursTraced::NAME))?,
-                    simplification: stage_diags[Simplified::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Simplified::NAME))?,
-                    mask: stage_diags[Masked::INDEX].take(),
-                    join: stage_diags[Joined::INDEX]
-                        .take()
-                        .ok_or_else(|| diag_missing(Joined::NAME))?,
-                    total_duration,
-                    summary,
-                };
-
-                break Ok((result, pipeline_diagnostics));
-            }
+            Advance::Next(next) => stage = next,
+            Advance::Complete(done) => break done.complete(),
         }
     }
 }

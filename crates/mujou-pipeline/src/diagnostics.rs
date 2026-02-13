@@ -1,17 +1,13 @@
 //! Pipeline diagnostics: timing, counts, and other metrics for each stage.
 //!
-//! These diagnostics are permanent instrumentation intended for
-//! algorithm tuning and parameter experimentation. Every call to
-//! [`process_staged`](crate::process_staged) collects diagnostics
-//! alongside the pipeline results.
+//! These types describe pipeline instrumentation for algorithm tuning
+//! and parameter experimentation. Each pipeline stage reports its own
+//! metrics via [`PipelineStage::metrics()`](crate::pipeline::PipelineStage::metrics).
+//! Timing is the caller's responsibility — this crate is sans-IO and
+//! does not read the system clock.
 //!
-//! Duration measurements use [`std::time::Duration`] (platform-agnostic).
-//! Timestamps are captured internally via the `web-time` crate, which
-//! uses `performance.now()` on WASM and `std::time::Instant` on native.
-//!
-//! Durations are serialized as fractional seconds (`f64`) for JSON
-//! compatibility, since `std::time::Duration` does not implement serde
-//! traits.
+//! Duration fields use [`std::time::Duration`] and are serialized as
+//! fractional seconds (`f64`) for JSON compatibility.
 
 use std::time::Duration;
 
