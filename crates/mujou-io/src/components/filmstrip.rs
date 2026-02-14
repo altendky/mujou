@@ -6,6 +6,8 @@
 //!
 //! All raster thumbnails use pre-built Blob URLs from the worker result
 //! (PNG encoding happens in the worker thread, not the main thread).
+//! When no result is available yet (initial processing), placeholder
+//! tiles with a skeleton shimmer are shown instead.
 
 use std::rc::Rc;
 
@@ -18,7 +20,8 @@ use crate::worker::WorkerResult;
 #[derive(Props, Clone)]
 pub struct FilmstripProps {
     /// Pre-rendered pipeline result with Blob URLs for raster stages.
-    result: Rc<WorkerResult>,
+    /// `None` during initial processing — placeholder tiles are shown.
+    result: Option<Rc<WorkerResult>>,
     /// Currently selected stage.
     selected: StageId,
     /// Callback fired when a stage tile is clicked.
@@ -27,14 +30,21 @@ pub struct FilmstripProps {
 
 impl PartialEq for FilmstripProps {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.result, &other.result) && self.selected == other.selected
+        let results_eq = match (&self.result, &other.result) {
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        results_eq && self.selected == other.selected
     }
 }
 
 /// Horizontal scrollable strip of pipeline stage thumbnails.
 ///
 /// Each tile shows a small preview of one stage's output. The selected
-/// tile is highlighted with a border accent color.
+/// tile is highlighted with a border accent color. When no pipeline
+/// result is available yet, placeholder tiles with a skeleton shimmer
+/// background are shown for each stage.
 #[component]
 pub fn Filmstrip(props: FilmstripProps) -> Element {
     let is_dark: Signal<bool> = use_context();
@@ -44,7 +54,7 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
             class: "flex flex-nowrap overflow-x-auto gap-2 py-2 scrollbar-thin",
 
             for stage in StageId::ALL {
-                {render_tile(&props.result, stage, props.selected == stage, &props.on_select, is_dark())}
+                {render_tile(props.result.as_deref(), stage, props.selected == stage, &props.on_select, is_dark())}
             }
         }
     }
@@ -52,7 +62,7 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
 
 /// Render a single filmstrip tile.
 fn render_tile(
-    result: &WorkerResult,
+    result: Option<&WorkerResult>,
     stage: StageId,
     is_selected: bool,
     on_select: &EventHandler<StageId>,
@@ -79,9 +89,9 @@ fn render_tile(
             aria_label: "Show {stage.label()} stage",
             "aria-pressed": "{is_selected}",
 
-            // Thumbnail
+            // Thumbnail (or placeholder skeleton)
             div { class: "w-full aspect-square overflow-hidden rounded bg-[var(--preview-bg)]",
-                {render_thumbnail(result, stage, is_dark)}
+                {result.map_or_else(render_placeholder, |r| render_thumbnail(r, stage, is_dark))}
             }
 
             // Label
@@ -92,6 +102,18 @@ fn render_tile(
             span { class: "text-xs text-[var(--text-secondary)] md:hidden",
                 "{stage.abbreviation()}"
             }
+        }
+    }
+}
+
+/// Render a placeholder skeleton for a filmstrip tile when no result is
+/// available yet.
+fn render_placeholder() -> Element {
+    rsx! {
+        div {
+            class: "w-full h-full animate-pulse bg-[var(--border)]",
+            role: "status",
+            aria_label: "Loading thumbnail",
         }
     }
 }

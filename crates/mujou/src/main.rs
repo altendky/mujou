@@ -332,22 +332,25 @@ fn app() -> Element {
                 // Left column: Preview + Filmstrip + Controls
                 div { class: "flex-1 flex flex-col gap-4 min-w-0",
 
-                    // Show results (stale or fresh) when available.
-                    // The processing indicator overlays rather than replaces.
-                    if let Some(ref worker_result) = result() {
+                    if image_bytes().is_some() {
+                        // Full layout skeleton — always rendered when an
+                        // image is loaded, even during first-time processing.
+
                         // Stage preview with processing overlay
                         div { class: "relative",
-                            // Preview content (stays visible during re-processing)
+                            // Preview content (stays visible during re-processing,
+                            // shows placeholder when no result yet)
                             div {
                                 class: if processing() { "opacity-50 transition-opacity" } else { "transition-opacity" },
 
                                 StagePreview {
-                                    result: Rc::clone(worker_result),
+                                    result: result(),
                                     selected: selected_stage(),
                                 }
                             }
 
-                            // Processing indicator overlay
+                            // Processing indicator overlay (both first-time
+                            // and re-processing)
                             if processing() {
                                 div { class: "absolute inset-0 flex items-center justify-center",
                                     div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2",
@@ -364,9 +367,9 @@ fn app() -> Element {
                             }
                         }
 
-                        // Filmstrip (always visible)
+                        // Filmstrip (shows placeholder tiles when no result)
                         Filmstrip {
-                            result: Rc::clone(worker_result),
+                            result: result(),
                             selected: selected_stage(),
                             on_select: on_stage_select,
                         }
@@ -391,26 +394,6 @@ fn app() -> Element {
                                     on_config_change: on_config_change,
                                     show_descriptions: show_descriptions(),
                                 }
-                            }
-                        }
-                    } else if processing() {
-                        // First-time processing (no previous result to show)
-                        div { class: "flex-1 flex items-center justify-center",
-                            div { class: "flex flex-col items-center gap-3",
-                                p { class: "text-(--text-secondary) text-lg animate-pulse",
-                                    "Processing... ({format_elapsed(elapsed_ms())})"
-                                }
-                                button {
-                                    class: "text-sm px-4 py-1.5 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
-                                    onclick: on_cancel,
-                                    "Cancel"
-                                }
-                            }
-                        }
-                    } else if image_bytes().is_some() {
-                        div { class: "flex-1 flex items-center justify-center",
-                            p { class: "text-(--muted) text-lg",
-                                "Processing failed"
                             }
                         }
                     } else {

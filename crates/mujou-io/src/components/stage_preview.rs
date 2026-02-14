@@ -7,6 +7,9 @@
 //! happens on the main thread. Raster `<img>` elements are always
 //! present in the DOM (hidden when not selected) so the browser eagerly
 //! decodes them and stage switching is instant.
+//!
+//! When no result is available yet (initial processing), a placeholder
+//! container is shown matching the preview area styling.
 
 use std::rc::Rc;
 
@@ -20,14 +23,20 @@ use crate::worker::WorkerResult;
 #[derive(Props, Clone)]
 pub struct StagePreviewProps {
     /// Pre-rendered pipeline result with Blob URLs for raster stages.
-    result: Rc<WorkerResult>,
+    /// `None` during initial processing — a placeholder is shown.
+    result: Option<Rc<WorkerResult>>,
     /// Which stage to display.
     selected: StageId,
 }
 
 impl PartialEq for StagePreviewProps {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.result, &other.result) && self.selected == other.selected
+        let results_eq = match (&self.result, &other.result) {
+            (Some(a), Some(b)) => Rc::ptr_eq(a, b),
+            (None, None) => true,
+            _ => false,
+        };
+        results_eq && self.selected == other.selected
     }
 }
 
@@ -40,9 +49,22 @@ impl PartialEq for StagePreviewProps {
 ///
 /// Vector stages (SVG) are conditionally rendered since inline SVG
 /// paints synchronously without an async decode step.
+///
+/// When no result is available yet, a placeholder container matching
+/// the preview area styling is rendered.
 #[component]
 pub fn StagePreview(props: StagePreviewProps) -> Element {
-    let result = &props.result;
+    let Some(ref result) = props.result else {
+        // No result yet — show placeholder matching the preview area
+        return rsx! {
+            div {
+                class: "w-full aspect-[4/3] max-h-[70vh] bg-[var(--preview-bg)] rounded",
+                role: "status",
+                aria_label: "Loading preview",
+            }
+        };
+    };
+
     let selected = props.selected;
     let w = result.dimensions.width;
     let h = result.dimensions.height;
