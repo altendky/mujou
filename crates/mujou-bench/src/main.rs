@@ -57,7 +57,7 @@ struct Cli {
     #[arg(long)]
     no_mask: bool,
 
-    /// Mask diameter as fraction of image extent (0.0-1.0).
+    /// Mask diameter as fraction of image diagonal (0.0-1.5).
     #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_DIAMETER)]
     mask_diameter: f64,
 

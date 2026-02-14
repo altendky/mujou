@@ -197,7 +197,8 @@ mod tests {
         // All points should be within the mask circle.
         let process_result = result.unwrap();
         let center = Point::new(20.0, 20.0);
-        let radius = 40.0 * 0.8 / 2.0; // 16.0
+        let diagonal = (40.0_f64).hypot(40.0);
+        let radius = diagonal * 0.8 / 2.0;
         for p in process_result.polyline.points() {
             let dist = p.distance(center);
             assert!(
@@ -211,8 +212,8 @@ mod tests {
 
     #[test]
     fn process_with_circular_mask_nonsquare() {
-        // Non-square image: mask radius should use min(width, height)
-        // so the circle fits entirely within the image.
+        // Non-square image: mask radius is based on the diagonal so at
+        // mask_diameter=1.0 the circle circumscribes the full image.
         let png = sharp_edge_png(60, 40);
         let config = PipelineConfig {
             circular_mask: true,
@@ -222,10 +223,39 @@ mod tests {
         let result = process(&png, &config);
         assert!(result.is_ok(), "expected Ok with mask, got {result:?}");
 
-        // Radius should be based on min(60, 40) = 40, so radius = 20.0.
+        // Radius based on diagonal: sqrt(60^2 + 40^2) / 2 ≈ 36.06
         let process_result = result.unwrap();
         let center = Point::new(30.0, 20.0);
-        let radius = 40.0 / 2.0; // 20.0, based on min dimension
+        let diagonal = (60.0_f64).hypot(40.0);
+        let radius = diagonal * 1.0 / 2.0;
+        for p in process_result.polyline.points() {
+            let dist = p.distance(center);
+            assert!(
+                dist <= radius + 1e-6,
+                "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
+                p.x,
+                p.y,
+            );
+        }
+    }
+
+    #[test]
+    fn process_with_circular_mask_above_one() {
+        // mask_diameter > 1.0 produces a circle larger than the diagonal,
+        // so all image content should survive clipping.
+        let png = sharp_edge_png(60, 40);
+        let config = PipelineConfig {
+            circular_mask: true,
+            mask_diameter: 1.3,
+            ..PipelineConfig::default()
+        };
+        let result = process(&png, &config);
+        assert!(result.is_ok(), "expected Ok with mask >1.0, got {result:?}");
+
+        let process_result = result.unwrap();
+        let center = Point::new(30.0, 20.0);
+        let diagonal = (60.0_f64).hypot(40.0);
+        let radius = diagonal * 1.3 / 2.0;
         for p in process_result.polyline.points() {
             let dist = p.distance(center);
             assert!(
@@ -303,8 +333,8 @@ mod tests {
             staged.masked.is_some(),
             "expected Some masked polylines when circular_mask=true"
         );
-        // With mask_diameter=1.0 (full extent), the vertical edge at
-        // x=20 on a 40x40 image should survive clipping.
+        // With mask_diameter=1.0 (circumscribing diagonal), the vertical
+        // edge at x=20 on a 40x40 image should survive clipping.
         assert!(
             !staged.masked.as_ref().unwrap().is_empty(),
             "expected non-empty masked polylines with full-extent mask"
