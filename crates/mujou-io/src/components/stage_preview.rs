@@ -1,7 +1,7 @@
 //! Full-size preview for the currently selected pipeline stage.
 //!
-//! Dispatches between raster `<img>` display (for Original, Blur,
-//! Edges) and inline SVG display (for vector stages).
+//! Dispatches between raster `<img>` display (for Original, Downsampled,
+//! Blur, Edges) and inline SVG display (for vector stages).
 //!
 //! All raster Blob URLs are pre-built by the worker — no PNG encoding
 //! happens on the main thread. Raster `<img>` elements are always
