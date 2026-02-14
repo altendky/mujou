@@ -117,7 +117,7 @@ Contours entirely outside the mask are discarded before joining, so the join ste
 **User parameters:**
 
 - `circular_mask` (bool, default: true)
-- `mask_diameter` (f64, fraction of image width, default: 1.0)
+- `mask_diameter` (f64, fraction of image diagonal, 0.0-1.5, default: 0.75)
 
 ### 8. Path Ordering + Joining
 
@@ -199,7 +199,7 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `simplify_tolerance` | f64 | 2.0 | RDP simplification tolerance (pixels) |
 | `path_joiner` | `PathJoiner` | `Mst` | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `circular_mask` | bool | true | Clip output to circle |
-| `mask_diameter` | f64 | 1.0 | Mask diameter as fraction of image width |
+| `mask_diameter` | f64 | 0.75 | Mask diameter as fraction of image diagonal (0.0-1.5) |
 | `invert` | bool | false | Invert edge map |
 
 ## Performance Considerations

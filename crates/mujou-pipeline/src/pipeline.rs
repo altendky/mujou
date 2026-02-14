@@ -368,8 +368,7 @@ impl Simplified {
                 f64::from(self.dimensions.width) / 2.0,
                 f64::from(self.dimensions.height) / 2.0,
             );
-            let extent = self.dimensions.width.min(self.dimensions.height);
-            let radius = f64::from(extent) * self.config.mask_diameter / 2.0;
+            let radius = self.dimensions.mask_radius(self.config.mask_diameter);
             Some(crate::mask::apply_circular_mask(
                 &self.reduced,
                 center,
@@ -854,8 +853,7 @@ impl PipelineStage for Masked {
 
     fn metrics(&self) -> Option<StageMetrics> {
         let clipped = self.clipped.as_ref()?;
-        let extent = self.dimensions.width.min(self.dimensions.height);
-        let radius_px = f64::from(extent) * self.config.mask_diameter / 2.0;
+        let radius_px = self.dimensions.mask_radius(self.config.mask_diameter);
         Some(StageMetrics::Mask {
             diameter: self.config.mask_diameter,
             radius_px,

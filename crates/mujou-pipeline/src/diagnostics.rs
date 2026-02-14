@@ -170,7 +170,7 @@ pub enum StageMetrics {
     },
     /// Circular mask metrics.
     Mask {
-        /// Mask diameter as fraction of image extent.
+        /// Mask diameter as fraction of image diagonal.
         diameter: f64,
         /// Mask radius in pixels.
         radius_px: f64,

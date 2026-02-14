@@ -27,7 +27,7 @@ Items to address after MVP:
 
 ### Validation
 
-- [ ] `PipelineConfig` validated constructor -- Add `try_new()` (or a builder) that enforces invariants (`blur_sigma > 0`, `canny_low <= canny_high`, `0.0 <= mask_diameter <= 1.0`, `simplify_tolerance >= 0.0`), make fields private, add getters, and return `PipelineError::InvalidConfig` on failure. See [PR #2 discussion](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
+- [ ] `PipelineConfig` validated constructor -- Add `try_new()` (or a builder) that enforces invariants (`blur_sigma > 0`, `canny_low <= canny_high`, `0.0 <= mask_diameter <= 1.5`, `simplify_tolerance >= 0.0`), make fields private, add getters, and return `PipelineError::InvalidConfig` on failure. See [PR #2 discussion](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
 
 ### Architecture
 
