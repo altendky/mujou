@@ -39,20 +39,22 @@ impl PartialEq for ExportPanelProps {
 pub fn ExportPanel(props: ExportPanelProps) -> Element {
     let mut show = props.show;
 
-    if !show() {
-        return rsx! {};
-    }
-
     let has_result = props.result.is_some();
     let mut svg_selected = use_signal(|| true);
     let mut export_error = use_signal(|| Option::<String>::None);
 
-    // Clear stale export errors when the pipeline result changes.
-    let result_present = props.result.is_some();
+    // Clear stale export errors when the popup opens.  `show` is a
+    // Signal so Dioxus tracks it as a reactive dependency — unlike a
+    // plain bool, this re-fires when the value changes.
     use_effect(move || {
-        let _ = result_present;
-        export_error.set(None);
+        if show() {
+            export_error.set(None);
+        }
     });
+
+    if !show() {
+        return rsx! {};
+    }
 
     let handle_download = {
         let result = props.result.clone();
