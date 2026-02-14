@@ -161,7 +161,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             }
         }
 
-        StageId::Path => {
+        StageId::Join => {
             let polyline = &result.joined;
             let w = result.dimensions.width;
             let h = result.dimensions.height;

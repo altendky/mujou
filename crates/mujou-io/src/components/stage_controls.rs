@@ -33,7 +33,7 @@ pub struct StageControlsProps {
 /// - **Edges**: Canny low/high sliders, invert toggle
 /// - **Contours**: contour tracer select
 /// - **Simplified**: simplify tolerance slider
-/// - **Path**: path joiner select
+/// - **Join**: path joiner select
 /// - **Masked**: circular mask toggle, mask diameter slider
 #[component]
 #[allow(clippy::too_many_lines)]
@@ -337,7 +337,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             }
         }
 
-        StageId::Path => {
+        StageId::Join => {
             let config_select = config.clone();
             let config_slider = config.clone();
             let is_mst = matches!(config.path_joiner, PathJoinerKind::Mst);

@@ -28,8 +28,8 @@ pub enum StageId {
     Simplified,
     /// Stage 8: circular mask.
     Masked,
-    /// Stage 9: path joining.
-    Path,
+    /// Stage 9: join (path joining).
+    Join,
 }
 
 impl StageId {
@@ -42,7 +42,7 @@ impl StageId {
         Self::Contours,
         Self::Simplified,
         Self::Masked,
-        Self::Path,
+        Self::Join,
     ];
 
     /// Full display label for the stage.
@@ -55,7 +55,7 @@ impl StageId {
             Self::Edges => "Edges",
             Self::Contours => "Contours",
             Self::Simplified => "Simplified",
-            Self::Path => "Path",
+            Self::Join => "Join",
             Self::Masked => "Masked",
         }
     }
@@ -80,7 +80,7 @@ impl StageId {
             5 => Some(Self::Contours),     // ContoursTraced
             6 => Some(Self::Simplified),   // Simplified
             7 => Some(Self::Masked),       // Masked
-            8 => Some(Self::Path),         // Joined
+            8 => Some(Self::Join),         // Joined
             _ => None,
         }
     }
@@ -96,7 +96,7 @@ impl StageId {
             Self::Contours => "Cont",
             Self::Simplified => "Simp",
             Self::Masked => "Mask",
-            Self::Path => "Path",
+            Self::Join => "Join",
         }
     }
 }
