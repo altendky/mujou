@@ -20,8 +20,8 @@ All subsequent pipeline stages operate at this reduced resolution.
 
 **User parameters:**
 
-- `working_resolution` (u32, default: 256)
-- `downsample_filter` (`DownsampleFilter`, default: `Disabled`)
+- `working_resolution` (u32, default: 1000)
+- `downsample_filter` (`DownsampleFilter`, default: `Triangle`)
 
 ### 3. Gaussian Blur
 

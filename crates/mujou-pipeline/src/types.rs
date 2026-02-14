@@ -344,9 +344,9 @@ impl PipelineConfig {
     /// Default edge map inversion state.
     pub const DEFAULT_INVERT: bool = false;
     /// Default working resolution (max dimension after downsampling).
-    pub const DEFAULT_WORKING_RESOLUTION: u32 = 256;
+    pub const DEFAULT_WORKING_RESOLUTION: u32 = 1000;
     /// Default downsample filter.
-    pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Disabled;
+    pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Triangle;
     /// Default MST nearest-neighbour candidate count per sample point.
     pub const DEFAULT_MST_NEIGHBOURS: usize = 100;
     /// Default edge channels (luminance only).
@@ -859,8 +859,8 @@ mod tests {
         assert!(config.circular_mask);
         assert!((config.mask_diameter - 0.75).abs() < f64::EPSILON);
         assert!(!config.invert);
-        assert_eq!(config.working_resolution, 256);
-        assert_eq!(config.downsample_filter, DownsampleFilter::Disabled);
+        assert_eq!(config.working_resolution, 1000);
+        assert_eq!(config.downsample_filter, DownsampleFilter::Triangle);
         assert_eq!(config.mst_neighbours, 100);
         assert_eq!(config.edge_channels, EdgeChannels::default());
         assert!(config.edge_channels.luminance);
