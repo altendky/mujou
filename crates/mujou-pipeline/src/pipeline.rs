@@ -1379,9 +1379,30 @@ impl PipelineCache {
         earliest_changed: usize,
         on_stage: &dyn Fn(usize, bool),
     ) -> Result<(StagedResult, Self), PipelineError> {
+        // Destructure self so we can move `staged` fields into the
+        // resume stage instead of cloning them.
+        let Self {
+            image_hash,
+            config: _,
+            decoded_image,
+            source_len,
+            mut downsampled_applied,
+            mut pre_invert_edge_pixels,
+            staged: old_staged,
+        } = self;
+
         // Build a Stage at the predecessor of the earliest changed
         // stage, populated with cached data and the new config.
-        let stage = self.build_resume_stage(&new_config, earliest_changed);
+        // Consumes `old_staged` by move — no image buffer clones.
+        let mut stage = Self::build_resume_stage(
+            old_staged,
+            &decoded_image,
+            source_len,
+            downsampled_applied,
+            pre_invert_edge_pixels,
+            &new_config,
+            earliest_changed,
+        );
 
         // Report progress for all cached (skipped) stages up to and
         // including the resume point.
@@ -1389,15 +1410,11 @@ impl PipelineCache {
             on_stage(i, true);
         }
 
-        // Run the remaining stages to completion.
-        let mut stage = stage;
-        let mut downsampled_applied = self.downsampled_applied;
-        let mut pre_invert_edge_pixels = self.pre_invert_edge_pixels;
-
         // Report the resume stage itself (cached — it was
         // reconstructed from the cache, not computed).
         on_stage(stage.index(), true);
 
+        // Run the remaining stages to completion.
         loop {
             // Capture diagnostic fields from stages we're about to
             // advance past (these are lost after `advance()`).
@@ -1422,10 +1439,10 @@ impl PipelineCache {
 
         let staged = stage.complete()?;
         let cache = Self {
-            image_hash: self.image_hash,
+            image_hash,
             config: new_config,
-            decoded_image: self.decoded_image,
-            source_len: self.source_len,
+            decoded_image,
+            source_len,
             downsampled_applied,
             pre_invert_edge_pixels,
             staged: staged.clone(),
@@ -1437,82 +1454,106 @@ impl PipelineCache {
     /// Reconstruct a [`Stage`] at the predecessor of `earliest_changed`
     /// using cached data and the new config.
     ///
+    /// Consumes `staged` by value so image buffers are moved rather
+    /// than cloned — avoiding ~13 MB of allocations at working
+    /// resolution.
+    ///
     /// For example, if `earliest_changed == 4` (edges), this builds a
     /// `Stage::Blurred` (index 3) so that `advance()` will re-run
     /// edge detection with the new config.
     #[allow(clippy::too_many_lines)]
-    fn build_resume_stage(&self, new_config: &PipelineConfig, earliest_changed: usize) -> Stage {
+    fn build_resume_stage(
+        staged: StagedResult,
+        decoded_image: &DynamicImage,
+        source_len: usize,
+        downsampled_applied: bool,
+        pre_invert_edge_pixels: u64,
+        new_config: &PipelineConfig,
+        earliest_changed: usize,
+    ) -> Stage {
+        let StagedResult {
+            original,
+            downsampled,
+            blurred,
+            edges,
+            contours,
+            simplified,
+            masked,
+            joined: _,
+            dimensions,
+        } = staged;
+
         match earliest_changed {
             // Stage 2 changed (downsample) — resume from Decoded (index 1).
             2 => Stage::Decoded(Decoded {
                 config: new_config.clone(),
-                image: self.decoded_image.clone(),
-                original: self.staged.original.clone(),
-                source_len: self.source_len,
+                image: decoded_image.clone(),
+                original,
+                source_len,
             }),
 
             // Stage 3 changed (blur) — resume from Downsampled (index 2).
             3 => Stage::Downsampled(Downsampled {
                 config: new_config.clone(),
-                original: self.staged.original.clone(),
-                rgba: self.staged.downsampled.clone(),
-                applied: self.downsampled_applied,
+                original,
+                rgba: downsampled,
+                applied: downsampled_applied,
             }),
 
             // Stage 4 changed (edges) — resume from Blurred (index 3).
             4 => Stage::Blurred(Blurred {
                 config: new_config.clone(),
-                original: self.staged.original.clone(),
-                downsampled: self.staged.downsampled.clone(),
-                smooth: self.staged.blurred.clone(),
-                dimensions: self.staged.dimensions,
+                original,
+                downsampled,
+                smooth: blurred,
+                dimensions,
             }),
 
             // Stage 5 changed (contours) — resume from EdgesDetected (index 4).
             5 => Stage::EdgesDetected(EdgesDetected {
                 config: new_config.clone(),
-                original: self.staged.original.clone(),
-                downsampled: self.staged.downsampled.clone(),
-                blurred: self.staged.blurred.clone(),
-                edge_map: self.staged.edges.clone(),
-                pre_invert_edge_pixels: self.pre_invert_edge_pixels,
-                dimensions: self.staged.dimensions,
+                original,
+                downsampled,
+                blurred,
+                edge_map: edges,
+                pre_invert_edge_pixels,
+                dimensions,
             }),
 
             // Stage 6 changed (simplify) — resume from ContoursTraced (index 5).
             6 => Stage::ContoursTraced(ContoursTraced {
                 config: new_config.clone(),
-                original: self.staged.original.clone(),
-                downsampled: self.staged.downsampled.clone(),
-                blurred: self.staged.blurred.clone(),
-                edges: self.staged.edges.clone(),
-                contours: self.staged.contours.clone(),
-                dimensions: self.staged.dimensions,
+                original,
+                downsampled,
+                blurred,
+                edges,
+                contours,
+                dimensions,
             }),
 
             // Stage 7 changed (mask) — resume from Simplified (index 6).
             7 => Stage::Simplified(Simplified {
                 config: new_config.clone(),
-                original: self.staged.original.clone(),
-                downsampled: self.staged.downsampled.clone(),
-                blurred: self.staged.blurred.clone(),
-                edges: self.staged.edges.clone(),
-                contours: self.staged.contours.clone(),
-                reduced: self.staged.simplified.clone(),
-                dimensions: self.staged.dimensions,
+                original,
+                downsampled,
+                blurred,
+                edges,
+                contours,
+                reduced: simplified,
+                dimensions,
             }),
 
             // Stage 8 changed (join) — resume from Masked (index 7).
             8 => Stage::Masked(Masked {
                 config: new_config.clone(),
-                original: self.staged.original.clone(),
-                downsampled: self.staged.downsampled.clone(),
-                blurred: self.staged.blurred.clone(),
-                edges: self.staged.edges.clone(),
-                contours: self.staged.contours.clone(),
-                simplified: self.staged.simplified.clone(),
-                clipped: self.staged.masked.clone(),
-                dimensions: self.staged.dimensions,
+                original,
+                downsampled,
+                blurred,
+                edges,
+                contours,
+                simplified,
+                clipped: masked,
+                dimensions,
             }),
 
             _ => unreachable!(
