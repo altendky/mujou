@@ -391,6 +391,8 @@ fn post_progress(generation: f64, stage_index: usize, stage_count: usize) {
         &JsValue::from_str("stageIndex"),
         &JsValue::from_f64(stage_index as f64),
     );
+    // stageCount is not currently consumed by the receiver but is
+    // included for forward compatibility (e.g., a progress bar).
     let _ = js_sys::Reflect::set(
         &msg,
         &JsValue::from_str("stageCount"),
