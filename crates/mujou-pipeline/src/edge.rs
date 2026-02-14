@@ -157,6 +157,11 @@ fn extract_saturation(rgba: &RgbaImage) -> GrayImage {
 /// Both images must have the same dimensions (caller must guarantee
 /// this). Edge pixels (255) in either image appear in the output.
 fn combine_edge_maps(a: &GrayImage, b: &GrayImage) -> GrayImage {
+    debug_assert_eq!(
+        (a.width(), a.height()),
+        (b.width(), b.height()),
+        "edge maps must have the same dimensions"
+    );
     GrayImage::from_fn(a.width(), a.height(), |x, y| {
         image::Luma([a.get_pixel(x, y).0[0].max(b.get_pixel(x, y).0[0])])
     })
