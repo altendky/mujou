@@ -3,7 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus_free_icons::Icon;
 use dioxus_free_icons::icons::ld_icons::{
-    LdClipboardCheck, LdClipboardCopy, LdClipboardPaste, LdInfo,
+    LdClipboardCheck, LdClipboardCopy, LdClipboardPaste, LdDownload, LdInfo,
 };
 use mujou_io::{
     ExportPanel, FileUpload, Filmstrip, PipelineWorker, StageControls, StageId, StagePreview,
@@ -104,6 +104,8 @@ fn app() -> Element {
     let mut show_info = use_signal(|| false);
     // Controls visibility of parameter description text in stage controls.
     let show_descriptions = use_signal(|| false);
+    // Controls visibility of the export popup.
+    let mut show_export = use_signal(|| false);
 
     // --- File upload handler ---
     let on_upload = move |(bytes, name): (Vec<u8>, String)| {
@@ -259,10 +261,14 @@ fn app() -> Element {
         }
 
         div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col overflow-x-hidden",
-            // Dismiss the info popover on Escape key.
+            // Dismiss popups on Escape key (export takes priority).
             onkeydown: move |e: KeyboardEvent| {
-                if e.key() == Key::Escape && show_info() {
-                    show_info.set(false);
+                if e.key() == Key::Escape {
+                    if show_export() {
+                        show_export.set(false);
+                    } else if show_info() {
+                        show_info.set(false);
+                    }
                 }
             },
             // Theme toggle (fixed-positioned via shared theme.css;
@@ -286,6 +292,13 @@ fn app() -> Element {
                 div { class: "flex items-center gap-3",
                     FileUpload {
                         on_upload: on_upload,
+                    }
+                    button {
+                        class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
+                        title: "Export",
+                        aria_label: "Export",
+                        onclick: move |_| show_export.toggle(),
+                        Icon { width: 20, height: 20, icon: LdDownload }
                     }
                     button {
                         class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
@@ -327,8 +340,15 @@ fn app() -> Element {
                 }
             }
 
+            // Export popup — triggered by the download button in the header.
+            ExportPanel {
+                result: result(),
+                filename: filename(),
+                show: show_export,
+            }
+
             // Main content area
-            div { class: "flex-1 flex flex-col lg:flex-row gap-6 p-6 min-w-0",
+            div { class: "flex-1 flex flex-col gap-6 p-6 min-w-0",
                 // Left column: Preview + Filmstrip + Controls
                 div { class: "flex-1 flex flex-col gap-4 min-w-0",
 
@@ -411,21 +431,6 @@ fn app() -> Element {
                         }
                     }
 
-                    // Export panel (inline on mobile/tablet)
-                    div { class: "lg:hidden",
-                        ExportPanel {
-                            result: result(),
-                            filename: filename(),
-                        }
-                    }
-                }
-
-                // Right sidebar: Export (desktop only)
-                div { class: "hidden lg:block lg:w-72 shrink-0",
-                    ExportPanel {
-                        result: result(),
-                        filename: filename(),
-                    }
                 }
             }
 

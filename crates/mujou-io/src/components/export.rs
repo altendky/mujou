@@ -1,4 +1,4 @@
-//! Export panel component with download buttons.
+//! Export popup component with format checkboxes and batch download.
 
 use std::rc::Rc;
 
@@ -9,11 +9,13 @@ use dioxus::prelude::*;
 /// Props for the [`ExportPanel`] component.
 #[derive(Props, Clone)]
 pub struct ExportPanelProps {
-    /// The pipeline result to export. `None` disables all buttons.
+    /// The pipeline result to export. `None` disables all format checkboxes.
     /// Wrapped in `Rc` to avoid cloning intermediate data on each render.
     result: Option<Rc<WorkerResult>>,
     /// Base filename (without extension) for downloads.
     filename: String,
+    /// Controls visibility of the export popup.
+    show: Signal<bool>,
 }
 
 impl PartialEq for ExportPanelProps {
@@ -23,87 +25,129 @@ impl PartialEq for ExportPanelProps {
             (None, None) => true,
             _ => false,
         };
-        results_eq && self.filename == other.filename
+        results_eq && self.filename == other.filename && self.show == other.show
     }
 }
 
-/// Export panel with download buttons for each output format.
+/// Export popup with format checkboxes and a download button.
 ///
-/// Currently only SVG export is functional. Other format buttons
-/// are shown but disabled until their serializers are implemented.
+/// Renders a modal overlay (matching the info modal pattern) with
+/// checkboxes for each export format. Currently only SVG is functional;
+/// future formats are shown but disabled. The popup dismisses on
+/// backdrop click, the Cancel button, or after a successful download.
 #[component]
 pub fn ExportPanel(props: ExportPanelProps) -> Element {
+    let mut show = props.show;
+
+    if !show() {
+        return rsx! {};
+    }
+
     let has_result = props.result.is_some();
+    let mut svg_selected = use_signal(|| true);
     let mut export_error = use_signal(|| Option::<String>::None);
 
     // Clear stale export errors when the pipeline result changes.
     let result_present = props.result.is_some();
     use_effect(move || {
-        // Subscribe to result_present so this fires on each change.
         let _ = result_present;
         export_error.set(None);
     });
 
-    let svg_click = {
+    let handle_download = {
         let result = props.result.clone();
         let filename = props.filename;
         move |_| {
             if let Some(ref res) = result {
-                let polyline = res.final_polyline();
-                let svg = mujou_export::to_svg(std::slice::from_ref(polyline), res.dimensions);
-                let download_name = format!("{filename}.svg");
-                if let Err(e) = download::trigger_download(&svg, &download_name, "image/svg+xml") {
-                    export_error.set(Some(format!("Download failed: {e}")));
-                } else {
-                    export_error.set(None);
+                if svg_selected() {
+                    let polyline = res.final_polyline();
+                    let svg = mujou_export::to_svg(std::slice::from_ref(polyline), res.dimensions);
+                    let download_name = format!("{filename}.svg");
+                    if let Err(e) =
+                        download::trigger_download(&svg, &download_name, "image/svg+xml")
+                    {
+                        export_error.set(Some(format!("Download failed: {e}")));
+                        return;
+                    }
                 }
+                export_error.set(None);
+                show.set(false);
             }
         }
     };
 
-    let enabled_class = "inline-flex items-center justify-center px-4 h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded text-white font-medium transition-colors cursor-pointer";
-    let disabled_class = "inline-flex items-center justify-center px-4 h-[var(--btn-height)] bg-[var(--btn-disabled)] rounded text-[var(--text-disabled)] cursor-not-allowed";
+    let any_selected = svg_selected();
+
+    let label_enabled = "flex items-center gap-3 cursor-pointer";
+    let label_disabled = "flex items-center gap-3 cursor-not-allowed opacity-50";
 
     rsx! {
-        div { class: "space-y-3",
-            h3 { class: "text-lg font-semibold text-[var(--text-heading)]", "Export" }
-
-            if let Some(ref err) = export_error() {
-                p { class: "text-[var(--text-error)] text-sm", "{err}" }
-            }
-
-            div { class: "flex flex-wrap gap-2",
-                button {
-                    class: if has_result { enabled_class } else { disabled_class },
-                    disabled: !has_result,
-                    onclick: svg_click,
-                    "SVG"
+        div {
+            class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]",
+            // Backdrop — click outside the card to dismiss.
+            onclick: move |_| show.set(false),
+            // Card — stop propagation so clicking inside doesn't dismiss.
+            div {
+                class: "relative z-10 w-full max-w-sm mx-4 p-6 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]",
+                onclick: move |e| e.stop_propagation(),
+                h2 { class: "text-lg font-semibold mb-4 text-[var(--text-heading)]",
+                    "Export"
                 }
 
-                // Future format buttons (disabled until serializers exist)
-                button {
-                    class: "{disabled_class}",
-                    disabled: true,
-                    title: "Coming soon",
-                    "THR"
+                if let Some(ref err) = export_error() {
+                    p { class: "text-[var(--text-error)] text-sm mb-3", "{err}" }
                 }
-                button {
-                    class: "{disabled_class}",
-                    disabled: true,
-                    title: "Coming soon",
-                    "G-code"
+
+                // Format checkboxes
+                div { class: "space-y-3 mb-5",
+                    label {
+                        class: if has_result { label_enabled } else { label_disabled },
+                        input {
+                            r#type: "checkbox",
+                            checked: svg_selected(),
+                            disabled: !has_result,
+                            oninput: move |_| svg_selected.toggle(),
+                            class: "w-4 h-4 accent-[var(--btn-primary)]",
+                        }
+                        span { "SVG" }
+                    }
+
+                    // Future format checkboxes (disabled until serializers exist)
+                    label { class: label_disabled,
+                        input { r#type: "checkbox", disabled: true, class: "w-4 h-4" }
+                        span { "THR" }
+                        span { class: "text-xs text-[var(--text-secondary)]", "(coming soon)" }
+                    }
+                    label { class: label_disabled,
+                        input { r#type: "checkbox", disabled: true, class: "w-4 h-4" }
+                        span { "G-code" }
+                        span { class: "text-xs text-[var(--text-secondary)]", "(coming soon)" }
+                    }
+                    label { class: label_disabled,
+                        input { r#type: "checkbox", disabled: true, class: "w-4 h-4" }
+                        span { "DXF" }
+                        span { class: "text-xs text-[var(--text-secondary)]", "(coming soon)" }
+                    }
+                    label { class: label_disabled,
+                        input { r#type: "checkbox", disabled: true, class: "w-4 h-4" }
+                        span { "PNG" }
+                        span { class: "text-xs text-[var(--text-secondary)]", "(coming soon)" }
+                    }
                 }
-                button {
-                    class: "{disabled_class}",
-                    disabled: true,
-                    title: "Coming soon",
-                    "DXF"
-                }
-                button {
-                    class: "{disabled_class}",
-                    disabled: true,
-                    title: "Coming soon",
-                    "PNG"
+
+                // Action buttons
+                div { class: "flex gap-3",
+                    button {
+                        class: "flex-1 text-sm px-4 py-1.5 rounded bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] text-white cursor-pointer transition-colors disabled:bg-[var(--btn-disabled)] disabled:text-[var(--text-disabled)] disabled:cursor-not-allowed",
+                        disabled: !has_result || !any_selected,
+                        onclick: handle_download,
+                        "Download"
+                    }
+                    button {
+                        class: "text-sm px-4 py-1.5 rounded border border-[var(--border)] text-[var(--text)] hover:opacity-80 cursor-pointer transition-colors",
+                        onclick: move |_| show.set(false),
+                        "Cancel"
+                    }
                 }
             }
         }
