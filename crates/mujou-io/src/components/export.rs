@@ -73,7 +73,6 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                     }
                 }
                 export_error.set(None);
-                show.set(false);
             }
         }
     };
