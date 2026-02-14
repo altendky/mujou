@@ -23,6 +23,11 @@ const CONFIG_DEBOUNCE_MS: u32 = 200;
 /// during processing.
 const ELAPSED_UPDATE_MS: u32 = 100;
 
+/// Delay in milliseconds before auto-closing the processing dialog
+/// after the pipeline completes. Gives the user time to see final
+/// per-stage timings.
+const AUTO_CLOSE_DELAY_MS: u32 = 1000;
+
 /// Status of a single stage in the processing popup.
 #[derive(Clone, Copy, PartialEq)]
 enum StageStatus {
@@ -126,6 +131,14 @@ fn app() -> Element {
     // timer loop to compute live elapsed time for the active stage.
     let mut current_stage_start = use_signal(|| Option::<f64>::None);
 
+    // Whether the pipeline has finished but the dialog is still visible
+    // (either during the auto-close delay or because auto-close is off).
+    let mut pipeline_finished = use_signal(|| false);
+
+    // Whether to automatically close the processing dialog after a
+    // short delay. When unchecked, the dialog persists until dismissed.
+    let mut auto_close = use_signal(|| true);
+
     // The "committed" config is what the pipeline actually runs with.
     // Updated immediately on image upload, debounced on slider changes.
     let mut committed_config = use_signal(mujou_pipeline::PipelineConfig::default);
@@ -173,6 +186,7 @@ fn app() -> Element {
         let my_generation = *generation.peek();
 
         processing.set(true);
+        pipeline_finished.set(false);
         error.set(None);
         elapsed_ms.set(0.0);
         let start = js_sys::Date::now();
@@ -276,12 +290,11 @@ fn app() -> Element {
                 return;
             }
 
-            // Record final elapsed time and hide the overlay. Since
-            // PNG encoding happened in the worker, result.set() only
-            // triggers a lightweight re-render (no main-thread encoding).
+            // Record final elapsed time. The dialog stays visible —
+            // either for a 1s delay (auto-close) or until manually
+            // dismissed (auto-close off).
             let now = js_sys::Date::now();
             elapsed_ms.set(now - start);
-            processing.set(false);
             processing_start.set(None);
 
             // Mark any still-running stage as completed.
@@ -297,6 +310,7 @@ fn app() -> Element {
             }
             current_stage_start.set(None);
 
+            // Deliver the result/error before deciding on dialog fate.
             match outcome {
                 Ok(res) => {
                     result.set(Some(Rc::new(res)));
@@ -305,6 +319,21 @@ fn app() -> Element {
                 Err(e) => {
                     error.set(Some(format!("{e}")));
                 }
+            }
+
+            // Mark the pipeline as finished (dialog shows "Done" instead
+            // of "Cancel") and schedule auto-close if enabled.
+            pipeline_finished.set(true);
+            if *auto_close.peek() {
+                spawn(async move {
+                    gloo_timers::future::TimeoutFuture::new(AUTO_CLOSE_DELAY_MS).await;
+                    // Only dismiss if no new run started and auto-close
+                    // is still enabled.
+                    if *generation.peek() == my_generation && *auto_close.peek() {
+                        processing.set(false);
+                        pipeline_finished.set(false);
+                    }
+                });
             }
         });
     });
@@ -337,12 +366,17 @@ fn app() -> Element {
         });
     });
 
-    // --- Cancel handler ---
+    // --- Cancel / Done handler ---
+    // During processing: terminates the worker and hides the dialog.
+    // After completion: just dismisses the dialog.
     let worker_for_cancel = Rc::clone(&worker);
-    let on_cancel = move |_| {
-        worker_for_cancel.cancel();
+    let on_cancel_or_done = move |_| {
+        if !pipeline_finished() {
+            worker_for_cancel.cancel();
+            processing_start.set(None);
+        }
         processing.set(false);
-        processing_start.set(None);
+        pipeline_finished.set(false);
     };
 
     // --- Config change handler ---
@@ -493,7 +527,7 @@ fn app() -> Element {
                             // Preview content (stays visible during re-processing,
                             // shows placeholder when no result yet)
                             div {
-                                class: if processing() { "opacity-50 transition-opacity" } else { "transition-opacity" },
+                                class: if processing() && !pipeline_finished() { "opacity-50 transition-opacity" } else { "transition-opacity" },
 
                                 StagePreview {
                                     result: result(),
@@ -508,7 +542,11 @@ fn app() -> Element {
                                     div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
                                         // Total elapsed time
                                         p { class: "text-(--text-secondary) text-sm",
-                                            "Processing... ({format_elapsed(elapsed_ms())})"
+                                            if pipeline_finished() {
+                                                "Completed ({format_elapsed(elapsed_ms())})"
+                                            } else {
+                                                "Processing... ({format_elapsed(elapsed_ms())})"
+                                            }
                                         }
                                         // Separator
                                         hr { class: "w-full border-(--border) my-1" }
@@ -540,11 +578,31 @@ fn app() -> Element {
                                                 }
                                             }
                                         }
-                                        // Cancel button
-                                        button {
-                                            class: "text-xs px-3 py-1 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer mt-1",
-                                            onclick: on_cancel,
-                                            "Cancel"
+                                        // Auto-close checkbox + Cancel/Done button
+                                        div { class: "flex items-center justify-between w-full mt-1",
+                                            label { class: "flex items-center gap-1.5 text-xs text-(--text-secondary) cursor-pointer select-none",
+                                                input {
+                                                    r#type: "checkbox",
+                                                    checked: auto_close(),
+                                                    onchange: move |e: Event<FormData>| {
+                                                        auto_close.set(e.checked());
+                                                    },
+                                                }
+                                                "Auto-close"
+                                            }
+                                            if pipeline_finished() {
+                                                button {
+                                                    class: "text-xs px-3 py-1 rounded bg-[var(--btn-primary)] text-white hover:bg-[var(--btn-primary-hover)] cursor-pointer",
+                                                    onclick: on_cancel_or_done,
+                                                    "Done"
+                                                }
+                                            } else {
+                                                button {
+                                                    class: "text-xs px-3 py-1 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
+                                                    onclick: on_cancel_or_done,
+                                                    "Cancel"
+                                                }
+                                            }
                                         }
                                     }
                                 }
