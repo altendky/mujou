@@ -67,7 +67,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         desc("Max pixel dimension for processing. Lower is faster."),
                         f64::from(value),
                         64.0,
-                        1024.0,
+                        2000.0,
                         1.0,
                         0,
                         move |v: f64| {
