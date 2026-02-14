@@ -164,8 +164,8 @@ fn handle_message(event: web_sys::MessageEvent) {
     // when the image is the same as the previous run.  The on_stage
     // callback posts per-stage progress so the main thread can update
     // its timing display.
-    let on_stage = |index: usize| {
-        post_progress(generation, index, STAGE_COUNT);
+    let on_stage = |index: usize, cached: bool| {
+        post_progress(generation, index, STAGE_COUNT, cached);
     };
     let outcome = PipelineCache::run(prev_cache, image_bytes, config, &on_stage);
 
@@ -390,10 +390,11 @@ fn dilate_soft(image: &GrayImage) -> GrayImage {
 /// Post a stage-progress message back to the main thread.
 ///
 /// Sent after each `stage.advance()` call so the main thread can update
-/// the per-stage timing display. The message carries only numeric
-/// indices — the main thread maps these to UI stage labels.
+/// the per-stage timing display. The `cached` flag indicates whether the
+/// stage result was served from the pipeline cache (`true`) or actually
+/// computed (`false`).
 #[allow(clippy::cast_precision_loss)]
-fn post_progress(generation: f64, stage_index: usize, stage_count: usize) {
+fn post_progress(generation: f64, stage_index: usize, stage_count: usize, cached: bool) {
     let msg = js_sys::Object::new();
     let _ = js_sys::Reflect::set(
         &msg,
@@ -416,6 +417,11 @@ fn post_progress(generation: f64, stage_index: usize, stage_count: usize) {
         &msg,
         &JsValue::from_str("stageCount"),
         &JsValue::from_f64(stage_count as f64),
+    );
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("cached"),
+        &JsValue::from_bool(cached),
     );
 
     if let Ok(global) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() {

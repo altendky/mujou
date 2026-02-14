@@ -133,13 +133,13 @@ impl PipelineWorker {
     /// handler, causing the first call's future to hang indefinitely.
     /// Use [`cancel()`](Self::cancel) to abort a previous run before
     /// starting a new one.
-    #[allow(clippy::future_not_send)] // WASM is single-threaded; Send is not needed
+    #[allow(clippy::future_not_send, clippy::too_many_lines)]
     pub async fn run(
         &self,
         image_bytes: &[u8],
         config: &PipelineConfig,
         generation: f64,
-        on_progress: Option<impl FnMut(usize) + 'static>,
+        on_progress: Option<impl FnMut(usize, bool) + 'static>,
     ) -> Result<WorkerResult, PipelineError> {
         let config_json = serde_json::to_string(config).map_err(|e| {
             PipelineError::InvalidConfig(format!("failed to serialize config: {e}"))
@@ -218,7 +218,11 @@ impl PipelineWorker {
                                 .ok()
                                 .and_then(|v| v.as_f64())
                                 .unwrap_or(0.0) as usize;
-                        cb(stage_index);
+                        let cached = js_sys::Reflect::get(&data, &JsValue::from_str("cached"))
+                            .ok()
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false);
+                        cb(stage_index, cached);
                     }
                     return;
                 }

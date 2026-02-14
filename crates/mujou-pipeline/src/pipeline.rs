@@ -1266,9 +1266,12 @@ impl PipelineCache {
     /// downstream dependents) are re-executed.  Otherwise a full run
     /// is performed.
     ///
-    /// `on_stage` is called with the zero-based index of each stage
-    /// as it is reached (either from cache or from actual computation).
-    /// This allows callers to report per-stage progress.
+    /// `on_stage` is called with `(stage_index, cached)` for each
+    /// stage as it is reached.  `cached` is `true` when the stage
+    /// result was served from the cache without re-computation, and
+    /// `false` when the stage was actually executed.  This allows
+    /// callers to report per-stage progress and distinguish skipped
+    /// stages in the UI.
     ///
     /// Returns the pipeline result together with an updated cache for
     /// the next invocation.
@@ -1281,7 +1284,7 @@ impl PipelineCache {
         cache: Option<Self>,
         image_bytes: Vec<u8>,
         config: PipelineConfig,
-        on_stage: &dyn Fn(usize),
+        on_stage: &dyn Fn(usize, bool),
     ) -> Result<(StagedResult, Self), PipelineError> {
         let image_hash = Self::hash_bytes(&image_bytes);
 
@@ -1290,9 +1293,9 @@ impl PipelineCache {
                 let earliest = c.config.earliest_changed_stage(&config);
                 if earliest >= STAGE_COUNT {
                     // Nothing changed — fire progress for all stages
-                    // and return the cached result.
+                    // (all cached) and return the cached result.
                     for i in 0..STAGE_COUNT {
-                        on_stage(i);
+                        on_stage(i, true);
                     }
                     return Ok((c.staged.clone(), Self { config, ..c }));
                 }
@@ -1317,15 +1320,15 @@ impl PipelineCache {
         image_bytes: Vec<u8>,
         config: PipelineConfig,
         image_hash: u64,
-        on_stage: &dyn Fn(usize),
+        on_stage: &dyn Fn(usize, bool),
     ) -> Result<(StagedResult, Self), PipelineError> {
         let cache_config = config.clone();
 
         let pending = Pipeline::new(image_bytes, config);
-        on_stage(Pending::INDEX);
+        on_stage(Pending::INDEX, false);
 
         let decoded = pending.decode()?;
-        on_stage(Decoded::INDEX);
+        on_stage(Decoded::INDEX, false);
 
         // Capture DynamicImage before downsample consumes it.
         let decoded_image = decoded.image.clone();
@@ -1333,26 +1336,26 @@ impl PipelineCache {
 
         let downsampled = decoded.downsample();
         let downsampled_applied = downsampled.applied;
-        on_stage(Downsampled::INDEX);
+        on_stage(Downsampled::INDEX, false);
 
         let blurred = downsampled.blur();
-        on_stage(Blurred::INDEX);
+        on_stage(Blurred::INDEX, false);
 
         let edges = blurred.detect_edges();
         let pre_invert_edge_pixels = edges.pre_invert_edge_pixels;
-        on_stage(EdgesDetected::INDEX);
+        on_stage(EdgesDetected::INDEX, false);
 
         let contours = edges.trace_contours()?;
-        on_stage(ContoursTraced::INDEX);
+        on_stage(ContoursTraced::INDEX, false);
 
         let simplified = contours.simplify();
-        on_stage(Simplified::INDEX);
+        on_stage(Simplified::INDEX, false);
 
         let masked = simplified.mask();
-        on_stage(Masked::INDEX);
+        on_stage(Masked::INDEX, false);
 
         let joined = masked.join();
-        on_stage(Joined::INDEX);
+        on_stage(Joined::INDEX, false);
 
         let staged = joined.into_result();
         let cache = Self {
@@ -1374,7 +1377,7 @@ impl PipelineCache {
         self,
         new_config: PipelineConfig,
         earliest_changed: usize,
-        on_stage: &dyn Fn(usize),
+        on_stage: &dyn Fn(usize, bool),
     ) -> Result<(StagedResult, Self), PipelineError> {
         // Build a Stage at the predecessor of the earliest changed
         // stage, populated with cached data and the new config.
@@ -1383,7 +1386,7 @@ impl PipelineCache {
         // Report progress for all cached (skipped) stages up to and
         // including the resume point.
         for i in 0..stage.index() {
-            on_stage(i);
+            on_stage(i, true);
         }
 
         // Run the remaining stages to completion.
@@ -1391,8 +1394,9 @@ impl PipelineCache {
         let mut downsampled_applied = self.downsampled_applied;
         let mut pre_invert_edge_pixels = self.pre_invert_edge_pixels;
 
-        // Report the resume stage itself.
-        on_stage(stage.index());
+        // Report the resume stage itself (cached — it was
+        // reconstructed from the cache, not computed).
+        on_stage(stage.index(), true);
 
         loop {
             // Capture diagnostic fields from stages we're about to
@@ -1406,7 +1410,7 @@ impl PipelineCache {
 
             match stage.advance()? {
                 Advance::Next(next) => {
-                    on_stage(next.index());
+                    on_stage(next.index(), false);
                     stage = next;
                 }
                 Advance::Complete(done) => {
@@ -2071,7 +2075,7 @@ mod tests {
     // ─────────── PipelineCache tests ─────────────────────────────
 
     /// No-op progress callback for tests.
-    fn noop(_: usize) {}
+    fn noop(_: usize, _: bool) {}
 
     /// Helper: assert two `StagedResult`s are identical.
     fn assert_staged_eq(a: &StagedResult, b: &StagedResult) {
