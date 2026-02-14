@@ -23,6 +23,33 @@ const CONFIG_DEBOUNCE_MS: u32 = 200;
 /// during processing.
 const ELAPSED_UPDATE_MS: u32 = 100;
 
+/// Delay in milliseconds before auto-closing the processing dialog
+/// after the pipeline completes. Gives the user time to see final
+/// per-stage timings.
+const AUTO_CLOSE_DELAY_MS: u32 = 1000;
+
+/// Status of a single stage in the processing popup.
+#[derive(Clone, Copy, PartialEq)]
+enum StageStatus {
+    /// Not yet started.
+    Pending,
+    /// Currently executing — elapsed time is updating live.
+    Running,
+    /// Finished — elapsed time is the final duration.
+    Completed,
+}
+
+/// Per-stage progress entry for the processing popup.
+#[derive(Clone, Copy)]
+struct StageProgressEntry {
+    /// Which UI stage this tracks.
+    stage: StageId,
+    /// Current status.
+    status: StageStatus,
+    /// Elapsed time in milliseconds (final for completed, live for running).
+    elapsed_ms: f64,
+}
+
 /// Cherry blossoms example image bundled at compile time so the app
 /// can show example output immediately on first load.
 static CHERRY_BLOSSOMS: &[u8] = include_bytes!(env!("CHERRY_BLOSSOMS_PATH"));
@@ -90,6 +117,28 @@ fn app() -> Element {
     // it for the final elapsed snapshot).
     let mut processing_start = use_signal(|| Option::<f64>::None);
 
+    // Per-stage progress for the processing popup. One entry per UI
+    // stage (8 total), tracking status and elapsed time.
+    let mut stage_progress = use_signal(|| {
+        StageId::ALL.map(|stage| StageProgressEntry {
+            stage,
+            status: StageStatus::Pending,
+            elapsed_ms: 0.0,
+        })
+    });
+
+    // Timestamp when the currently-running stage began. Used by the
+    // timer loop to compute live elapsed time for the active stage.
+    let mut current_stage_start = use_signal(|| Option::<f64>::None);
+
+    // Whether the pipeline has finished but the dialog is still visible
+    // (either during the auto-close delay or because auto-close is off).
+    let mut pipeline_finished = use_signal(|| false);
+
+    // Whether to automatically close the processing dialog after a
+    // short delay. When unchecked, the dialog persists until dismissed.
+    let mut auto_close = use_signal(|| true);
+
     // The "committed" config is what the pipeline actually runs with.
     // Updated immediately on image upload, debounced on slider changes.
     let mut committed_config = use_signal(mujou_pipeline::PipelineConfig::default);
@@ -137,10 +186,19 @@ fn app() -> Element {
         let my_generation = *generation.peek();
 
         processing.set(true);
+        pipeline_finished.set(false);
         error.set(None);
         elapsed_ms.set(0.0);
         let start = js_sys::Date::now();
         processing_start.set(Some(start));
+
+        // Initialize all stages as pending.
+        stage_progress.set(StageId::ALL.map(|stage| StageProgressEntry {
+            stage,
+            status: StageStatus::Pending,
+            elapsed_ms: 0.0,
+        }));
+        current_stage_start.set(None);
 
         let worker = Rc::clone(&worker_for_effect);
         spawn(async move {
@@ -155,18 +213,74 @@ fn app() -> Element {
                 loop {
                     gloo_timers::future::TimeoutFuture::new(ELAPSED_UPDATE_MS).await;
                     match *processing_start.peek() {
-                        Some(s) => elapsed_ms.set(js_sys::Date::now() - s),
+                        Some(s) => {
+                            let now = js_sys::Date::now();
+                            elapsed_ms.set(now - s);
+                            // Also update the currently-running stage's
+                            // elapsed time.
+                            if let Some(stage_start) = *current_stage_start.peek() {
+                                let mut entries = *stage_progress.peek();
+                                for entry in &mut entries {
+                                    if entry.status == StageStatus::Running {
+                                        entry.elapsed_ms = now - stage_start;
+                                    }
+                                }
+                                stage_progress.set(entries);
+                            }
+                        }
                         None => break,
                     }
                 }
             });
+
+            // Progress callback — invoked by the worker wrapper each
+            // time a pipeline stage transition occurs.
+            //
+            // `progress(N)` means "I just arrived at state N" — the
+            // advance that *produced* state N is complete. That work
+            // belongs to the UI stage for index N. The *next* piece of
+            // work (advance FROM state N) will produce state N+1, so
+            // we start the UI stage for N+1 running.
+            let on_progress = move |backend_index: usize| {
+                let now = js_sys::Date::now();
+                let mut entries = *stage_progress.peek();
+
+                // Complete the currently-running stage (if any).
+                if let Some(stage_start) = *current_stage_start.peek() {
+                    for entry in &mut entries {
+                        if entry.status == StageStatus::Running {
+                            entry.status = StageStatus::Completed;
+                            entry.elapsed_ms = now - stage_start;
+                        }
+                    }
+                }
+
+                // Start the next UI stage running. The upcoming work
+                // is the advance FROM backend_index, which produces
+                // backend_index + 1. Attribute that work to the UI
+                // stage for backend_index + 1.
+                if let Some(next_ui_stage) = StageId::from_pipeline_index(backend_index + 1) {
+                    if let Some(ui_idx) = entries.iter().position(|e| e.stage == next_ui_stage) {
+                        entries[ui_idx].status = StageStatus::Running;
+                        entries[ui_idx].elapsed_ms = 0.0;
+                        current_stage_start.set(Some(now));
+                    }
+                } else {
+                    // Last pipeline stage — no more work to attribute.
+                    current_stage_start.set(None);
+                }
+
+                stage_progress.set(entries);
+            };
 
             // Run the pipeline in the web worker — this .await yields
             // to the browser event loop so animations and cancel clicks
             // keep working. PNG encoding also happens in the worker, so
             // the returned WorkerResult has ready-to-use Blob URLs.
             #[allow(clippy::cast_precision_loss)]
-            let outcome = worker.run(&bytes, &cfg, my_generation as f64).await;
+            let outcome = worker
+                .run(&bytes, &cfg, my_generation as f64, Some(on_progress))
+                .await;
 
             // If another run was triggered while we were processing,
             // discard this stale result silently. The new run already
@@ -176,13 +290,27 @@ fn app() -> Element {
                 return;
             }
 
-            // Record final elapsed time and hide the overlay. Since
-            // PNG encoding happened in the worker, result.set() only
-            // triggers a lightweight re-render (no main-thread encoding).
-            elapsed_ms.set(js_sys::Date::now() - start);
-            processing.set(false);
+            // Record final elapsed time. The dialog stays visible —
+            // either for a 1s delay (auto-close) or until manually
+            // dismissed (auto-close off).
+            let now = js_sys::Date::now();
+            elapsed_ms.set(now - start);
             processing_start.set(None);
 
+            // Mark any still-running stage as completed.
+            if let Some(stage_start) = *current_stage_start.peek() {
+                let mut entries = *stage_progress.peek();
+                for entry in &mut entries {
+                    if entry.status == StageStatus::Running {
+                        entry.status = StageStatus::Completed;
+                        entry.elapsed_ms = now - stage_start;
+                    }
+                }
+                stage_progress.set(entries);
+            }
+            current_stage_start.set(None);
+
+            // Deliver the result/error before deciding on dialog fate.
             match outcome {
                 Ok(res) => {
                     result.set(Some(Rc::new(res)));
@@ -191,6 +319,21 @@ fn app() -> Element {
                 Err(e) => {
                     error.set(Some(format!("{e}")));
                 }
+            }
+
+            // Mark the pipeline as finished (dialog shows "Done" instead
+            // of "Cancel") and schedule auto-close if enabled.
+            pipeline_finished.set(true);
+            if *auto_close.peek() {
+                spawn(async move {
+                    gloo_timers::future::TimeoutFuture::new(AUTO_CLOSE_DELAY_MS).await;
+                    // Only dismiss if no new run started and auto-close
+                    // is still enabled.
+                    if *generation.peek() == my_generation && *auto_close.peek() {
+                        processing.set(false);
+                        pipeline_finished.set(false);
+                    }
+                });
             }
         });
     });
@@ -223,12 +366,17 @@ fn app() -> Element {
         });
     });
 
-    // --- Cancel handler ---
+    // --- Cancel / Done handler ---
+    // During processing: terminates the worker and hides the dialog.
+    // After completion: just dismisses the dialog.
     let worker_for_cancel = Rc::clone(&worker);
-    let on_cancel = move |_| {
-        worker_for_cancel.cancel();
+    let on_cancel_or_done = move |_| {
+        if !pipeline_finished() {
+            worker_for_cancel.cancel();
+            processing_start.set(None);
+        }
         processing.set(false);
-        processing_start.set(None);
+        pipeline_finished.set(false);
     };
 
     // --- Config change handler ---
@@ -379,7 +527,7 @@ fn app() -> Element {
                             // Preview content (stays visible during re-processing,
                             // shows placeholder when no result yet)
                             div {
-                                class: if processing() { "opacity-50 transition-opacity" } else { "transition-opacity" },
+                                class: if processing() && !pipeline_finished() { "opacity-50 transition-opacity" } else { "transition-opacity" },
 
                                 StagePreview {
                                     result: result(),
@@ -391,14 +539,71 @@ fn app() -> Element {
                             // and re-processing)
                             if processing() {
                                 div { class: "absolute inset-0 flex items-center justify-center",
-                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2",
-                                        p { class: "text-(--text-secondary) text-sm animate-pulse",
-                                            "Processing... ({format_elapsed(elapsed_ms())})"
+                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
+                                        // Total elapsed time
+                                        div { class: "flex justify-between w-full text-sm text-(--text-secondary)",
+                                            span {
+                                                if pipeline_finished() { "Completed" } else { "Processing..." }
+                                            }
+                                            span { class: "tabular-nums",
+                                                "{format_elapsed(elapsed_ms())}"
+                                            }
                                         }
-                                        button {
-                                            class: "text-xs px-3 py-1 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
-                                            onclick: on_cancel,
-                                            "Cancel"
+                                        // Separator
+                                        hr { class: "w-full border-(--border) my-1" }
+                                        // Per-stage list
+                                        div { class: "w-full text-xs",
+                                            for entry in stage_progress() {
+                                                div {
+                                                    key: "{entry.stage}",
+                                                    class: "flex justify-between py-0.5",
+                                                    span {
+                                                        class: match entry.status {
+                                                            StageStatus::Running => "text-(--text) font-medium animate-pulse",
+                                                            StageStatus::Completed => "text-(--text-secondary)",
+                                                            StageStatus::Pending => "text-(--text-placeholder)",
+                                                        },
+                                                        "{entry.stage.label()}"
+                                                    }
+                                                    span {
+                                                        class: match entry.status {
+                                                            StageStatus::Running => "text-(--text) tabular-nums animate-pulse",
+                                                            StageStatus::Completed => "text-(--text-secondary) tabular-nums",
+                                                            StageStatus::Pending => "",
+                                                        },
+                                                        match entry.status {
+                                                            StageStatus::Running | StageStatus::Completed => format_elapsed(entry.elapsed_ms),
+                                                            StageStatus::Pending => String::new(),
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        // Auto-close checkbox + Cancel/Done button
+                                        div { class: "flex items-center justify-between w-full mt-1",
+                                            label { class: "flex items-center gap-1.5 text-xs text-(--text-secondary) cursor-pointer select-none",
+                                                input {
+                                                    r#type: "checkbox",
+                                                    checked: auto_close(),
+                                                    onchange: move |e: Event<FormData>| {
+                                                        auto_close.set(e.checked());
+                                                    },
+                                                }
+                                                "Auto-close"
+                                            }
+                                            if pipeline_finished() {
+                                                button {
+                                                    class: "text-xs px-3 py-1 rounded bg-[var(--btn-primary)] text-white hover:bg-[var(--btn-primary-hover)] border border-transparent cursor-pointer",
+                                                    onclick: on_cancel_or_done,
+                                                    "Done"
+                                                }
+                                            } else {
+                                                button {
+                                                    class: "text-xs px-3 py-1 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
+                                                    onclick: on_cancel_or_done,
+                                                    "Cancel"
+                                                }
+                                            }
                                         }
                                     }
                                 }
