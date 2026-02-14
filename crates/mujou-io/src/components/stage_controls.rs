@@ -7,7 +7,8 @@
 
 use dioxus::prelude::*;
 use mujou_pipeline::{
-    ContourTracerKind, DownsampleFilter, PathJoinerKind, PipelineConfig, max_gradient_magnitude,
+    BorderPathMode, ContourTracerKind, DownsampleFilter, PathJoinerKind, PipelineConfig,
+    max_gradient_magnitude,
 };
 
 use crate::stage::StageId;
@@ -392,6 +393,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             let diameter = config.mask_diameter;
             let config_toggle = config.clone();
             let config_slider = config.clone();
+            let config_select = config.clone();
             rsx! {
                 div { class: "space-y-2",
                     {render_toggle(
@@ -419,6 +421,27 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             move |v: f64| {
                                 let mut c = config_slider.clone();
                                 c.mask_diameter = v;
+                                on_change.call(c);
+                            },
+                        )}
+
+                        {render_select(
+                            "border_path",
+                            "Border Path",
+                            desc("Add a border polyline along the mask edge to route connections along the boundary."),
+                            &[("Auto", "Auto"), ("On", "On"), ("Off", "Off")],
+                            match config_select.border_path {
+                                BorderPathMode::Auto => "Auto",
+                                BorderPathMode::On => "On",
+                                BorderPathMode::Off => "Off",
+                            },
+                            move |v: String| {
+                                let mut c = config_select.clone();
+                                c.border_path = match v.as_str() {
+                                    "On" => BorderPathMode::On,
+                                    "Off" => BorderPathMode::Off,
+                                    _ => BorderPathMode::Auto,
+                                };
                                 on_change.call(c);
                             },
                         )}

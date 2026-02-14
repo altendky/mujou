@@ -12,7 +12,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mujou_pipeline::{Dimensions, PipelineConfig, PipelineError, Polyline};
+use mujou_pipeline::{Dimensions, MaskResult, PipelineConfig, PipelineError, Polyline};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -25,7 +25,7 @@ use crate::raster;
 struct VectorResult {
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<Vec<Polyline>>,
+    masked: Option<MaskResult>,
     joined: Polyline,
     dimensions: Dimensions,
 }
@@ -50,8 +50,8 @@ pub struct WorkerResult {
     pub contours: Vec<Polyline>,
     /// Simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Masked polylines (if circular mask was applied, before joining).
-    pub masked: Option<Vec<Polyline>>,
+    /// Mask result (if circular mask was applied, before joining).
+    pub masked: Option<MaskResult>,
     /// Joined single polyline (always the final output).
     pub joined: Polyline,
     /// Image dimensions.

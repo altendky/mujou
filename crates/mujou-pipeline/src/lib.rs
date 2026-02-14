@@ -28,6 +28,7 @@ pub use diagnostics::PipelineDiagnostics;
 pub use downsample::DownsampleFilter;
 pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
+pub use mask::{BorderPathMode, ClippedPolyline, MaskResult, MaskShape};
 pub use pipeline::{Pipeline, PipelineCache};
 pub use types::{
     Dimensions, EdgeChannels, GrayImage, PipelineConfig, PipelineError, Point, Polyline,
@@ -336,7 +337,7 @@ mod tests {
         // With mask_diameter=1.0 (circumscribing diagonal), the vertical
         // edge at x=20 on a 40x40 image should survive clipping.
         assert!(
-            !staged.masked.as_ref().unwrap().is_empty(),
+            !staged.masked.as_ref().unwrap().clipped.is_empty(),
             "expected non-empty masked polylines with full-extent mask"
         );
     }

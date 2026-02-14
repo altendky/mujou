@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::contour::ContourTracerKind;
 use crate::downsample::DownsampleFilter;
 use crate::join::PathJoinerKind;
+use crate::mask::{BorderPathMode, MaskResult};
 
 /// Re-export `GrayImage` so downstream crates can reference
 /// intermediate raster data without depending on `image` directly.
@@ -291,6 +292,14 @@ pub struct PipelineConfig {
     /// `true`.
     pub mask_diameter: f64,
 
+    /// Whether to add a border polyline matching the mask shape.
+    ///
+    /// The border lets the joiner route connections along the mask
+    /// boundary rather than across open space.  Only takes effect when
+    /// `circular_mask` is `true`.
+    #[serde(default)]
+    pub border_path: BorderPathMode,
+
     /// Whether to invert the binary edge map before contour tracing.
     pub invert: bool,
 
@@ -341,6 +350,8 @@ impl PipelineConfig {
     pub const DEFAULT_CIRCULAR_MASK: bool = true;
     /// Default mask diameter as a fraction of image diagonal.
     pub const DEFAULT_MASK_DIAMETER: f64 = 0.75;
+    /// Default border path mode (auto-detect based on clipping).
+    pub const DEFAULT_BORDER_PATH: BorderPathMode = BorderPathMode::Auto;
     /// Default edge map inversion state.
     pub const DEFAULT_INVERT: bool = false;
     /// Default working resolution (max dimension after downsampling).
@@ -456,6 +467,7 @@ impl Default for PipelineConfig {
             path_joiner: PathJoinerKind::default(),
             circular_mask: Self::DEFAULT_CIRCULAR_MASK,
             mask_diameter: Self::DEFAULT_MASK_DIAMETER,
+            border_path: Self::DEFAULT_BORDER_PATH,
             invert: Self::DEFAULT_INVERT,
             working_resolution: Self::DEFAULT_WORKING_RESOLUTION,
             downsample_filter: Self::DEFAULT_DOWNSAMPLE_FILTER,
@@ -484,6 +496,7 @@ impl PipelineConfig {
             path_joiner,
             circular_mask,
             mask_diameter,
+            border_path,
             invert,
             working_resolution,
             downsample_filter,
@@ -499,6 +512,7 @@ impl PipelineConfig {
             && *path_joiner == other.path_joiner
             && *circular_mask == other.circular_mask
             && *mask_diameter == other.mask_diameter
+            && *border_path == other.border_path
             && *invert == other.invert
             && *working_resolution == other.working_resolution
             && *downsample_filter == other.downsample_filter
@@ -536,6 +550,7 @@ impl PipelineConfig {
             path_joiner,
             circular_mask,
             mask_diameter,
+            border_path,
             invert,
             working_resolution,
             downsample_filter,
@@ -574,8 +589,11 @@ impl PipelineConfig {
             return 6;
         }
 
-        // Stage 7 — masking: circular_mask, mask_diameter
-        if *circular_mask != other.circular_mask || *mask_diameter != other.mask_diameter {
+        // Stage 7 — masking: circular_mask, mask_diameter, border_path
+        if *circular_mask != other.circular_mask
+            || *mask_diameter != other.mask_diameter
+            || *border_path != other.border_path
+        {
             return 7;
         }
 
@@ -633,12 +651,12 @@ pub struct StagedResult {
     pub contours: Vec<Polyline>,
     /// Stage 6: RDP-simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Stage 7: circular-masked polylines (`Some` only when `circular_mask=true`).
+    /// Stage 7: mask result (`Some` only when `circular_mask=true`).
     ///
-    /// Contains the simplified polylines after clipping to the circular mask
-    /// boundary. Polylines entirely outside the mask are discarded; those
-    /// crossing the boundary are split at the intersection.
-    pub masked: Option<Vec<Polyline>>,
+    /// Contains the simplified polylines after clipping to the mask
+    /// boundary (with explicit per-endpoint clip metadata) and an
+    /// optional border polyline matching the mask shape.
+    pub masked: Option<MaskResult>,
     /// Stage 8: joined single continuous path (always the final output).
     ///
     /// When masking is enabled, this is the join of the masked polylines.
@@ -672,7 +690,7 @@ struct StagedResultProxy {
     edges: (u32, u32, Vec<u8>),
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<Vec<Polyline>>,
+    masked: Option<MaskResult>,
     joined: Polyline,
     dimensions: Dimensions,
 }
@@ -1175,6 +1193,7 @@ mod tests {
             path_joiner: PathJoinerKind::Retrace,
             circular_mask: true,
             mask_diameter: 0.85,
+            border_path: BorderPathMode::On,
             invert: true,
             working_resolution: 256,
             downsample_filter: DownsampleFilter::Triangle,
