@@ -225,7 +225,7 @@ impl Default for EdgeChannels {
 /// Fields are currently public with no construction-time validation.
 /// A validated constructor (`try_new`) or builder should be added to
 /// enforce invariants such as `blur_sigma > 0`, `canny_low <= canny_high`,
-/// `canny_low >= 1.0`, `0.0 <= mask_diameter <= 1.0`, and
+/// `canny_low >= 1.0`, `0.0 <= mask_diameter <= 1.5`, and
 /// `simplify_tolerance >= 0.0`.
 /// Invalid values would return [`PipelineError::InvalidConfig`].
 /// See [open-questions: PipelineConfig validation](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
@@ -271,8 +271,10 @@ pub struct PipelineConfig {
     /// Useful for round sand tables.
     pub circular_mask: bool,
 
-    /// Mask diameter as a fraction of image width (0.0 to 1.0).
-    /// Only used when `circular_mask` is `true`.
+    /// Mask diameter as a fraction of image diagonal (0.0 to 1.5).
+    /// At 1.0 the circle circumscribes the full image (all four corners
+    /// lie on or inside the circle). Only used when `circular_mask` is
+    /// `true`.
     pub mask_diameter: f64,
 
     /// Whether to invert the binary edge map before contour tracing.
@@ -323,8 +325,8 @@ impl PipelineConfig {
     pub const DEFAULT_SIMPLIFY_TOLERANCE: f64 = 2.0;
     /// Default circular mask enabled state.
     pub const DEFAULT_CIRCULAR_MASK: bool = true;
-    /// Default mask diameter as a fraction of image width.
-    pub const DEFAULT_MASK_DIAMETER: f64 = 1.0;
+    /// Default mask diameter as a fraction of image diagonal.
+    pub const DEFAULT_MASK_DIAMETER: f64 = 0.75;
     /// Default edge map inversion state.
     pub const DEFAULT_INVERT: bool = false;
     /// Default working resolution (max dimension after downsampling).
@@ -356,7 +358,7 @@ impl PipelineConfig {
     /// - `canny_high <= canny_max`
     /// - `canny_max <= edge::max_gradient_magnitude()`
     /// - `simplify_tolerance >= 0`
-    /// - `mask_diameter` in `[0.0, 1.0]`
+    /// - `mask_diameter` in `[0.0, 1.5]`
     /// - `working_resolution > 0`
     /// - `mst_neighbours > 0`
     ///
@@ -403,9 +405,9 @@ impl PipelineConfig {
                 self.simplify_tolerance,
             )));
         }
-        if !(0.0..=1.0).contains(&self.mask_diameter) {
+        if !(0.0..=1.5).contains(&self.mask_diameter) {
             return Err(PipelineError::InvalidConfig(format!(
-                "mask_diameter must be in [0.0, 1.0], got {}",
+                "mask_diameter must be in [0.0, 1.5], got {}",
                 self.mask_diameter,
             )));
         }
@@ -841,7 +843,7 @@ mod tests {
         assert!((config.simplify_tolerance - 2.0).abs() < f64::EPSILON);
         assert_eq!(config.path_joiner, PathJoinerKind::Mst);
         assert!(config.circular_mask);
-        assert!((config.mask_diameter - 1.0).abs() < f64::EPSILON);
+        assert!((config.mask_diameter - 0.75).abs() < f64::EPSILON);
         assert!(!config.invert);
         assert_eq!(config.working_resolution, 256);
         assert_eq!(config.downsample_filter, DownsampleFilter::Disabled);
@@ -953,6 +955,59 @@ mod tests {
         assert!(
             matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("edge channel")),
             "expected InvalidConfig about edge channels, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn validate_accepts_mask_diameter_zero() {
+        let config = PipelineConfig {
+            mask_diameter: 0.0,
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_mask_diameter_max() {
+        let config = PipelineConfig {
+            mask_diameter: 1.5,
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_mask_diameter_above_one() {
+        let config = PipelineConfig {
+            mask_diameter: 1.3,
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_mask_diameter_negative() {
+        let config = PipelineConfig {
+            mask_diameter: -0.01,
+            ..PipelineConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_diameter")),
+            "expected InvalidConfig about mask_diameter, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mask_diameter_above_max() {
+        let config = PipelineConfig {
+            mask_diameter: 1.51,
+            ..PipelineConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_diameter")),
+            "expected InvalidConfig about mask_diameter, got {err:?}",
         );
     }
 

@@ -410,10 +410,10 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         {render_slider(
                             "mask_diameter",
                             "Mask Diameter",
-                            desc("Circle diameter as a fraction of image size."),
+                            desc("Circle diameter as a fraction of image diagonal."),
                             diameter,
                             0.1,
-                            1.0,
+                            1.5,
                             0.01,
                             2,
                             move |v: f64| {
