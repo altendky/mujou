@@ -157,7 +157,7 @@ mod tests {
                 "StageId::{stage} short_label() must not be empty"
             );
             assert!(
-                short.len() <= 4,
+                short.chars().count() <= 4,
                 "StageId::{stage} short_label() {short:?} exceeds 4 characters"
             );
         }
