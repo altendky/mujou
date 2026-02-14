@@ -261,19 +261,6 @@ fn app() -> Element {
                     }
                 }
 
-                // If this progress message indicates a cached stage,
-                // mark the corresponding UI stage as completed+cached
-                // immediately (it won't go through a Running phase).
-                if cached
-                    && let Some(ui_stage) = StageId::from_pipeline_index(backend_index)
-                    && let Some(ui_idx) = entries.iter().position(|e| e.stage == ui_stage)
-                    && entries[ui_idx].status == StageStatus::Pending
-                {
-                    entries[ui_idx].status = StageStatus::Completed;
-                    entries[ui_idx].elapsed_ms = 0.0;
-                    entries[ui_idx].cached = true;
-                }
-
                 // Start the next UI stage running. The upcoming work
                 // is the advance FROM backend_index, which produces
                 // backend_index + 1. Attribute that work to the UI
@@ -288,6 +275,22 @@ fn app() -> Element {
                 } else {
                     // Last pipeline stage — no more work to attribute.
                     current_stage_start.set(None);
+                }
+
+                // Apply the cached flag last so it overrides any
+                // transient Running state set above. Multiple backend
+                // indices can map to the same UI stage (e.g. 0 and 1
+                // both map to Original), so a cached stage may have
+                // been briefly set to Running by the "start next"
+                // block and needs to be stamped back to
+                // Completed+cached.
+                if cached
+                    && let Some(ui_stage) = StageId::from_pipeline_index(backend_index)
+                    && let Some(ui_idx) = entries.iter().position(|e| e.stage == ui_stage)
+                {
+                    entries[ui_idx].status = StageStatus::Completed;
+                    entries[ui_idx].elapsed_ms = 0.0;
+                    entries[ui_idx].cached = true;
                 }
 
                 stage_progress.set(entries);
