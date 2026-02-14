@@ -197,9 +197,10 @@ const MAX_NN_ITERATIONS: usize = 200;
 /// for R-tree nearest-neighbor queries during MST candidate generation.
 ///
 /// Lower values produce more samples and better MST quality at the cost
-/// of more R-tree queries.  At the default `working_resolution` of 256
-/// this yields ~51 samples across the longest axis, matching the
-/// previous hard-coded divisor of 50.
+/// of more R-tree queries.  At the default `working_resolution` of 1000
+/// this yields ~200 samples across the longest axis.  (The spacing was
+/// originally chosen to give ~51 samples at the former default of 256,
+/// matching the previous hard-coded divisor of 50.)
 const SAMPLE_SPACING_PIXELS: f64 = 5.0;
 
 /// Build an MST connecting all polylines using Kruskal's algorithm with
