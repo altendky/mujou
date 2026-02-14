@@ -127,6 +127,20 @@ pub struct Dimensions {
     pub height: u32,
 }
 
+impl Dimensions {
+    /// Compute the mask circle radius in pixels for a given `mask_diameter`.
+    ///
+    /// The diameter is expressed as a fraction of the image diagonal
+    /// (`sqrt(width² + height²)`), so at 1.0 the circle circumscribes the
+    /// entire image.
+    #[must_use]
+    pub fn mask_radius(self, mask_diameter: f64) -> f64 {
+        let w = f64::from(self.width);
+        let h = f64::from(self.height);
+        w.hypot(h) * mask_diameter / 2.0
+    }
+}
+
 /// Channels to use for edge detection.
 ///
 /// Canny edge detection is run independently on each enabled channel.
