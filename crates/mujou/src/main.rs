@@ -234,29 +234,18 @@ fn app() -> Element {
             });
 
             // Progress callback — invoked by the worker wrapper each
-            // time a pipeline stage transition occurs. Maps backend
-            // stage indices to UI stages and updates the progress state.
+            // time a pipeline stage transition occurs.
+            //
+            // `progress(N)` means "I just arrived at state N" — the
+            // advance that *produced* state N is complete. That work
+            // belongs to the UI stage for index N. The *next* piece of
+            // work (advance FROM state N) will produce state N+1, so
+            // we start the UI stage for N+1 running.
             let on_progress = move |backend_index: usize| {
                 let now = js_sys::Date::now();
-                let Some(ui_stage) = StageId::from_pipeline_index(backend_index) else {
-                    return;
-                };
                 let mut entries = *stage_progress.peek();
 
-                // Find the UI stage index for the newly reached stage.
-                let Some(ui_idx) = entries.iter().position(|e| e.stage == ui_stage) else {
-                    return;
-                };
-
-                // If this stage is already running (backend stages 0
-                // and 1 both map to Original), skip — preserving the
-                // original start time so the elapsed captures the full
-                // span of the UI stage (source + decode).
-                if entries[ui_idx].status == StageStatus::Running {
-                    return;
-                }
-
-                // Mark any previously running stage as completed.
+                // Complete the currently-running stage (if any).
                 if let Some(stage_start) = *current_stage_start.peek() {
                     for entry in &mut entries {
                         if entry.status == StageStatus::Running {
@@ -266,10 +255,21 @@ fn app() -> Element {
                     }
                 }
 
-                // Mark the new stage as running.
-                entries[ui_idx].status = StageStatus::Running;
-                entries[ui_idx].elapsed_ms = 0.0;
-                current_stage_start.set(Some(now));
+                // Start the next UI stage running. The upcoming work
+                // is the advance FROM backend_index, which produces
+                // backend_index + 1. Attribute that work to the UI
+                // stage for backend_index + 1.
+                if let Some(next_ui_stage) = StageId::from_pipeline_index(backend_index + 1) {
+                    if let Some(ui_idx) = entries.iter().position(|e| e.stage == next_ui_stage) {
+                        entries[ui_idx].status = StageStatus::Running;
+                        entries[ui_idx].elapsed_ms = 0.0;
+                        current_stage_start.set(Some(now));
+                    }
+                } else {
+                    // Last pipeline stage — no more work to attribute.
+                    current_stage_start.set(None);
+                }
+
                 stage_progress.set(entries);
             };
 
