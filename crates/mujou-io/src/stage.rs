@@ -60,6 +60,31 @@ impl StageId {
         }
     }
 
+    /// Map a pipeline-internal stage index to the corresponding UI stage.
+    ///
+    /// The pipeline has 9 internal stages (indices 0–8) while the UI
+    /// presents 8 stages. Backend stages 0 (`Pending`/source) and 1
+    /// (`Decoded`/decode) both map to [`StageId::Original`] because
+    /// decode is the operation that produces the original preview image.
+    ///
+    /// Returns `None` for out-of-range indices.
+    ///
+    /// See also: <https://github.com/altendky/mujou/issues/122>
+    #[must_use]
+    pub const fn from_pipeline_index(index: usize) -> Option<Self> {
+        match index {
+            0 | 1 => Some(Self::Original), // Pending + Decoded
+            2 => Some(Self::Downsampled),  // Downsampled
+            3 => Some(Self::Blur),         // Blurred
+            4 => Some(Self::Edges),        // EdgesDetected
+            5 => Some(Self::Contours),     // ContoursTraced
+            6 => Some(Self::Simplified),   // Simplified
+            7 => Some(Self::Masked),       // Masked
+            8 => Some(Self::Path),         // Joined
+            _ => None,
+        }
+    }
+
     /// Short abbreviation for compact mobile display.
     #[must_use]
     pub const fn abbreviation(self) -> &'static str {
@@ -98,6 +123,44 @@ mod tests {
         let mut seen = std::collections::HashSet::new();
         for stage in StageId::ALL {
             assert!(seen.insert(stage), "Duplicate stage in ALL: {stage}");
+        }
+    }
+
+    #[test]
+    fn from_pipeline_index_maps_all_backend_stages() {
+        // Backend indices 0-8 should all map to a valid StageId.
+        for i in 0..=8 {
+            assert!(
+                StageId::from_pipeline_index(i).is_some(),
+                "pipeline index {i} should map to a StageId"
+            );
+        }
+        // Out-of-range returns None.
+        assert_eq!(StageId::from_pipeline_index(9), None);
+        assert_eq!(StageId::from_pipeline_index(usize::MAX), None);
+    }
+
+    #[test]
+    fn from_pipeline_index_merges_source_and_decode() {
+        // Backend stages 0 (Pending) and 1 (Decoded) both map to Original.
+        assert_eq!(StageId::from_pipeline_index(0), Some(StageId::Original));
+        assert_eq!(StageId::from_pipeline_index(1), Some(StageId::Original));
+    }
+
+    #[test]
+    fn from_pipeline_index_covers_all_ui_stages() {
+        // Every StageId variant should be reachable from some pipeline index.
+        let mut reachable = std::collections::HashSet::new();
+        for i in 0..=8 {
+            if let Some(stage) = StageId::from_pipeline_index(i) {
+                reachable.insert(stage);
+            }
+        }
+        for stage in StageId::ALL {
+            assert!(
+                reachable.contains(&stage),
+                "StageId::{stage} is not reachable from any pipeline index"
+            );
         }
     }
 }

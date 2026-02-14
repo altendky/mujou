@@ -113,6 +113,12 @@ impl PipelineWorker {
     /// The `generation` parameter is passed through to the response so
     /// the caller can detect stale results.
     ///
+    /// The optional `on_progress` callback is invoked each time the
+    /// worker reports a stage transition. It receives the 0-based
+    /// pipeline stage index that was just reached. The caller can map
+    /// this to a [`StageId`](crate::StageId) via
+    /// [`StageId::from_pipeline_index`](crate::StageId::from_pipeline_index).
+    ///
     /// # Errors
     ///
     /// Returns a `PipelineError` if:
@@ -133,6 +139,7 @@ impl PipelineWorker {
         image_bytes: &[u8],
         config: &PipelineConfig,
         generation: f64,
+        on_progress: Option<impl FnMut(usize) + 'static>,
     ) -> Result<WorkerResult, PipelineError> {
         let config_json = serde_json::to_string(config).map_err(|e| {
             PipelineError::InvalidConfig(format!("failed to serialize config: {e}"))
@@ -176,7 +183,10 @@ impl PipelineWorker {
         let (promise, resolve, reject) = new_promise();
 
         // Set up the onmessage handler for this specific request.
+        // Progress messages (type="progress") invoke the callback;
+        // final result messages (with "ok" field) resolve the promise.
         let resolve_clone = resolve.clone();
+        let mut on_progress = on_progress;
         let onmessage = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(
             move |event: web_sys::MessageEvent| {
                 let data = event.data();
@@ -192,6 +202,28 @@ impl PipelineWorker {
                     return;
                 }
 
+                // Check if this is a progress message.
+                let msg_type = js_sys::Reflect::get(&data, &JsValue::from_str("type"))
+                    .ok()
+                    .and_then(|v| v.as_string());
+
+                if msg_type.as_deref() == Some("progress") {
+                    if let Some(ref mut cb) = on_progress {
+                        // TODO: unwrap_or(0.0) silently maps a missing/invalid
+                        // stageIndex to stage 0 (Original). Consider skipping
+                        // the callback when stageIndex is absent instead.
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let stage_index =
+                            js_sys::Reflect::get(&data, &JsValue::from_str("stageIndex"))
+                                .ok()
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(0.0) as usize;
+                        cb(stage_index);
+                    }
+                    return;
+                }
+
+                // Final result — resolve the promise.
                 let outcome = decode_response(&data);
                 *result_clone.borrow_mut() = Some(outcome);
                 resolve_clone.call0(&JsValue::NULL).ok();

@@ -23,6 +23,7 @@
 use std::cell::RefCell;
 
 use image::ImageEncoder;
+use mujou_pipeline::pipeline::STAGE_COUNT;
 use mujou_pipeline::{Dimensions, GrayImage, PipelineCache, Polyline, StagedResult};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
@@ -55,7 +56,16 @@ pub struct VectorResult {
 /// - `lightBg`, `lightFg`: `String` — hex RGB for light theme (e.g. "f5f5f5,1a1a1a")
 /// - `darkBg`, `darkFg`: `String` — hex RGB for dark theme
 ///
-/// On success the worker responds with a JS object containing:
+/// The worker responds with three types of messages, distinguished by a
+/// `type` field:
+///
+/// **Progress** (sent after each pipeline stage completes):
+/// - `type`: `"progress"`
+/// - `generation`: `f64` matching the request generation
+/// - `stageIndex`: `f64` — the 0-based index of the stage just reached
+/// - `stageCount`: `f64` — total number of pipeline stages
+///
+/// **Success** (sent once when the pipeline completes):
 /// - `generation`: `f64` matching the request generation
 /// - `ok`: `true`
 /// - `vectorJson`: `String` — JSON-serialized `VectorResult`
@@ -65,7 +75,7 @@ pub struct VectorResult {
 /// - `edgesLightPng`: `Uint8Array` — themed edge PNG (light mode)
 /// - `edgesDarkPng`: `Uint8Array` — themed edge PNG (dark mode)
 ///
-/// On error the worker responds with:
+/// **Error** (sent once on pipeline failure):
 /// - `generation`: `f64`
 /// - `ok`: `false`
 /// - `errorJson`: `String` — JSON-serialized `PipelineError`
@@ -151,8 +161,13 @@ fn handle_message(event: web_sys::MessageEvent) {
     let prev_cache = PIPELINE_CACHE.with(|c| c.borrow_mut().take());
 
     // Run the pipeline with caching — only changed stages are re-executed
-    // when the image is the same as the previous run.
-    let outcome = PipelineCache::run(prev_cache, image_bytes, config);
+    // when the image is the same as the previous run.  The on_stage
+    // callback posts per-stage progress so the main thread can update
+    // its timing display.
+    let on_stage = |index: usize| {
+        post_progress(generation, index, STAGE_COUNT);
+    };
+    let outcome = PipelineCache::run(prev_cache, image_bytes, config, &on_stage);
 
     match outcome {
         Ok((staged, new_cache)) => {
@@ -370,6 +385,42 @@ fn dilate_soft(image: &GrayImage) -> GrayImage {
         }
         image::Luma([0])
     })
+}
+
+/// Post a stage-progress message back to the main thread.
+///
+/// Sent after each `stage.advance()` call so the main thread can update
+/// the per-stage timing display. The message carries only numeric
+/// indices — the main thread maps these to UI stage labels.
+#[allow(clippy::cast_precision_loss)]
+fn post_progress(generation: f64, stage_index: usize, stage_count: usize) {
+    let msg = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("progress"),
+    );
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("generation"),
+        &JsValue::from_f64(generation),
+    );
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("stageIndex"),
+        &JsValue::from_f64(stage_index as f64),
+    );
+    // stageCount is not currently consumed by the receiver but is
+    // included for forward compatibility (e.g., a progress bar).
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("stageCount"),
+        &JsValue::from_f64(stage_count as f64),
+    );
+
+    if let Ok(global) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() {
+        let _ = global.post_message(&msg);
+    }
 }
 
 /// Post an error response back to the main thread.

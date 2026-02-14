@@ -1266,6 +1266,10 @@ impl PipelineCache {
     /// downstream dependents) are re-executed.  Otherwise a full run
     /// is performed.
     ///
+    /// `on_stage` is called with the zero-based index of each stage
+    /// as it is reached (either from cache or from actual computation).
+    /// This allows callers to report per-stage progress.
+    ///
     /// Returns the pipeline result together with an updated cache for
     /// the next invocation.
     ///
@@ -1277,6 +1281,7 @@ impl PipelineCache {
         cache: Option<Self>,
         image_bytes: Vec<u8>,
         config: PipelineConfig,
+        on_stage: &dyn Fn(usize),
     ) -> Result<(StagedResult, Self), PipelineError> {
         let image_hash = Self::hash_bytes(&image_bytes);
 
@@ -1284,12 +1289,16 @@ impl PipelineCache {
             Some(c) if c.image_hash == image_hash => {
                 let earliest = c.config.earliest_changed_stage(&config);
                 if earliest >= STAGE_COUNT {
-                    // Nothing changed — return the cached result.
+                    // Nothing changed — fire progress for all stages
+                    // and return the cached result.
+                    for i in 0..STAGE_COUNT {
+                        on_stage(i);
+                    }
                     return Ok((c.staged.clone(), Self { config, ..c }));
                 }
-                c.resume(config, earliest)
+                c.resume(config, earliest, on_stage)
             }
-            _ => Self::full_run(image_bytes, config, image_hash),
+            _ => Self::full_run(image_bytes, config, image_hash, on_stage),
         }
     }
 
@@ -1308,11 +1317,15 @@ impl PipelineCache {
         image_bytes: Vec<u8>,
         config: PipelineConfig,
         image_hash: u64,
+        on_stage: &dyn Fn(usize),
     ) -> Result<(StagedResult, Self), PipelineError> {
         let cache_config = config.clone();
 
         let pending = Pipeline::new(image_bytes, config);
+        on_stage(Pending::INDEX);
+
         let decoded = pending.decode()?;
+        on_stage(Decoded::INDEX);
 
         // Capture DynamicImage before downsample consumes it.
         let decoded_image = decoded.image.clone();
@@ -1320,15 +1333,26 @@ impl PipelineCache {
 
         let downsampled = decoded.downsample();
         let downsampled_applied = downsampled.applied;
+        on_stage(Downsampled::INDEX);
 
         let blurred = downsampled.blur();
+        on_stage(Blurred::INDEX);
+
         let edges = blurred.detect_edges();
         let pre_invert_edge_pixels = edges.pre_invert_edge_pixels;
+        on_stage(EdgesDetected::INDEX);
 
         let contours = edges.trace_contours()?;
+        on_stage(ContoursTraced::INDEX);
+
         let simplified = contours.simplify();
+        on_stage(Simplified::INDEX);
+
         let masked = simplified.mask();
+        on_stage(Masked::INDEX);
+
         let joined = masked.join();
+        on_stage(Joined::INDEX);
 
         let staged = joined.into_result();
         let cache = Self {
@@ -1350,15 +1374,25 @@ impl PipelineCache {
         self,
         new_config: PipelineConfig,
         earliest_changed: usize,
+        on_stage: &dyn Fn(usize),
     ) -> Result<(StagedResult, Self), PipelineError> {
         // Build a Stage at the predecessor of the earliest changed
         // stage, populated with cached data and the new config.
         let stage = self.build_resume_stage(&new_config, earliest_changed);
 
+        // Report progress for all cached (skipped) stages up to and
+        // including the resume point.
+        for i in 0..stage.index() {
+            on_stage(i);
+        }
+
         // Run the remaining stages to completion.
         let mut stage = stage;
         let mut downsampled_applied = self.downsampled_applied;
         let mut pre_invert_edge_pixels = self.pre_invert_edge_pixels;
+
+        // Report the resume stage itself.
+        on_stage(stage.index());
 
         loop {
             // Capture diagnostic fields from stages we're about to
@@ -1371,7 +1405,10 @@ impl PipelineCache {
             }
 
             match stage.advance()? {
-                Advance::Next(next) => stage = next,
+                Advance::Next(next) => {
+                    on_stage(next.index());
+                    stage = next;
+                }
                 Advance::Complete(done) => {
                     stage = done;
                     break;
@@ -2033,6 +2070,9 @@ mod tests {
 
     // ─────────── PipelineCache tests ─────────────────────────────
 
+    /// No-op progress callback for tests.
+    fn noop(_: usize) {}
+
     /// Helper: assert two `StagedResult`s are identical.
     fn assert_staged_eq(a: &StagedResult, b: &StagedResult) {
         assert_eq!(a.original, b.original, "original mismatch");
@@ -2052,7 +2092,7 @@ mod tests {
         let config = PipelineConfig::default();
 
         let expected = crate::process_staged(&png, &config).unwrap();
-        let (actual, _cache) = PipelineCache::run(None, png, config).unwrap();
+        let (actual, _cache) = PipelineCache::run(None, png, config, &noop).unwrap();
 
         assert_staged_eq(&expected, &actual);
     }
@@ -2062,8 +2102,8 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig::default();
 
-        let (first, cache) = PipelineCache::run(None, png.clone(), config.clone()).unwrap();
-        let (second, _cache2) = PipelineCache::run(Some(cache), png, config).unwrap();
+        let (first, cache) = PipelineCache::run(None, png.clone(), config.clone(), &noop).unwrap();
+        let (second, _cache2) = PipelineCache::run(Some(cache), png, config, &noop).unwrap();
 
         assert_staged_eq(&first, &second);
     }
@@ -2079,9 +2119,9 @@ mod tests {
             ..PipelineConfig::default()
         };
 
-        let (_first, cache) = PipelineCache::run(None, png.clone(), config1).unwrap();
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
         let (cached_result, _cache2) =
-            PipelineCache::run(Some(cache), png.clone(), config2.clone()).unwrap();
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
 
         // Verify against a fresh full run with config2.
         let expected = crate::process_staged(&png, &config2).unwrap();
@@ -2099,9 +2139,9 @@ mod tests {
             ..PipelineConfig::default()
         };
 
-        let (_first, cache) = PipelineCache::run(None, png.clone(), config1).unwrap();
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
         let (cached_result, _cache2) =
-            PipelineCache::run(Some(cache), png.clone(), config2.clone()).unwrap();
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
 
         let expected = crate::process_staged(&png, &config2).unwrap();
         assert_staged_eq(&expected, &cached_result);
@@ -2117,9 +2157,9 @@ mod tests {
             ..PipelineConfig::default()
         };
 
-        let (_first, cache) = PipelineCache::run(None, png.clone(), config1).unwrap();
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
         let (cached_result, _cache2) =
-            PipelineCache::run(Some(cache), png.clone(), config2.clone()).unwrap();
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
 
         let expected = crate::process_staged(&png, &config2).unwrap();
         assert_staged_eq(&expected, &cached_result);
@@ -2135,9 +2175,9 @@ mod tests {
             ..PipelineConfig::default()
         };
 
-        let (_first, cache) = PipelineCache::run(None, png.clone(), config1).unwrap();
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
         let (cached_result, _cache2) =
-            PipelineCache::run(Some(cache), png.clone(), config2.clone()).unwrap();
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
 
         let expected = crate::process_staged(&png, &config2).unwrap();
         assert_staged_eq(&expected, &cached_result);
@@ -2149,9 +2189,9 @@ mod tests {
         let png2 = sharp_edge_png(60, 40);
         let config = PipelineConfig::default();
 
-        let (_first, cache) = PipelineCache::run(None, png1, config.clone()).unwrap();
+        let (_first, cache) = PipelineCache::run(None, png1, config.clone(), &noop).unwrap();
         let (result, _cache2) =
-            PipelineCache::run(Some(cache), png2.clone(), config.clone()).unwrap();
+            PipelineCache::run(Some(cache), png2.clone(), config.clone(), &noop).unwrap();
 
         let expected = crate::process_staged(&png2, &config).unwrap();
         assert_staged_eq(&expected, &result);
@@ -2162,7 +2202,8 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig::default();
 
-        let (result, _cache) = PipelineCache::run(None, png.clone(), config.clone()).unwrap();
+        let (result, _cache) =
+            PipelineCache::run(None, png.clone(), config.clone(), &noop).unwrap();
 
         let expected = crate::process_staged(&png, &config).unwrap();
         assert_staged_eq(&expected, &result);
@@ -2178,9 +2219,9 @@ mod tests {
             ..PipelineConfig::default()
         };
 
-        let (_first, cache) = PipelineCache::run(None, png.clone(), config1).unwrap();
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
         let (cached_result, _cache2) =
-            PipelineCache::run(Some(cache), png.clone(), config2.clone()).unwrap();
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
 
         let expected = crate::process_staged(&png, &config2).unwrap();
         assert_staged_eq(&expected, &cached_result);
@@ -2194,9 +2235,9 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig::default();
 
-        let (first, cache) = PipelineCache::run(None, png.clone(), config.clone()).unwrap();
+        let (first, cache) = PipelineCache::run(None, png.clone(), config.clone(), &noop).unwrap();
         // Same contour_tracer — should be a cache hit.
-        let (second, _cache2) = PipelineCache::run(Some(cache), png, config).unwrap();
+        let (second, _cache2) = PipelineCache::run(Some(cache), png, config, &noop).unwrap();
         assert_staged_eq(&first, &second);
     }
 
@@ -2210,8 +2251,8 @@ mod tests {
             ..PipelineConfig::default()
         };
 
-        let (first, cache) = PipelineCache::run(None, png.clone(), config1).unwrap();
-        let (second, _cache2) = PipelineCache::run(Some(cache), png, config2).unwrap();
+        let (first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (second, _cache2) = PipelineCache::run(Some(cache), png, config2, &noop).unwrap();
 
         assert_staged_eq(&first, &second);
     }
@@ -2232,9 +2273,10 @@ mod tests {
             ..PipelineConfig::default()
         };
 
-        let (_r1, cache1) = PipelineCache::run(None, png.clone(), config1).unwrap();
-        let (_r2, cache2) = PipelineCache::run(Some(cache1), png.clone(), config2).unwrap();
-        let (r3, _cache3) = PipelineCache::run(Some(cache2), png.clone(), config3.clone()).unwrap();
+        let (_r1, cache1) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (_r2, cache2) = PipelineCache::run(Some(cache1), png.clone(), config2, &noop).unwrap();
+        let (r3, _cache3) =
+            PipelineCache::run(Some(cache2), png.clone(), config3.clone(), &noop).unwrap();
 
         let expected = crate::process_staged(&png, &config3).unwrap();
         assert_staged_eq(&expected, &r3);
