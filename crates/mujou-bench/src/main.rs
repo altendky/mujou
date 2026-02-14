@@ -322,7 +322,6 @@ fn print_multi_run_summary(all_diagnostics: &[PipelineDiagnostics]) {
     let stage_extractors: &[(&str, StageExtractor)] = &[
         ("Decode", |d| Some(d.decode.duration)),
         ("Downsample", |d| Some(d.downsample.duration)),
-        ("Grayscale", |d| Some(d.grayscale.duration)),
         ("Blur", |d| Some(d.blur.duration)),
         ("Edge Detection", |d| Some(d.edge_detection.duration)),
         ("Invert", |d| d.invert.as_ref().map(|s| s.duration)),

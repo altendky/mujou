@@ -29,7 +29,6 @@ pub struct StageControlsProps {
 ///
 /// Each stage shows only its relevant controls:
 /// - **Original**: no controls
-/// - **Grayscale**: no controls
 /// - **Blur**: blur sigma slider
 /// - **Edges**: Canny low/high sliders, invert toggle
 /// - **Contours**: contour tracer select
@@ -48,7 +47,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
         |text: &'static str| -> &'static str { if props.show_descriptions { text } else { "" } };
 
     match props.stage {
-        StageId::Original | StageId::Grayscale => {
+        StageId::Original => {
             rsx! {
                 p { class: "text-sm text-[var(--text-secondary)] italic",
                     "No adjustable parameters for this stage."
@@ -145,10 +144,16 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             let canny_high = config.canny_high;
             let canny_max = config.canny_max;
             let invert = config.invert;
+            let channels = config.edge_channels.clone();
             let config_low = config.clone();
             let config_high = config.clone();
             let config_max = config.clone();
             let config_invert = config.clone();
+            let config_lum = config.clone();
+            let config_red = config.clone();
+            let config_green = config.clone();
+            let config_blue = config.clone();
+            let config_sat = config.clone();
             let theoretical_max = f64::from(max_gradient_magnitude());
             rsx! {
                 div { class: "space-y-2",
@@ -217,6 +222,67 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             let mut c = config_invert.clone();
                             c.invert = v;
                             on_change.call(c);
+                        },
+                    )}
+
+                    // ── Edge channel toggles ─────────────────────────
+                    {render_channel_heading(
+                        "Edge Channels",
+                        desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined."),
+                    )}
+                    {render_channel_toggle(
+                        "ch_luminance",
+                        "Luminance",
+                        channels.luminance,
+                        channels.count() <= 1 && channels.luminance,
+                        move |v: bool| {
+                            let mut c = config_lum.clone();
+                            c.edge_channels.luminance = v;
+                            if c.edge_channels.any_enabled() { on_change.call(c); }
+                        },
+                    )}
+                    {render_channel_toggle(
+                        "ch_red",
+                        "Red",
+                        channels.red,
+                        channels.count() <= 1 && channels.red,
+                        move |v: bool| {
+                            let mut c = config_red.clone();
+                            c.edge_channels.red = v;
+                            if c.edge_channels.any_enabled() { on_change.call(c); }
+                        },
+                    )}
+                    {render_channel_toggle(
+                        "ch_green",
+                        "Green",
+                        channels.green,
+                        channels.count() <= 1 && channels.green,
+                        move |v: bool| {
+                            let mut c = config_green.clone();
+                            c.edge_channels.green = v;
+                            if c.edge_channels.any_enabled() { on_change.call(c); }
+                        },
+                    )}
+                    {render_channel_toggle(
+                        "ch_blue",
+                        "Blue",
+                        channels.blue,
+                        channels.count() <= 1 && channels.blue,
+                        move |v: bool| {
+                            let mut c = config_blue.clone();
+                            c.edge_channels.blue = v;
+                            if c.edge_channels.any_enabled() { on_change.call(c); }
+                        },
+                    )}
+                    {render_channel_toggle(
+                        "ch_saturation",
+                        "Saturation",
+                        channels.saturation,
+                        channels.count() <= 1 && channels.saturation,
+                        move |v: bool| {
+                            let mut c = config_sat.clone();
+                            c.edge_channels.saturation = v;
+                            if c.edge_channels.any_enabled() { on_change.call(c); }
                         },
                     )}
                 }
@@ -451,6 +517,57 @@ fn render_toggle(
             }
             if !description.is_empty() {
                 p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
+            }
+        }
+    }
+}
+
+/// Render a section heading for the edge channel toggles.
+fn render_channel_heading(label: &str, description: &str) -> Element {
+    let label = label.to_string();
+    let description = description.to_string();
+
+    rsx! {
+        div { class: "flex flex-col gap-1 pt-2 border-t border-[var(--border)]",
+            span { class: "text-sm text-[var(--text-heading)] font-medium",
+                "{label}"
+            }
+            if !description.is_empty() {
+                p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
+            }
+        }
+    }
+}
+
+/// Render a compact channel toggle checkbox.
+///
+/// When `disabled` is `true` the checkbox is shown as disabled (used to
+/// prevent unchecking the last enabled channel).
+fn render_channel_toggle(
+    id: &str,
+    label: &str,
+    checked: bool,
+    disabled: bool,
+    on_change: impl Fn(bool) + 'static,
+) -> Element {
+    let id = id.to_string();
+    let label = label.to_string();
+
+    rsx! {
+        div { class: "flex items-center gap-2",
+            input {
+                r#type: "checkbox",
+                id: "{id}",
+                checked: checked,
+                disabled: disabled,
+                class: "w-4 h-4 accent-[var(--btn-primary)]",
+                onchange: move |e| {
+                    on_change(e.checked());
+                },
+            }
+            label { r#for: "{id}",
+                class: "text-sm text-[var(--text)]",
+                "{label}"
             }
         }
     }

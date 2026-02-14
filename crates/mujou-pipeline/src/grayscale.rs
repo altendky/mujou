@@ -35,8 +35,8 @@ pub fn to_rgba(img: &DynamicImage) -> RgbaImage {
 
 /// Convert a decoded image to grayscale.
 ///
-/// The standard luminance formula is used for RGB-to-gray
-/// conversion: `0.299*R + 0.587*G + 0.114*B`.
+/// Uses sRGB/Rec.709 luminance via the `image` crate's `to_luma8()`:
+/// `0.2126*R + 0.7152*G + 0.0722*B`.
 #[must_use]
 pub fn to_grayscale(img: &DynamicImage) -> GrayImage {
     img.to_luma8()
@@ -45,8 +45,7 @@ pub fn to_grayscale(img: &DynamicImage) -> GrayImage {
 /// Decode raw image bytes and convert to grayscale.
 ///
 /// Supports PNG, JPEG, BMP, and WebP formats (whatever the `image` crate
-/// can decode). The standard luminance formula is used for RGB-to-gray
-/// conversion: `0.299*R + 0.587*G + 0.114*B`.
+/// can decode). Uses sRGB/Rec.709 luminance: `0.2126*R + 0.7152*G + 0.0722*B`.
 ///
 /// # Errors
 ///

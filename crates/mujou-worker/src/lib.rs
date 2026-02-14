@@ -42,8 +42,7 @@ pub struct VectorResult {
 /// - `vectorJson`: `String` — JSON-serialized `VectorResult`
 /// - `originalPng`: `Uint8Array` — pre-encoded RGBA PNG
 /// - `downsampledPng`: `Uint8Array` — pre-encoded RGBA PNG (working resolution)
-/// - `grayscalePng`: `Uint8Array` — pre-encoded grayscale PNG
-/// - `blurredPng`: `Uint8Array` — pre-encoded grayscale PNG
+/// - `blurredPng`: `Uint8Array` — pre-encoded RGBA PNG (blurred)
 /// - `edgesLightPng`: `Uint8Array` — themed edge PNG (light mode)
 /// - `edgesDarkPng`: `Uint8Array` — themed edge PNG (dark mode)
 ///
@@ -230,8 +229,7 @@ fn post_success_response(
     }
     let original_png = encode_or_error!(encode_rgba_png(&staged.original));
     let downsampled_png = encode_or_error!(encode_rgba_png(&staged.downsampled));
-    let grayscale_png = encode_or_error!(encode_gray_png(&staged.grayscale));
-    let blurred_png = encode_or_error!(encode_gray_png(&staged.blurred));
+    let blurred_png = encode_or_error!(encode_rgba_png(&staged.blurred));
     // Dilate once — both themes use the same dilated edge image.
     let dilated_edges = dilate_soft(&staged.edges);
     let edges_light_png = encode_themed_edge_png(&dilated_edges, light_bg, light_fg);
@@ -257,10 +255,6 @@ fn post_success_response(
     set(
         "downsampledPng",
         &js_sys::Uint8Array::from(downsampled_png.as_slice()),
-    );
-    set(
-        "grayscalePng",
-        &js_sys::Uint8Array::from(grayscale_png.as_slice()),
     );
     set(
         "blurredPng",
@@ -295,21 +289,6 @@ fn encode_rgba_png(image: &mujou_pipeline::RgbaImage) -> Result<Vec<u8>, String>
             image::ExtendedColorType::Rgba8,
         )
         .map_err(|e| format!("RGBA PNG encode failed: {e}"))?;
-    Ok(buf)
-}
-
-/// Encode a grayscale image as PNG bytes.
-fn encode_gray_png(image: &GrayImage) -> Result<Vec<u8>, String> {
-    let mut buf = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new(&mut buf);
-    encoder
-        .write_image(
-            image.as_raw(),
-            image.width(),
-            image.height(),
-            image::ExtendedColorType::L8,
-        )
-        .map_err(|e| format!("grayscale PNG encode failed: {e}"))?;
     Ok(buf)
 }
 

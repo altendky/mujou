@@ -1,7 +1,7 @@
 //! mujou-pipeline: Pure image processing pipeline (sans-IO).
 //!
 //! Converts raster images into vector polylines through:
-//! grayscale -> blur -> edge detection -> contour tracing ->
+//! blur -> edge detection -> contour tracing ->
 //! simplification -> optional mask -> ordering + joining.
 //!
 //! This crate has **no I/O dependencies** -- it operates on in-memory
@@ -30,8 +30,8 @@ pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
 pub use pipeline::Pipeline;
 pub use types::{
-    Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, ProcessResult,
-    RgbaImage, StagedResult,
+    Dimensions, EdgeChannels, GrayImage, PipelineConfig, PipelineError, Point, Polyline,
+    ProcessResult, RgbaImage, StagedResult,
 };
 
 /// Run the full image processing pipeline, preserving all intermediate
@@ -45,15 +45,14 @@ pub use types::{
 ///
 /// 1. Decode image
 /// 2. Downsample to working resolution
-/// 3. Convert to grayscale
-/// 4. Gaussian blur (noise reduction)
-/// 5. Canny edge detection
-/// 6. Optional edge map inversion
-/// 7. Contour tracing (pluggable strategy)
-/// 8. Path simplification (Ramer-Douglas-Peucker)
-/// 9. Optional circular mask
-/// 10. Path ordering + joining into single continuous path (pluggable strategy;
-///     each joiner handles its own ordering internally)
+/// 3. Gaussian blur (RGBA, preserves color for UI preview)
+/// 4. Canny edge detection
+/// 5. Optional edge map inversion
+/// 6. Contour tracing (pluggable strategy)
+/// 7. Path simplification (Ramer-Douglas-Peucker)
+/// 8. Optional circular mask
+/// 9. Path ordering + joining into single continuous path (pluggable strategy;
+///    each joiner handles its own ordering internally)
 ///
 /// # Errors
 ///
@@ -267,8 +266,6 @@ mod tests {
         assert_eq!(staged.original.height(), 40);
 
         // Raster stages have correct dimensions.
-        assert_eq!(staged.grayscale.width(), 40);
-        assert_eq!(staged.grayscale.height(), 40);
         assert_eq!(staged.blurred.width(), 40);
         assert_eq!(staged.blurred.height(), 40);
         assert_eq!(staged.edges.width(), 40);

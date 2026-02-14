@@ -103,7 +103,6 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
         StageId::Downsampled => {
             render_img_thumb(result.downsampled_url.url(), "Downsampled thumbnail")
         }
-        StageId::Grayscale => render_img_thumb(result.grayscale_url.url(), "Grayscale thumbnail"),
         StageId::Blur => render_img_thumb(result.blur_url.url(), "Blur thumbnail"),
 
         StageId::Edges => {
