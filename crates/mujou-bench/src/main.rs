@@ -231,8 +231,21 @@ fn main() -> ExitCode {
                 if run == 0
                     && let Some(ref svg_path) = cli.svg
                 {
-                    let svg =
-                        mujou_export::to_svg(&[staged.final_polyline().clone()], staged.dimensions);
+                    let title = cli
+                        .image_path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("bench");
+                    let desc = format!("{config:#?}");
+                    let metadata = mujou_export::SvgMetadata {
+                        title: Some(title),
+                        description: Some(&desc),
+                    };
+                    let svg = mujou_export::to_svg(
+                        &[staged.final_polyline().clone()],
+                        staged.dimensions,
+                        &metadata,
+                    );
                     match std::fs::write(svg_path, &svg) {
                         Ok(()) => {
                             eprintln!(

@@ -14,6 +14,9 @@ pub struct ExportPanelProps {
     result: Option<Rc<WorkerResult>>,
     /// Base filename (without extension) for downloads.
     filename: String,
+    /// Pre-formatted description of pipeline parameters for SVG metadata.
+    /// Embedded in the `<desc>` element so exported files are distinguishable.
+    config_description: String,
     /// Controls visibility of the export popup.
     show: Signal<bool>,
 }
@@ -25,8 +28,27 @@ impl PartialEq for ExportPanelProps {
             (None, None) => true,
             _ => false,
         };
-        results_eq && self.filename == other.filename && self.show == other.show
+        results_eq
+            && self.filename == other.filename
+            && self.config_description == other.config_description
+            && self.show == other.show
     }
+}
+
+/// Return the current local time formatted as `YYYY-MM-DD_HH-MM-SS`.
+///
+/// Uses `js_sys::Date` so this works in the WASM environment.
+fn now_timestamp() -> String {
+    let d = js_sys::Date::new_0();
+    format!(
+        "{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
+        d.get_full_year(),
+        d.get_month() + 1, // JS months are 0-indexed
+        d.get_date(),
+        d.get_hours(),
+        d.get_minutes(),
+        d.get_seconds(),
+    )
 }
 
 /// Export popup with format checkboxes and a download button.
@@ -59,12 +81,23 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
     let handle_download = {
         let result = props.result.clone();
         let filename = props.filename;
+        let config_description = props.config_description;
         move |_| {
             if let Some(ref res) = result {
                 if svg_selected() {
+                    let timestamp = now_timestamp();
+                    let description = format!("{config_description}\nExported: {timestamp}");
+                    let metadata = mujou_export::SvgMetadata {
+                        title: Some(&filename),
+                        description: Some(&description),
+                    };
                     let polyline = res.final_polyline();
-                    let svg = mujou_export::to_svg(std::slice::from_ref(polyline), res.dimensions);
-                    let download_name = format!("{filename}.svg");
+                    let svg = mujou_export::to_svg(
+                        std::slice::from_ref(polyline),
+                        res.dimensions,
+                        &metadata,
+                    );
+                    let download_name = format!("{filename}_{timestamp}.svg");
                     if let Err(e) =
                         download::trigger_download(&svg, &download_name, "image/svg+xml")
                     {

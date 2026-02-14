@@ -4,11 +4,55 @@
 //! Each polyline becomes a separate `<path>` element using `M` (move to)
 //! and `L` (line to) commands.
 //!
+//! Optional [`SvgMetadata`] embeds `<title>` and `<desc>` elements for
+//! accessibility and to help file managers identify exported files.
+//!
 //! This is a pure function with no I/O -- it returns a `String`.
 
 use std::fmt::Write;
 
 use mujou_pipeline::{Dimensions, Polyline};
+
+/// Metadata to embed in the SVG document.
+///
+/// Both fields are optional.  When present, a `<title>` and/or `<desc>`
+/// element is emitted immediately after the opening `<svg>` tag.  These
+/// are standard SVG accessibility elements and are surfaced by some file
+/// managers and screen readers.
+///
+/// Text values are XML-escaped automatically (see [`xml_escape`]).
+#[derive(Debug, Clone, Default)]
+pub struct SvgMetadata<'a> {
+    /// Document title — emitted as `<title>`.
+    ///
+    /// Typically the source image filename (without extension).
+    pub title: Option<&'a str>,
+
+    /// Document description — emitted as `<desc>`.
+    ///
+    /// Typically contains pipeline parameters and a timestamp so
+    /// exported files are distinguishable.
+    pub description: Option<&'a str>,
+}
+
+/// Escape the five XML special characters for safe embedding in element
+/// text content and attribute values.
+///
+/// Handles `&` (must be first), `<`, `>`, `"`, and `'`.
+fn xml_escape(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
 
 /// Serialize polylines into an SVG document string.
 ///
@@ -21,23 +65,36 @@ use mujou_pipeline::{Dimensions, Polyline};
 ///
 /// Coordinates are formatted to 1 decimal place (0.1 px precision).
 ///
+/// If [`SvgMetadata::title`] or [`SvgMetadata::description`] is
+/// provided, the corresponding `<title>` / `<desc>` element is emitted
+/// after the opening `<svg>` tag.
+///
 /// # Examples
 ///
 /// ```
 /// use mujou_pipeline::{Dimensions, Point, Polyline};
-/// use mujou_export::to_svg;
+/// use mujou_export::{SvgMetadata, to_svg};
 ///
 /// let polylines = vec![
 ///     Polyline::new(vec![Point::new(10.0, 15.0), Point::new(12.5, 18.3)]),
 /// ];
 /// let dims = Dimensions { width: 800, height: 600 };
-/// let svg = to_svg(&polylines, dims);
+/// let metadata = SvgMetadata {
+///     title: Some("cherry-blossoms"),
+///     description: Some("Exported by mujou"),
+/// };
+/// let svg = to_svg(&polylines, dims, &metadata);
 /// assert!(svg.contains("width=\"800\" height=\"600\""));
 /// assert!(svg.contains("viewBox=\"0 0 800 600\""));
+/// assert!(svg.contains("<title>cherry-blossoms</title>"));
 /// assert!(svg.contains("M 10.0 15.0 L 12.5 18.3"));
 /// ```
 #[must_use]
-pub fn to_svg(polylines: &[Polyline], dimensions: Dimensions) -> String {
+pub fn to_svg(
+    polylines: &[Polyline],
+    dimensions: Dimensions,
+    metadata: &SvgMetadata<'_>,
+) -> String {
     let mut out = String::new();
 
     // XML declaration
@@ -49,6 +106,16 @@ pub fn to_svg(polylines: &[Polyline], dimensions: Dimensions) -> String {
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
         dimensions.width, dimensions.height, dimensions.width, dimensions.height,
     );
+
+    // Optional <title> element
+    if let Some(title) = metadata.title {
+        let _ = writeln!(out, "  <title>{}</title>", xml_escape(title));
+    }
+
+    // Optional <desc> element
+    if let Some(description) = metadata.description {
+        let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
+    }
 
     // One <path> per polyline (skip polylines with fewer than 2 points)
     for polyline in polylines {
@@ -90,11 +157,16 @@ mod tests {
         Dimensions { width, height }
     }
 
+    /// Shorthand: no metadata (most existing tests don't care about it).
+    fn no_meta() -> SvgMetadata<'static> {
+        SvgMetadata::default()
+    }
+
     // --- Empty / degenerate inputs ---
 
     #[test]
     fn empty_polylines_produces_valid_svg_with_no_paths() {
-        let svg = to_svg(&[], dims(100, 50));
+        let svg = to_svg(&[], dims(100, 50), &no_meta());
         assert!(svg.contains(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
         assert!(svg.contains(r#"width="100" height="50""#));
         assert!(svg.contains(r#"viewBox="0 0 100 50""#));
@@ -105,14 +177,14 @@ mod tests {
     #[test]
     fn single_point_polyline_is_skipped() {
         let polylines = vec![Polyline::new(vec![Point::new(5.0, 5.0)])];
-        let svg = to_svg(&polylines, dims(100, 100));
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
         assert!(!svg.contains("<path"));
     }
 
     #[test]
     fn zero_point_polyline_is_skipped() {
         let polylines = vec![Polyline::new(vec![])];
-        let svg = to_svg(&polylines, dims(100, 100));
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
         assert!(!svg.contains("<path"));
     }
 
@@ -124,7 +196,7 @@ mod tests {
             Point::new(10.0, 20.0),
             Point::new(30.0, 40.0),
         ])];
-        let svg = to_svg(&polylines, dims(800, 600));
+        let svg = to_svg(&polylines, dims(800, 600), &no_meta());
 
         assert!(svg.contains(r#"width="800" height="600""#));
         assert!(svg.contains(r#"viewBox="0 0 800 600""#));
@@ -141,7 +213,7 @@ mod tests {
             Point::new(12.5, 18.3),
             Point::new(14.0, 20.1),
         ])];
-        let svg = to_svg(&polylines, dims(800, 600));
+        let svg = to_svg(&polylines, dims(800, 600), &no_meta());
         assert!(svg.contains(r#"d="M 10.0 15.0 L 12.5 18.3 L 14.0 20.1""#));
     }
 
@@ -151,7 +223,7 @@ mod tests {
             Polyline::new(vec![Point::new(1.0, 2.0), Point::new(3.0, 4.0)]),
             Polyline::new(vec![Point::new(5.0, 6.0), Point::new(7.0, 8.0)]),
         ];
-        let svg = to_svg(&polylines, dims(100, 100));
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
 
         // Count <path occurrences
         let path_count = svg.matches("<path").count();
@@ -169,7 +241,7 @@ mod tests {
             Point::new(1.0 / 3.0, 2.0 / 3.0),
             Point::new(10.0, 20.0),
         ])];
-        let svg = to_svg(&polylines, dims(100, 100));
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
 
         // 1/3 ≈ 0.333... should be formatted as "0.3"
         // 2/3 ≈ 0.666... should be formatted as "0.7"
@@ -182,7 +254,7 @@ mod tests {
             Point::new(5.0, 10.0),
             Point::new(15.0, 20.0),
         ])];
-        let svg = to_svg(&polylines, dims(100, 100));
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
         assert!(svg.contains("M 5.0 10.0 L 15.0 20.0"));
     }
 
@@ -196,7 +268,7 @@ mod tests {
             Polyline::new(vec![Point::new(2.0, 3.0), Point::new(4.0, 5.0)]), // kept
             Polyline::new(vec![]),                                           // skipped
         ];
-        let svg = to_svg(&polylines, dims(100, 100));
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
 
         let path_count = svg.matches("<path").count();
         assert_eq!(path_count, 1);
@@ -207,7 +279,7 @@ mod tests {
 
     #[test]
     fn viewbox_reflects_dimensions() {
-        let svg = to_svg(&[], dims(1920, 1080));
+        let svg = to_svg(&[], dims(1920, 1080), &no_meta());
         assert!(svg.contains(r#"width="1920" height="1080""#));
         assert!(svg.contains(r#"viewBox="0 0 1920 1080""#));
     }
@@ -216,21 +288,119 @@ mod tests {
 
     #[test]
     fn svg_has_xml_declaration() {
-        let svg = to_svg(&[], dims(100, 100));
+        let svg = to_svg(&[], dims(100, 100), &no_meta());
         assert!(svg.starts_with(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
     }
 
     #[test]
     fn svg_has_xmlns_namespace() {
-        let svg = to_svg(&[], dims(100, 100));
+        let svg = to_svg(&[], dims(100, 100), &no_meta());
         assert!(svg.contains(r#"xmlns="http://www.w3.org/2000/svg""#));
     }
 
     #[test]
     fn svg_ends_with_closing_tag() {
-        let svg = to_svg(&[], dims(100, 100));
+        let svg = to_svg(&[], dims(100, 100), &no_meta());
         let trimmed = svg.trim_end();
         assert!(trimmed.ends_with("</svg>"));
+    }
+
+    // --- Metadata ---
+
+    #[test]
+    fn title_element_emitted_when_present() {
+        let meta = SvgMetadata {
+            title: Some("cherry-blossoms"),
+            ..SvgMetadata::default()
+        };
+        let svg = to_svg(&[], dims(100, 100), &meta);
+        assert!(svg.contains("  <title>cherry-blossoms</title>"));
+        assert!(!svg.contains("<desc>"));
+    }
+
+    #[test]
+    fn desc_element_emitted_when_present() {
+        let meta = SvgMetadata {
+            description: Some("Exported by mujou"),
+            ..SvgMetadata::default()
+        };
+        let svg = to_svg(&[], dims(100, 100), &meta);
+        assert!(svg.contains("  <desc>Exported by mujou</desc>"));
+        assert!(!svg.contains("<title>"));
+    }
+
+    #[test]
+    fn title_and_desc_both_emitted() {
+        let meta = SvgMetadata {
+            title: Some("my-image"),
+            description: Some("blur=1.4, canny=15/40"),
+        };
+        let svg = to_svg(&[], dims(100, 100), &meta);
+        assert!(svg.contains("  <title>my-image</title>"));
+        assert!(svg.contains("  <desc>blur=1.4, canny=15/40</desc>"));
+    }
+
+    #[test]
+    fn title_and_desc_omitted_when_none() {
+        let svg = to_svg(&[], dims(100, 100), &no_meta());
+        assert!(!svg.contains("<title>"));
+        assert!(!svg.contains("<desc>"));
+    }
+
+    #[test]
+    fn title_appears_before_paths() {
+        let polylines = vec![Polyline::new(vec![
+            Point::new(1.0, 2.0),
+            Point::new(3.0, 4.0),
+        ])];
+        let meta = SvgMetadata {
+            title: Some("test"),
+            description: Some("desc"),
+        };
+        let svg = to_svg(&polylines, dims(100, 100), &meta);
+
+        let title_pos = svg.find("<title>").unwrap();
+        let desc_pos = svg.find("<desc>").unwrap();
+        let path_pos = svg.find("<path").unwrap();
+        assert!(title_pos < desc_pos, "title should come before desc");
+        assert!(desc_pos < path_pos, "desc should come before paths");
+    }
+
+    #[test]
+    fn special_characters_in_title_are_escaped() {
+        let meta = SvgMetadata {
+            title: Some("A <B> & C \"D\" 'E'"),
+            ..SvgMetadata::default()
+        };
+        let svg = to_svg(&[], dims(100, 100), &meta);
+        assert!(svg.contains("<title>A &lt;B&gt; &amp; C &quot;D&quot; &apos;E&apos;</title>"));
+    }
+
+    #[test]
+    fn special_characters_in_desc_are_escaped() {
+        let meta = SvgMetadata {
+            description: Some("x < y & z > w"),
+            ..SvgMetadata::default()
+        };
+        let svg = to_svg(&[], dims(100, 100), &meta);
+        assert!(svg.contains("<desc>x &lt; y &amp; z &gt; w</desc>"));
+    }
+
+    // --- XML escaping ---
+
+    #[test]
+    fn xml_escape_handles_all_special_chars() {
+        assert_eq!(xml_escape("&<>\"'"), "&amp;&lt;&gt;&quot;&apos;");
+    }
+
+    #[test]
+    fn xml_escape_passes_through_plain_text() {
+        assert_eq!(xml_escape("hello world 123"), "hello world 123");
+    }
+
+    #[test]
+    fn xml_escape_empty_string() {
+        assert_eq!(xml_escape(""), "");
     }
 
     // --- End-to-end: process() -> to_svg() ---
@@ -263,7 +433,7 @@ mod tests {
 
         let png = sharp_edge_png(40, 40);
         let result = process(&png, &PipelineConfig::default()).unwrap();
-        let svg = to_svg(&[result.polyline], result.dimensions);
+        let svg = to_svg(&[result.polyline], result.dimensions, &no_meta());
 
         // Valid SVG structure
         assert!(svg.contains(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
@@ -293,7 +463,7 @@ mod tests {
                 Point::new(35.0, 10.2),
             ]),
         ];
-        let svg = to_svg(&polylines, dims(800, 600));
+        let svg = to_svg(&polylines, dims(800, 600), &no_meta());
 
         assert!(svg.contains(r#"width="800" height="600""#));
         assert!(svg.contains(r#"viewBox="0 0 800 600""#));

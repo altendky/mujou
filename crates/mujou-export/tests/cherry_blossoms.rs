@@ -54,7 +54,11 @@ fn cherry_blossoms_pipeline_to_svg() {
     );
 
     // Export to SVG.
-    let svg = mujou_export::to_svg(&[result.polyline], result.dimensions);
+    let svg = mujou_export::to_svg(
+        &[result.polyline],
+        result.dimensions,
+        &mujou_export::SvgMetadata::default(),
+    );
 
     // Basic structural assertions.
     assert!(svg.contains("<svg"));
