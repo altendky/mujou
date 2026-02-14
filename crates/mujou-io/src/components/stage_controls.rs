@@ -324,7 +324,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         desc("Point reduction strength. Higher means fewer points."),
                         value,
                         0.0,
-                        20.0,
+                        10.0,
                         0.1,
                         1,
                         move |v: f64| {
@@ -372,7 +372,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             #[allow(clippy::cast_precision_loss)]
                             { config_slider.mst_neighbours as f64 },
                             1.0,
-                            100.0,
+                            200.0,
                             1.0,
                             0,
                             move |v: f64| {
