@@ -94,13 +94,14 @@ fn render_tile(
                 {result.map_or_else(render_placeholder, |r| render_thumbnail(r, stage, is_dark))}
             }
 
-            // Label
+            // Label: full name at lg+, short label below lg
             span { class: "text-xs text-[var(--text-secondary)] truncate w-full text-center
-                          hidden md:block",
+                          hidden lg:block",
                 "{stage.label()}"
             }
-            span { class: "text-xs text-[var(--text-secondary)] md:hidden",
-                "{stage.abbreviation()}"
+            span { class: "text-xs text-[var(--text-secondary)] truncate w-full text-center
+                          lg:hidden",
+                "{stage.short_label()}"
             }
         }
     }
