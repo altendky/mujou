@@ -2193,6 +2193,25 @@ mod tests {
     }
 
     #[test]
+    fn cache_changed_working_resolution_produces_correct_result() {
+        // Change working_resolution (stage 2) — only stages 0-1 cached,
+        // stages 2-8 re-run using the cached decoded_image.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            working_resolution: 20,
+            ..PipelineConfig::default()
+        };
+
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (cached_result, _cache2) =
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png, &config2).unwrap();
+        assert_staged_eq(&expected, &cached_result);
+    }
+
+    #[test]
     fn cache_changed_early_stage_produces_correct_result() {
         // Change blur_sigma (stage 3) — stages 0-2 cached, 3-8 re-run.
         let png = sharp_edge_png(40, 40);
