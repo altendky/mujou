@@ -115,7 +115,7 @@ fn render_raster_edges(result: &WorkerResult, visible: bool, is_dark: bool) -> E
     }
 }
 
-/// Render the vector (SVG) preview for Contours, Simplified, Path, or
+/// Render the vector (SVG) preview for Contours, Simplified, Join, or
 /// Masked stages. Returns empty for raster stages.
 fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u32) -> Element {
     match selected {
@@ -148,7 +148,7 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
             }
         }
 
-        StageId::Path => {
+        StageId::Join => {
             let polyline = &result.joined;
             let view_box = format!("0 0 {w} {h}");
             let d = build_path_data(polyline);
