@@ -85,18 +85,18 @@ impl StageId {
         }
     }
 
-    /// Short abbreviation for compact mobile display.
+    /// Short label for compact display at small and medium viewports.
     #[must_use]
-    pub const fn abbreviation(self) -> &'static str {
+    pub const fn short_label(self) -> &'static str {
         match self {
-            Self::Original => "O",
-            Self::Downsampled => "D",
-            Self::Blur => "B",
-            Self::Edges => "E",
-            Self::Contours => "C",
-            Self::Simplified => "S",
-            Self::Path => "P",
-            Self::Masked => "M",
+            Self::Original => "Orig",
+            Self::Downsampled => "Down",
+            Self::Blur => "Blur",
+            Self::Edges => "Edge",
+            Self::Contours => "Cont",
+            Self::Simplified => "Simp",
+            Self::Masked => "Mask",
+            Self::Path => "Path",
         }
     }
 }
@@ -145,6 +145,22 @@ mod tests {
         // Backend stages 0 (Pending) and 1 (Decoded) both map to Original.
         assert_eq!(StageId::from_pipeline_index(0), Some(StageId::Original));
         assert_eq!(StageId::from_pipeline_index(1), Some(StageId::Original));
+    }
+
+    #[test]
+    fn short_labels_are_compact() {
+        // Short labels should be at most 4 characters to fit in compact tiles.
+        for stage in StageId::ALL {
+            let short = stage.short_label();
+            assert!(
+                !short.is_empty(),
+                "StageId::{stage} short_label() must not be empty"
+            );
+            assert!(
+                short.chars().count() <= 4,
+                "StageId::{stage} short_label() {short:?} exceeds 4 characters"
+            );
+        }
     }
 
     #[test]
