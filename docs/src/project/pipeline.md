@@ -13,22 +13,48 @@ All pipeline code lives in the `mujou-pipeline` crate (core layer, pure Rust, no
 Accept common raster formats: PNG, JPEG, BMP, WebP.
 Use the `image` crate to decode raw bytes into an `RgbaImage` pixel buffer.
 
-### 2. Convert to Grayscale
+### 2. Downsample
 
-Convert the RGBA image to a single-channel grayscale image.
-Standard luminance formula: `0.299*R + 0.587*G + 0.114*B`.
+Resize the image so the longest axis matches `working_resolution`.
+All subsequent pipeline stages operate at this reduced resolution.
+
+**User parameters:**
+
+- `working_resolution` (u32, default: 256)
+- `downsample_filter` (`DownsampleFilter`, default: `Disabled`)
 
 ### 3. Gaussian Blur
 
-Smooth the grayscale image to reduce noise before edge detection.
+Convert the RGBA image to grayscale (BT.601 luminance formula: `0.299*R + 0.587*G + 0.114*B`) and smooth the result to reduce noise before edge detection.
 Use `imageproc::filter::gaussian_blur_f32(image, sigma)`.
+
+The grayscale conversion is an internal implementation detail of the blur stage (it prepares the luminance channel for edge detection). When non-luminance edge channels are enabled, those channels are extracted and blurred independently inside the edge detection step.
 
 **User parameter:** `blur_sigma` (f32, default: 1.4)
 
 ### 4. Canny Edge Detection
 
-Detect edges using `imageproc::edges::canny(image, low_threshold, high_threshold)`.
-Returns a binary image (255 for edge pixels, 0 for non-edge).
+Detect edges using Canny on one or more image channels, combining results via pixel-wise maximum.
+
+By default, edge detection runs on the luminance (grayscale) channel only. The user can enable additional channels to capture edges that luminance alone misses -- for example, hue boundaries where color changes but brightness stays similar.
+
+#### Edge channels
+
+Canny runs independently on each enabled channel. The per-channel edge maps are combined via pixel-wise maximum, so edges detected in *any* enabled channel appear in the final edge map.
+
+| Channel | Source | Default | Notes |
+| --- | --- | --- | --- |
+| Luminance | BT.601 grayscale | **on** | Standard luminance, works well for most images |
+| Red | R from RGBA | off | Skin appears bright; useful for skin/lip boundaries |
+| Green | G from RGBA | off | Most similar to luminance; captures overall detail |
+| Blue | B from RGBA | off | Skin appears dark; tends to be noisier |
+| Saturation | S from HSV | off | Highlights hue boundaries (lips, colored clothing) |
+
+Non-luminance channels are independently blurred (using the same `blur_sigma`) before Canny is applied.
+
+See [#96](https://github.com/altendky/mujou/issues/96) for planned future channels (Hue, Value, Lab).
+
+#### Canny internals
 
 Internally, Canny performs:
 
@@ -38,6 +64,7 @@ Internally, Canny performs:
 
 **User parameters:**
 
+- `edge_channels` (`EdgeChannels`, default: luminance only)
 - `canny_low` (f32, default: 15.0)
 - `canny_high` (f32, default: 40.0)
 
@@ -164,6 +191,7 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | Parameter | Type | Default | Description |
 | --------- | ---- | ------- | ----------- |
 | `blur_sigma` | f32 | 1.4 | Gaussian blur kernel sigma |
+| `edge_channels` | `EdgeChannels` | luminance only | Which channels to use for edge detection (composable) |
 | `canny_low` | f32 | 15.0 | Canny low threshold |
 | `canny_high` | f32 | 40.0 | Canny high threshold |
 | `canny_max` | f32 | 60.0 | Upper bound for Canny threshold sliders (UI only) |

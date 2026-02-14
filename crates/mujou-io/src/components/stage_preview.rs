@@ -1,7 +1,7 @@
 //! Full-size preview for the currently selected pipeline stage.
 //!
-//! Dispatches between raster `<img>` display (for Original, Grayscale,
-//! Blur, Edges) and inline SVG display (for vector stages).
+//! Dispatches between raster `<img>` display (for Original, Blur,
+//! Edges) and inline SVG display (for vector stages).
 //!
 //! All raster Blob URLs are pre-built by the worker — no PNG encoding
 //! happens on the main thread. Raster `<img>` elements are always
@@ -56,7 +56,6 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         // raster stages are hidden with `display: none`.
         {render_raster_img(result.original_url.url(), "Original", selected == StageId::Original)}
         {render_raster_img(result.downsampled_url.url(), "Downsampled", selected == StageId::Downsampled)}
-        {render_raster_img(result.grayscale_url.url(), "Grayscale", selected == StageId::Grayscale)}
         {render_raster_img(result.blur_url.url(), "Blur", selected == StageId::Blur)}
         {render_raster_edges(result, selected == StageId::Edges, is_dark())}
 

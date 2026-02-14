@@ -42,7 +42,6 @@ pub struct VectorResult {
 /// - `vectorJson`: `String` — JSON-serialized `VectorResult`
 /// - `originalPng`: `Uint8Array` — pre-encoded RGBA PNG
 /// - `downsampledPng`: `Uint8Array` — pre-encoded RGBA PNG (working resolution)
-/// - `grayscalePng`: `Uint8Array` — pre-encoded grayscale PNG
 /// - `blurredPng`: `Uint8Array` — pre-encoded grayscale PNG
 /// - `edgesLightPng`: `Uint8Array` — themed edge PNG (light mode)
 /// - `edgesDarkPng`: `Uint8Array` — themed edge PNG (dark mode)
@@ -230,7 +229,6 @@ fn post_success_response(
     }
     let original_png = encode_or_error!(encode_rgba_png(&staged.original));
     let downsampled_png = encode_or_error!(encode_rgba_png(&staged.downsampled));
-    let grayscale_png = encode_or_error!(encode_gray_png(&staged.grayscale));
     let blurred_png = encode_or_error!(encode_gray_png(&staged.blurred));
     // Dilate once — both themes use the same dilated edge image.
     let dilated_edges = dilate_soft(&staged.edges);
@@ -257,10 +255,6 @@ fn post_success_response(
     set(
         "downsampledPng",
         &js_sys::Uint8Array::from(downsampled_png.as_slice()),
-    );
-    set(
-        "grayscalePng",
-        &js_sys::Uint8Array::from(grayscale_png.as_slice()),
     );
     set(
         "blurredPng",

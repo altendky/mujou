@@ -18,8 +18,6 @@ pub enum StageId {
     Original,
     /// Stage 1: downsampled to working resolution.
     Downsampled,
-    /// Stage 2: decode + grayscale conversion.
-    Grayscale,
     /// Stage 3: Gaussian blur.
     Blur,
     /// Stages 4+5: Canny edge detection + optional inversion.
@@ -36,10 +34,9 @@ pub enum StageId {
 
 impl StageId {
     /// All stages in pipeline order, for iterating the filmstrip.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::Original,
         Self::Downsampled,
-        Self::Grayscale,
         Self::Blur,
         Self::Edges,
         Self::Contours,
@@ -54,7 +51,6 @@ impl StageId {
         match self {
             Self::Original => "Original",
             Self::Downsampled => "Downsampled",
-            Self::Grayscale => "Grayscale",
             Self::Blur => "Blur",
             Self::Edges => "Edges",
             Self::Contours => "Contours",
@@ -70,7 +66,6 @@ impl StageId {
         match self {
             Self::Original => "O",
             Self::Downsampled => "D",
-            Self::Grayscale => "G",
             Self::Blur => "B",
             Self::Edges => "E",
             Self::Contours => "C",
@@ -96,7 +91,7 @@ mod tests {
         // If you add a variant to StageId, update ALL and this count.
         assert_eq!(
             StageId::ALL.len(),
-            9,
+            8,
             "StageId::ALL length must match variant count"
         );
         // Verify no duplicates.

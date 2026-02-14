@@ -10,6 +10,8 @@
 
 use image::GrayImage;
 
+use crate::types::{EdgeChannels, RgbaImage};
+
 /// Minimum allowed Canny threshold.
 ///
 /// A low threshold of zero causes every pixel with any gradient to be
@@ -89,6 +91,122 @@ pub fn max_gradient_magnitude() -> f32 {
     max_mag
 }
 
+/// Extract a single color channel from an RGBA image as a grayscale image.
+///
+/// `channel` selects which byte of the RGBA pixel to extract:
+/// 0 = Red, 1 = Green, 2 = Blue, 3 = Alpha.
+#[must_use]
+fn extract_channel(rgba: &RgbaImage, channel: usize) -> GrayImage {
+    GrayImage::from_fn(rgba.width(), rgba.height(), |x, y| {
+        image::Luma([rgba.get_pixel(x, y).0[channel]])
+    })
+}
+
+/// Compute the HSV saturation channel from an RGBA image.
+///
+/// Saturation is defined as `(max(R,G,B) - min(R,G,B)) / max(R,G,B)`,
+/// scaled to 0–255. When `max(R,G,B)` is zero (pure black), saturation
+/// is zero.
+#[must_use]
+fn extract_saturation(rgba: &RgbaImage) -> GrayImage {
+    GrayImage::from_fn(rgba.width(), rgba.height(), |x, y| {
+        let [r, g, b, _] = rgba.get_pixel(x, y).0;
+        let max = r.max(g).max(b);
+        let min = r.min(g).min(b);
+        if max == 0 {
+            image::Luma([0])
+        } else {
+            // (max - min) / max, scaled to 0–255.
+            let sat = u16::from(max - min) * 255 / u16::from(max);
+            #[allow(clippy::cast_possible_truncation)]
+            image::Luma([sat as u8])
+        }
+    })
+}
+
+/// Combine two binary edge maps via pixel-wise maximum.
+///
+/// Both images must have the same dimensions (caller must guarantee
+/// this). Edge pixels (255) in either image appear in the output.
+fn combine_edge_maps(a: &GrayImage, b: &GrayImage) -> GrayImage {
+    GrayImage::from_fn(a.width(), a.height(), |x, y| {
+        image::Luma([a.get_pixel(x, y).0[0].max(b.get_pixel(x, y).0[0])])
+    })
+}
+
+/// Run Canny edge detection on multiple image channels and combine
+/// the results via pixel-wise maximum.
+///
+/// For each enabled channel in `channels`:
+/// 1. Extract the channel from `rgba` (or reuse `blurred_luma` for
+///    luminance, which has already been blurred by the pipeline).
+/// 2. Apply Gaussian blur with `blur_sigma` (skipped for luminance).
+/// 3. Run Canny with the given thresholds.
+///
+/// All per-channel edge maps are then combined by taking the maximum
+/// value at each pixel, so edges detected in *any* channel appear in
+/// the final output.
+///
+/// # Panics
+///
+/// Panics if no channels are enabled. Callers should validate via
+/// [`EdgeChannels::any_enabled`] or [`PipelineConfig::validate`].
+#[must_use = "returns the combined binary edge map"]
+pub fn canny_combined(
+    rgba: &RgbaImage,
+    blurred_luma: &GrayImage,
+    channels: &EdgeChannels,
+    blur_sigma: f32,
+    low_threshold: f32,
+    high_threshold: f32,
+) -> GrayImage {
+    assert!(
+        channels.any_enabled(),
+        "at least one edge channel must be enabled"
+    );
+
+    let (low, high) = clamp_thresholds(low_threshold, high_threshold);
+
+    // Collect (channel_image, needs_blur) pairs for each enabled channel.
+    // Luminance is already blurred by the pipeline, so it skips the blur step.
+    let mut channel_images: Vec<(GrayImage, bool)> = Vec::with_capacity(channels.count());
+
+    if channels.luminance {
+        channel_images.push((blurred_luma.clone(), false));
+    }
+    if channels.red {
+        channel_images.push((extract_channel(rgba, 0), true));
+    }
+    if channels.green {
+        channel_images.push((extract_channel(rgba, 1), true));
+    }
+    if channels.blue {
+        channel_images.push((extract_channel(rgba, 2), true));
+    }
+    if channels.saturation {
+        channel_images.push((extract_saturation(rgba), true));
+    }
+
+    let mut combined: Option<GrayImage> = None;
+
+    for (img, needs_blur) in &channel_images {
+        let blurred = if *needs_blur {
+            crate::blur::gaussian_blur(img, blur_sigma)
+        } else {
+            img.clone()
+        };
+        let edges = crate::canny::canny(&blurred, low, high);
+        combined = Some(match combined {
+            Some(acc) => combine_edge_maps(&acc, &edges),
+            None => edges,
+        });
+    }
+
+    // Safety: we asserted at least one channel is enabled, so combined is Some.
+    #[allow(clippy::unwrap_used)]
+    combined.unwrap()
+}
+
 /// Invert a binary edge map (bitwise NOT).
 ///
 /// Swaps edge pixels (255 → 0) and background pixels (0 → 255).
@@ -102,6 +220,7 @@ pub fn invert_edge_map(edges: &GrayImage) -> GrayImage {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
 
@@ -215,5 +334,242 @@ mod tests {
         // canny(200, 100) should produce the same result as canny(100, 100)
         // because low gets clamped down to high.
         assert_eq!(edges_inverted, edges_equal);
+    }
+
+    // ─────── Edge channel tests ──────────────────────────────────
+
+    /// Helper: count edge pixels (value > 0) in a grayscale image.
+    fn count_edges(img: &GrayImage) -> u32 {
+        img.pixels().map(|p| u32::from(p.0[0] > 0)).sum()
+    }
+
+    /// 20x20 RGBA image with a sharp vertical luminance boundary at x = 10.
+    fn sharp_edge_rgba() -> RgbaImage {
+        RgbaImage::from_fn(20, 20, |x, _y| {
+            if x < 10 {
+                image::Rgba([0, 0, 0, 255])
+            } else {
+                image::Rgba([255, 255, 255, 255])
+            }
+        })
+    }
+
+    /// 20x20 RGBA image with an isoluminant hue boundary at x = 10.
+    ///
+    /// Left half: saturated red (R=180, G=70, B=70)
+    /// Right half: saturated cyan (R=70, G=180, B=180)
+    ///
+    /// Both halves have nearly identical BT.601 luminance:
+    ///   Left:  0.299*180 + 0.587*70 + 0.114*70 = 53.82 + 41.09 + 7.98 = 102.89
+    ///   Right: 0.299*70 + 0.587*180 + 0.114*180 = 20.93 + 105.66 + 20.52 = 147.11
+    ///
+    /// Actually these aren't perfectly isoluminant, but close enough
+    /// that with moderate blur the luminance edge is weak. A tighter
+    /// pair can be used if needed.
+    ///
+    /// For a truly isoluminant pair we use:
+    ///   Left:  R=200, G=100, B=100 → luma = 0.299*200 + 0.587*100 + 0.114*100 = 59.8 + 58.7 + 11.4 = 129.9
+    ///   Right: R=100, G=140, B=130 → luma = 0.299*100 + 0.587*140 + 0.114*130 = 29.9 + 82.18 + 14.82 = 126.9
+    ///
+    /// Difference: ~3 gray levels — below typical Canny thresholds after blur.
+    fn isoluminant_hue_boundary_rgba() -> RgbaImage {
+        RgbaImage::from_fn(20, 20, |x, _y| {
+            if x < 10 {
+                image::Rgba([200, 100, 100, 255])
+            } else {
+                image::Rgba([100, 140, 130, 255])
+            }
+        })
+    }
+
+    #[test]
+    fn extract_channel_red() {
+        let rgba = RgbaImage::from_fn(2, 2, |_, _| image::Rgba([100, 150, 200, 255]));
+        let red = extract_channel(&rgba, 0);
+        assert_eq!(red.get_pixel(0, 0).0[0], 100);
+    }
+
+    #[test]
+    fn extract_channel_green() {
+        let rgba = RgbaImage::from_fn(2, 2, |_, _| image::Rgba([100, 150, 200, 255]));
+        let green = extract_channel(&rgba, 1);
+        assert_eq!(green.get_pixel(0, 0).0[0], 150);
+    }
+
+    #[test]
+    fn extract_channel_blue() {
+        let rgba = RgbaImage::from_fn(2, 2, |_, _| image::Rgba([100, 150, 200, 255]));
+        let blue = extract_channel(&rgba, 2);
+        assert_eq!(blue.get_pixel(0, 0).0[0], 200);
+    }
+
+    #[test]
+    fn extract_saturation_pure_red() {
+        // Pure red: R=255, G=0, B=0 → max=255, min=0, S = 255/255*255 = 255
+        let rgba = RgbaImage::from_fn(1, 1, |_, _| image::Rgba([255, 0, 0, 255]));
+        let sat = extract_saturation(&rgba);
+        assert_eq!(sat.get_pixel(0, 0).0[0], 255);
+    }
+
+    #[test]
+    fn extract_saturation_gray() {
+        // Gray: R=G=B=128 → max=128, min=128, S = 0/128*255 = 0
+        let rgba = RgbaImage::from_fn(1, 1, |_, _| image::Rgba([128, 128, 128, 255]));
+        let sat = extract_saturation(&rgba);
+        assert_eq!(sat.get_pixel(0, 0).0[0], 0);
+    }
+
+    #[test]
+    fn extract_saturation_black() {
+        // Black: R=G=B=0 → max=0, S = 0 (special case)
+        let rgba = RgbaImage::from_fn(1, 1, |_, _| image::Rgba([0, 0, 0, 255]));
+        let sat = extract_saturation(&rgba);
+        assert_eq!(sat.get_pixel(0, 0).0[0], 0);
+    }
+
+    #[test]
+    fn extract_saturation_half_saturated() {
+        // R=200, G=100, B=100 → max=200, min=100, S = 100/200*255 ≈ 127
+        let rgba = RgbaImage::from_fn(1, 1, |_, _| image::Rgba([200, 100, 100, 255]));
+        let sat = extract_saturation(&rgba);
+        let s = sat.get_pixel(0, 0).0[0];
+        // Allow ±1 for integer rounding.
+        assert!((i16::from(s) - 127).abs() <= 1, "expected ~127, got {s}",);
+    }
+
+    #[test]
+    fn combine_edge_maps_takes_maximum() {
+        let a = GrayImage::from_fn(3, 1, |x, _| image::Luma([if x == 0 { 255 } else { 0 }]));
+        let b = GrayImage::from_fn(3, 1, |x, _| image::Luma([if x == 2 { 255 } else { 0 }]));
+        let combined = combine_edge_maps(&a, &b);
+        assert_eq!(combined.get_pixel(0, 0).0[0], 255); // from a
+        assert_eq!(combined.get_pixel(1, 0).0[0], 0); // neither
+        assert_eq!(combined.get_pixel(2, 0).0[0], 255); // from b
+    }
+
+    #[test]
+    fn canny_combined_luminance_only_matches_single_channel() {
+        let rgba = sharp_edge_rgba();
+        let luma = crate::grayscale::to_grayscale(&image::DynamicImage::ImageRgba8(rgba.clone()));
+        let blurred = crate::blur::gaussian_blur(&luma, 1.4);
+
+        let channels = EdgeChannels {
+            luminance: true,
+            ..EdgeChannels::default()
+        };
+        let combined = canny_combined(&rgba, &blurred, &channels, 1.4, 50.0, 150.0);
+        let single = canny(&blurred, 50.0, 150.0);
+
+        assert_eq!(combined, single);
+    }
+
+    #[test]
+    fn canny_combined_detects_isoluminant_hue_edges() {
+        let rgba = isoluminant_hue_boundary_rgba();
+        let luma = crate::grayscale::to_grayscale(&image::DynamicImage::ImageRgba8(rgba.clone()));
+        let blurred = crate::blur::gaussian_blur(&luma, 1.4);
+
+        // Luminance-only should find few or no edges at the boundary.
+        let luma_only = EdgeChannels {
+            luminance: true,
+            ..EdgeChannels::default()
+        };
+        let luma_edges = canny_combined(&rgba, &blurred, &luma_only, 1.4, 15.0, 40.0);
+        let luma_count = count_edges(&luma_edges);
+
+        // Red channel should find the boundary (R=200 vs R=100).
+        let with_red = EdgeChannels {
+            luminance: true,
+            red: true,
+            ..EdgeChannels::default()
+        };
+        let red_edges = canny_combined(&rgba, &blurred, &with_red, 1.4, 15.0, 40.0);
+        let red_count = count_edges(&red_edges);
+
+        assert!(
+            red_count > luma_count,
+            "adding red channel should detect more edges at isoluminant boundary \
+             (luma_count={luma_count}, red_count={red_count})",
+        );
+    }
+
+    #[test]
+    fn canny_combined_saturation_detects_saturation_boundary() {
+        // Left: saturated (R=255, G=0, B=0, S=255)
+        // Right: desaturated (R=128, G=128, B=128, S=0)
+        // Luminance differs (76 vs 128), so both modes find edges,
+        // but saturation channel should also contribute.
+        let rgba = RgbaImage::from_fn(20, 20, |x, _y| {
+            if x < 10 {
+                image::Rgba([255, 0, 0, 255])
+            } else {
+                image::Rgba([128, 128, 128, 255])
+            }
+        });
+        let luma = crate::grayscale::to_grayscale(&image::DynamicImage::ImageRgba8(rgba.clone()));
+        let blurred = crate::blur::gaussian_blur(&luma, 1.4);
+
+        let with_sat = EdgeChannels {
+            luminance: false,
+            saturation: true,
+            ..EdgeChannels::default()
+        };
+        let sat_edges = canny_combined(&rgba, &blurred, &with_sat, 1.4, 15.0, 40.0);
+        let sat_count = count_edges(&sat_edges);
+
+        assert!(
+            sat_count > 0,
+            "saturation channel should detect edges at saturated/desaturated boundary",
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "at least one edge channel must be enabled")]
+    fn canny_combined_panics_with_no_channels() {
+        let rgba = sharp_edge_rgba();
+        let luma = GrayImage::new(20, 20);
+        let none = EdgeChannels {
+            luminance: false,
+            red: false,
+            green: false,
+            blue: false,
+            saturation: false,
+        };
+        let _ = canny_combined(&rgba, &luma, &none, 1.4, 50.0, 150.0);
+    }
+
+    #[test]
+    fn edge_channels_default_has_luminance_only() {
+        let channels = EdgeChannels::default();
+        assert!(channels.luminance);
+        assert!(!channels.red);
+        assert!(!channels.green);
+        assert!(!channels.blue);
+        assert!(!channels.saturation);
+        assert!(channels.any_enabled());
+        assert_eq!(channels.count(), 1);
+    }
+
+    #[test]
+    fn edge_channels_count_and_any_enabled() {
+        let all = EdgeChannels {
+            luminance: true,
+            red: true,
+            green: true,
+            blue: true,
+            saturation: true,
+        };
+        assert_eq!(all.count(), 5);
+        assert!(all.any_enabled());
+
+        let none = EdgeChannels {
+            luminance: false,
+            red: false,
+            green: false,
+            blue: false,
+            saturation: false,
+        };
+        assert_eq!(none.count(), 0);
+        assert!(!none.any_enabled());
     }
 }
