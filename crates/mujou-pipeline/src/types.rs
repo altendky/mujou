@@ -526,8 +526,8 @@ pub struct StagedResult {
     pub original: RgbaImage,
     /// Stage 1: downsampled RGBA image (working resolution).
     pub downsampled: RgbaImage,
-    /// Stage 2: Gaussian-blurred image.
-    pub blurred: GrayImage,
+    /// Stage 2: Gaussian-blurred RGBA image.
+    pub blurred: RgbaImage,
     /// Stages 3+4: Canny edge map (post-inversion when `invert=true`).
     pub edges: GrayImage,
     /// Stage 5: traced contour polylines.
@@ -607,6 +607,8 @@ impl Serialize for StagedResult {
             joined: self.joined.clone(),
             dimensions: self.dimensions,
         };
+        // Note: the proxy stores blurred as (w, h, Vec<u8>) — the raw
+        // bytes now contain 4 bytes per pixel (RGBA) instead of 1.
         proxy.serialize(serializer)
     }
 }
@@ -623,7 +625,7 @@ impl<'de> Deserialize<'de> for StagedResult {
             proxy.downsampled.2,
         )
         .ok_or_else(|| serde::de::Error::custom("invalid downsampled image dimensions"))?;
-        let blurred = GrayImage::from_raw(proxy.blurred.0, proxy.blurred.1, proxy.blurred.2)
+        let blurred = RgbaImage::from_raw(proxy.blurred.0, proxy.blurred.1, proxy.blurred.2)
             .ok_or_else(|| serde::de::Error::custom("invalid blurred image dimensions"))?;
         let edges = GrayImage::from_raw(proxy.edges.0, proxy.edges.1, proxy.edges.2)
             .ok_or_else(|| serde::de::Error::custom("invalid edges image dimensions"))?;
@@ -1058,7 +1060,7 @@ mod tests {
         let staged = StagedResult {
             original: RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255])),
             downsampled: RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255])),
-            blurred: GrayImage::from_pixel(2, 2, image::Luma([45])),
+            blurred: RgbaImage::from_pixel(2, 2, image::Rgba([40, 45, 50, 255])),
             edges: GrayImage::from_pixel(2, 2, image::Luma([255])),
             contours: vec![Polyline::new(vec![
                 Point::new(0.0, 0.0),
@@ -1131,7 +1133,7 @@ mod tests {
         let staged = StagedResult {
             original: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
             downsampled: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
-            blurred: GrayImage::from_pixel(1, 1, image::Luma([0])),
+            blurred: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
             edges: GrayImage::from_pixel(1, 1, image::Luma([0])),
             contours: vec![],
             simplified: vec![],

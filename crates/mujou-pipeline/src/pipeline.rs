@@ -122,7 +122,6 @@ impl Decoded {
         Downsampled {
             config: self.config,
             original: self.original,
-            image: downsampled_dynamic,
             rgba: downsampled,
             applied,
         }
@@ -141,7 +140,6 @@ impl Decoded {
 pub struct Downsampled {
     config: PipelineConfig,
     original: RgbaImage,
-    image: DynamicImage,
     rgba: RgbaImage,
     applied: bool,
 }
@@ -160,14 +158,18 @@ impl Downsampled {
         self.applied
     }
 
-    /// Advance to the blur stage (includes grayscale conversion).
+    /// Advance to the blur stage.
+    ///
+    /// Applies Gaussian blur to the full RGBA image so the UI preview
+    /// shows color (not grayscale). Downstream edge detection extracts
+    /// channels from the already-blurred RGBA — no per-channel blur
+    /// needed.
     pub fn blur(self) -> Blurred {
-        let gray = crate::grayscale::to_grayscale(&self.image);
         let dimensions = Dimensions {
-            width: gray.width(),
-            height: gray.height(),
+            width: self.rgba.width(),
+            height: self.rgba.height(),
         };
-        let smooth = crate::blur::gaussian_blur(&gray, self.config.blur_sigma);
+        let smooth = crate::blur::gaussian_blur_rgba(&self.rgba, self.config.blur_sigma);
         Blurred {
             config: self.config,
             original: self.original,
@@ -182,20 +184,24 @@ impl Downsampled {
 
 /// Pipeline state after Gaussian blur.
 ///
+/// The blur operates on the full RGBA image so the UI preview shows
+/// color. Downstream edge detection extracts channels from this
+/// already-blurred image.
+///
 /// Call [`detect_edges`](Self::detect_edges) to advance to the next stage.
 #[must_use = "pipeline stages are consumed by advancing — call .detect_edges() to continue"]
 pub struct Blurred {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
-    smooth: GrayImage,
+    smooth: RgbaImage,
     dimensions: Dimensions,
 }
 
 impl Blurred {
-    /// The blurred grayscale image.
+    /// The blurred RGBA image.
     #[must_use]
-    pub const fn blurred(&self) -> &GrayImage {
+    pub const fn blurred(&self) -> &RgbaImage {
         &self.smooth
     }
 
@@ -205,12 +211,13 @@ impl Blurred {
     /// [`EdgeChannels`](crate::types::EdgeChannels)) and combines the
     /// results via pixel-wise maximum. Optionally inverts the combined
     /// edge map when `config.invert` is `true`.
+    ///
+    /// All channels are extracted from the already-blurred RGBA image,
+    /// so no per-channel blurring is needed.
     pub fn detect_edges(self) -> EdgesDetected {
         let edges_raw = crate::edge::canny_combined(
-            &self.downsampled,
             &self.smooth,
             &self.config.edge_channels,
-            self.config.blur_sigma,
             self.config.canny_low,
             self.config.canny_high,
         );
@@ -244,7 +251,7 @@ pub struct EdgesDetected {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
-    blurred: GrayImage,
+    blurred: RgbaImage,
     edge_map: GrayImage,
     /// Edge pixel count from Canny output, before optional inversion.
     pre_invert_edge_pixels: u64,
@@ -294,7 +301,7 @@ pub struct ContoursTraced {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
-    blurred: GrayImage,
+    blurred: RgbaImage,
     edges: GrayImage,
     contours: Vec<Polyline>,
     dimensions: Dimensions,
@@ -337,7 +344,7 @@ pub struct Simplified {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
-    blurred: GrayImage,
+    blurred: RgbaImage,
     edges: GrayImage,
     contours: Vec<Polyline>,
     reduced: Vec<Polyline>,
@@ -398,7 +405,7 @@ pub struct Masked {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
-    blurred: GrayImage,
+    blurred: RgbaImage,
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
@@ -446,7 +453,7 @@ pub struct Joined {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
-    blurred: GrayImage,
+    blurred: RgbaImage,
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
@@ -514,8 +521,8 @@ pub enum StageOutput<'a> {
     },
     /// Gaussian blur result.
     Blurred {
-        /// The blurred grayscale image.
-        blurred: &'a GrayImage,
+        /// The blurred RGBA image.
+        blurred: &'a RgbaImage,
     },
     /// Edge detection result.
     EdgesDetected {

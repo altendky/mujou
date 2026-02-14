@@ -45,7 +45,7 @@ pub use types::{
 ///
 /// 1. Decode image
 /// 2. Downsample to working resolution
-/// 3. Gaussian blur (includes grayscale conversion)
+/// 3. Gaussian blur (RGBA, preserves color for UI preview)
 /// 4. Canny edge detection
 /// 5. Optional edge map inversion
 /// 6. Contour tracing (pluggable strategy)

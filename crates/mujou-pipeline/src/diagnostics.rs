@@ -49,7 +49,7 @@ pub struct PipelineDiagnostics {
     pub decode: StageDiagnostics,
     /// Stage 1: downsampling to working resolution.
     pub downsample: StageDiagnostics,
-    /// Stage 2: Gaussian blur (includes grayscale conversion).
+    /// Stage 2: Gaussian blur (RGBA, preserves color for UI preview).
     pub blur: StageDiagnostics,
     /// Stage 3: Canny edge detection.
     pub edge_detection: StageDiagnostics,

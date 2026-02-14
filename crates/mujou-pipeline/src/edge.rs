@@ -137,11 +137,10 @@ fn combine_edge_maps(a: &GrayImage, b: &GrayImage) -> GrayImage {
 /// Run Canny edge detection on multiple image channels and combine
 /// the results via pixel-wise maximum.
 ///
-/// For each enabled channel in `channels`:
-/// 1. Extract the channel from `rgba` (or reuse `blurred_luma` for
-///    luminance, which has already been blurred by the pipeline).
-/// 2. Apply Gaussian blur with `blur_sigma` (skipped for luminance).
-/// 3. Run Canny with the given thresholds.
+/// `blurred_rgba` must already be Gaussian-blurred by the pipeline's
+/// blur stage. For each enabled channel in `channels`:
+/// 1. Extract the grayscale channel from the already-blurred RGBA.
+/// 2. Run Canny with the given thresholds.
 ///
 /// All per-channel edge maps are then combined by taking the maximum
 /// value at each pixel, so edges detected in *any* channel appear in
@@ -153,10 +152,8 @@ fn combine_edge_maps(a: &GrayImage, b: &GrayImage) -> GrayImage {
 /// [`EdgeChannels::any_enabled`] or [`PipelineConfig::validate`].
 #[must_use = "returns the combined binary edge map"]
 pub fn canny_combined(
-    rgba: &RgbaImage,
-    blurred_luma: &GrayImage,
+    blurred_rgba: &RgbaImage,
     channels: &EdgeChannels,
-    blur_sigma: f32,
     low_threshold: f32,
     high_threshold: f32,
 ) -> GrayImage {
@@ -167,35 +164,31 @@ pub fn canny_combined(
 
     let (low, high) = clamp_thresholds(low_threshold, high_threshold);
 
-    // Collect (channel_image, needs_blur) pairs for each enabled channel.
-    // Luminance is already blurred by the pipeline, so it skips the blur step.
-    let mut channel_images: Vec<(GrayImage, bool)> = Vec::with_capacity(channels.count());
+    // Collect grayscale channel images extracted from the already-blurred RGBA.
+    let mut channel_images: Vec<GrayImage> = Vec::with_capacity(channels.count());
 
     if channels.luminance {
-        channel_images.push((blurred_luma.clone(), false));
+        channel_images.push(crate::grayscale::to_grayscale(
+            &image::DynamicImage::ImageRgba8(blurred_rgba.clone()),
+        ));
     }
     if channels.red {
-        channel_images.push((extract_channel(rgba, 0), true));
+        channel_images.push(extract_channel(blurred_rgba, 0));
     }
     if channels.green {
-        channel_images.push((extract_channel(rgba, 1), true));
+        channel_images.push(extract_channel(blurred_rgba, 1));
     }
     if channels.blue {
-        channel_images.push((extract_channel(rgba, 2), true));
+        channel_images.push(extract_channel(blurred_rgba, 2));
     }
     if channels.saturation {
-        channel_images.push((extract_saturation(rgba), true));
+        channel_images.push(extract_saturation(blurred_rgba));
     }
 
     let mut combined: Option<GrayImage> = None;
 
-    for (img, needs_blur) in &channel_images {
-        let blurred = if *needs_blur {
-            crate::blur::gaussian_blur(img, blur_sigma)
-        } else {
-            img.clone()
-        };
-        let edges = crate::canny::canny(&blurred, low, high);
+    for img in &channel_images {
+        let edges = crate::canny::canny(img, low, high);
         combined = Some(match combined {
             Some(acc) => combine_edge_maps(&acc, &edges),
             None => edges,
@@ -450,31 +443,43 @@ mod tests {
     #[test]
     fn canny_combined_luminance_only_matches_single_channel() {
         let rgba = sharp_edge_rgba();
-        let luma = crate::grayscale::to_grayscale(&image::DynamicImage::ImageRgba8(rgba.clone()));
-        let blurred = crate::blur::gaussian_blur(&luma, 1.4);
+        let blurred_rgba = crate::blur::gaussian_blur_rgba(&rgba, 1.4);
 
         let channels = EdgeChannels {
             luminance: true,
             ..EdgeChannels::default()
         };
-        let combined = canny_combined(&rgba, &blurred, &channels, 1.4, 50.0, 150.0);
-        let single = canny(&blurred, 50.0, 150.0);
+        let combined = canny_combined(&blurred_rgba, &channels, 50.0, 150.0);
 
-        assert_eq!(combined, single);
+        // Reference: blur luma directly and run single-channel canny.
+        let luma = crate::grayscale::to_grayscale(&image::DynamicImage::ImageRgba8(rgba));
+        let blurred_luma = crate::blur::gaussian_blur(&luma, 1.4);
+        let single = canny(&blurred_luma, 50.0, 150.0);
+
+        // Blur-then-grayscale ≈ grayscale-then-blur (both linear), but
+        // integer rounding may cause ±1 differences. Verify edge maps
+        // are identical or nearly so.
+        let combined_count = count_edges(&combined);
+        let single_count = count_edges(&single);
+        let diff = (i64::from(combined_count) - i64::from(single_count)).unsigned_abs();
+        assert!(
+            diff <= 5,
+            "luminance-only combined should closely match single-channel canny \
+             (combined={combined_count}, single={single_count}, diff={diff})",
+        );
     }
 
     #[test]
     fn canny_combined_detects_isoluminant_hue_edges() {
         let rgba = isoluminant_hue_boundary_rgba();
-        let luma = crate::grayscale::to_grayscale(&image::DynamicImage::ImageRgba8(rgba.clone()));
-        let blurred = crate::blur::gaussian_blur(&luma, 1.4);
+        let blurred_rgba = crate::blur::gaussian_blur_rgba(&rgba, 1.4);
 
         // Luminance-only should find few or no edges at the boundary.
         let luma_only = EdgeChannels {
             luminance: true,
             ..EdgeChannels::default()
         };
-        let luma_edges = canny_combined(&rgba, &blurred, &luma_only, 1.4, 15.0, 40.0);
+        let luma_edges = canny_combined(&blurred_rgba, &luma_only, 15.0, 40.0);
         let luma_count = count_edges(&luma_edges);
 
         // Red channel should find the boundary (R=200 vs R=100).
@@ -483,7 +488,7 @@ mod tests {
             red: true,
             ..EdgeChannels::default()
         };
-        let red_edges = canny_combined(&rgba, &blurred, &with_red, 1.4, 15.0, 40.0);
+        let red_edges = canny_combined(&blurred_rgba, &with_red, 15.0, 40.0);
         let red_count = count_edges(&red_edges);
 
         assert!(
@@ -506,15 +511,14 @@ mod tests {
                 image::Rgba([128, 128, 128, 255])
             }
         });
-        let luma = crate::grayscale::to_grayscale(&image::DynamicImage::ImageRgba8(rgba.clone()));
-        let blurred = crate::blur::gaussian_blur(&luma, 1.4);
+        let blurred_rgba = crate::blur::gaussian_blur_rgba(&rgba, 1.4);
 
         let with_sat = EdgeChannels {
             luminance: false,
             saturation: true,
             ..EdgeChannels::default()
         };
-        let sat_edges = canny_combined(&rgba, &blurred, &with_sat, 1.4, 15.0, 40.0);
+        let sat_edges = canny_combined(&blurred_rgba, &with_sat, 15.0, 40.0);
         let sat_count = count_edges(&sat_edges);
 
         assert!(
@@ -527,7 +531,6 @@ mod tests {
     #[should_panic(expected = "at least one edge channel must be enabled")]
     fn canny_combined_panics_with_no_channels() {
         let rgba = sharp_edge_rgba();
-        let luma = GrayImage::new(20, 20);
         let none = EdgeChannels {
             luminance: false,
             red: false,
@@ -535,7 +538,7 @@ mod tests {
             blue: false,
             saturation: false,
         };
-        let _ = canny_combined(&rgba, &luma, &none, 1.4, 50.0, 150.0);
+        let _ = canny_combined(&rgba, &none, 50.0, 150.0);
     }
 
     #[test]

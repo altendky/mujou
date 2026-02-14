@@ -25,10 +25,10 @@ All subsequent pipeline stages operate at this reduced resolution.
 
 ### 3. Gaussian Blur
 
-Convert the RGBA image to grayscale (BT.601 luminance formula: `0.299*R + 0.587*G + 0.114*B`) and smooth the result to reduce noise before edge detection.
-Use `imageproc::filter::gaussian_blur_f32(image, sigma)`.
+Smooth the RGBA image to reduce noise before edge detection.
+Each R/G/B/A channel is blurred independently using `imageproc::filter::gaussian_blur_f32(channel, sigma)`.
 
-The grayscale conversion is an internal implementation detail of the blur stage (it prepares the luminance channel for edge detection). When non-luminance edge channels are enabled, those channels are extracted and blurred independently inside the edge detection step.
+Operating on the full RGBA image means the blur preview in the UI shows color (not grayscale), and downstream edge detection can extract already-blurred channels without redundant per-channel blurring. Mathematically, blurring each channel independently then extracting a derived channel (e.g. luminance) is equivalent to extracting the channel first then blurring, since Gaussian blur is a linear per-channel operation.
 
 **User parameter:** `blur_sigma` (f32, default: 1.4)
 
@@ -50,7 +50,7 @@ Canny runs independently on each enabled channel. The per-channel edge maps are 
 | Blue | B from RGBA | off | Skin appears dark; tends to be noisier |
 | Saturation | S from HSV | off | Highlights hue boundaries (lips, colored clothing) |
 
-Non-luminance channels are independently blurred (using the same `blur_sigma`) before Canny is applied.
+All channels are extracted from the already-blurred RGBA image (step 3), so no additional per-channel blurring is needed.
 
 See [#96](https://github.com/altendky/mujou/issues/96) for planned future channels (Hue, Value, Lab).
 
