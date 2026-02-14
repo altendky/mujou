@@ -9,10 +9,13 @@
 //! creates Blob URLs from the pre-encoded bytes — a near-instant
 //! operation that doesn't block the UI.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use mujou_pipeline::{Dimensions, MaskResult, PipelineConfig, PipelineError, Polyline};
+
+use crate::stage::StageId;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -67,6 +70,24 @@ impl WorkerResult {
     #[must_use]
     pub const fn final_polyline(&self) -> &Polyline {
         &self.joined
+    }
+
+    /// Select the polylines to display for a given vector stage.
+    ///
+    /// Returns the appropriate polyline slice for Contours, Simplified,
+    /// and Masked stages. For Masked, all polylines (clipped + border)
+    /// are collected; if no mask result is available, falls back to
+    /// simplified.
+    #[must_use]
+    pub fn polylines_for_stage(&self, stage: StageId) -> Cow<'_, [Polyline]> {
+        match stage {
+            StageId::Contours => Cow::Borrowed(&self.contours),
+            StageId::Masked => self.masked.as_ref().map_or_else(
+                || Cow::Borrowed(self.simplified.as_slice()),
+                |mr| Cow::Owned(mr.all_polylines().cloned().collect()),
+            ),
+            _ => Cow::Borrowed(&self.simplified),
+        }
     }
 }
 

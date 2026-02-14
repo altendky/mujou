@@ -138,19 +138,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
         }
 
         StageId::Contours | StageId::Simplified | StageId::Masked => {
-            let mask_polylines;
-            let polylines: &[mujou_pipeline::Polyline] = match stage {
-                StageId::Contours => &result.contours,
-                StageId::Masked => {
-                    if let Some(mr) = &result.masked {
-                        mask_polylines = mr.all_polylines().cloned().collect::<Vec<_>>();
-                        &mask_polylines
-                    } else {
-                        &result.simplified
-                    }
-                }
-                _ => &result.simplified,
-            };
+            let polylines = result.polylines_for_stage(stage);
             let w = result.dimensions.width;
             let h = result.dimensions.height;
             let view_box = format!("0 0 {w} {h}");

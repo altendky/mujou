@@ -120,21 +120,9 @@ fn render_raster_edges(result: &WorkerResult, visible: bool, is_dark: bool) -> E
 fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u32) -> Element {
     match selected {
         StageId::Contours | StageId::Simplified | StageId::Masked => {
-            let mask_polylines;
-            let polylines: &[mujou_pipeline::Polyline] = match selected {
-                StageId::Contours => &result.contours,
-                StageId::Masked => {
-                    if let Some(mr) = &result.masked {
-                        mask_polylines = mr.all_polylines().cloned().collect::<Vec<_>>();
-                        &mask_polylines
-                    } else {
-                        &result.simplified
-                    }
-                }
-                _ => &result.simplified,
-            };
+            let polylines = result.polylines_for_stage(selected);
             let view_box = format!("0 0 {w} {h}");
-            let path_data = build_multi_path_data(polylines);
+            let path_data = build_multi_path_data(&polylines);
 
             rsx! {
                 svg {
