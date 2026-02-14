@@ -336,7 +336,7 @@ impl PipelineConfig {
     /// Default Canny slider maximum.
     pub const DEFAULT_CANNY_MAX: f32 = 60.0;
     /// Default RDP simplification tolerance in pixels.
-    pub const DEFAULT_SIMPLIFY_TOLERANCE: f64 = 2.0;
+    pub const DEFAULT_SIMPLIFY_TOLERANCE: f64 = 1.0;
     /// Default circular mask enabled state.
     pub const DEFAULT_CIRCULAR_MASK: bool = true;
     /// Default mask diameter as a fraction of image diagonal.
@@ -348,7 +348,7 @@ impl PipelineConfig {
     /// Default downsample filter.
     pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Triangle;
     /// Default MST nearest-neighbour candidate count per sample point.
-    pub const DEFAULT_MST_NEIGHBOURS: usize = 100;
+    pub const DEFAULT_MST_NEIGHBOURS: usize = 20;
     /// Default edge channels (luminance only).
     pub const DEFAULT_EDGE_CHANNELS: EdgeChannels = EdgeChannels {
         luminance: true,
@@ -854,14 +854,14 @@ mod tests {
         assert!((config.canny_high - 40.0).abs() < f32::EPSILON);
         assert!((config.canny_max - 60.0).abs() < f32::EPSILON);
         assert_eq!(config.contour_tracer, ContourTracerKind::BorderFollowing);
-        assert!((config.simplify_tolerance - 2.0).abs() < f64::EPSILON);
+        assert!((config.simplify_tolerance - 1.0).abs() < f64::EPSILON);
         assert_eq!(config.path_joiner, PathJoinerKind::Mst);
         assert!(config.circular_mask);
         assert!((config.mask_diameter - 0.75).abs() < f64::EPSILON);
         assert!(!config.invert);
         assert_eq!(config.working_resolution, 1000);
         assert_eq!(config.downsample_filter, DownsampleFilter::Triangle);
-        assert_eq!(config.mst_neighbours, 100);
+        assert_eq!(config.mst_neighbours, 20);
         assert_eq!(config.edge_channels, EdgeChannels::default());
         assert!(config.edge_channels.luminance);
         assert!(!config.edge_channels.red);
