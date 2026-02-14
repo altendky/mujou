@@ -344,6 +344,24 @@ fn app() -> Element {
             ExportPanel {
                 result: result(),
                 filename: filename(),
+                config_description: {
+                    let cfg = committed_config();
+                    format!(
+                        "blur={}, canny={}/{}, simplify={}, tracer={:?}, joiner={:?}, mask={}, res={}",
+                        cfg.blur_sigma,
+                        cfg.canny_low,
+                        cfg.canny_high,
+                        cfg.simplify_tolerance,
+                        cfg.contour_tracer,
+                        cfg.path_joiner,
+                        if cfg.circular_mask {
+                            format!("{:.0}%", cfg.mask_diameter * 100.0)
+                        } else {
+                            "off".to_owned()
+                        },
+                        cfg.working_resolution,
+                    )
+                },
                 show: show_export,
             }
 

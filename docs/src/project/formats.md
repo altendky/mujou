@@ -95,6 +95,8 @@ Useful for plotters, laser cutters, vinyl cutters, or viewing in a browser.
 ### Format Specification
 
 - Standard SVG XML
+- Optional `<title>` element with the source image name (for accessibility and file manager identification)
+- Optional `<desc>` element with pipeline parameters and export timestamp
 - Each polyline becomes a `<path>` element with a `d` attribute containing `M` (move to) and `L` (line to) commands
 - Disconnected contours are separate `<path>` elements
 - `viewBox` set to the image dimensions
@@ -103,7 +105,10 @@ Useful for plotters, laser cutters, vinyl cutters, or viewing in a browser.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600">
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600" viewBox="0 0 800 600">
+  <title>cherry-blossoms</title>
+  <desc>blur=1.4, canny=15/40, simplify=2, tracer=BorderFollowing, joiner=Mst, mask=75%, res=256
+Exported: 2026-02-14_12-30-45</desc>
   <path d="M 10.0 15.0 L 12.5 18.3 L 14.0 20.1" fill="none" stroke="black" stroke-width="1"/>
   <path d="M 30.0 5.0 L 32.5 7.8 L 35.0 10.2" fill="none" stroke="black" stroke-width="1"/>
 </svg>
