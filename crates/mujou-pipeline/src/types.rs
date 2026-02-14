@@ -306,6 +306,7 @@ pub struct PipelineConfig {
     /// Canny is run independently on each enabled channel and the
     /// results are combined via pixel-wise maximum. See [`EdgeChannels`]
     /// for per-channel documentation.
+    #[serde(default)]
     pub edge_channels: EdgeChannels,
 }
 
@@ -1038,6 +1039,31 @@ mod tests {
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: PipelineConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(config, deserialized);
+    }
+
+    #[test]
+    fn pipeline_config_deserializes_without_edge_channels() {
+        // Old configs from before edge_channels was added should still
+        // deserialize, falling back to EdgeChannels::default() (luminance only).
+        let json = r#"{
+            "blur_sigma": 1.4,
+            "canny_low": 15.0,
+            "canny_high": 40.0,
+            "canny_max": 60.0,
+            "contour_tracer": "BorderFollowing",
+            "simplify_tolerance": 2.0,
+            "path_joiner": "Mst",
+            "circular_mask": true,
+            "mask_diameter": 1.0,
+            "invert": false,
+            "working_resolution": 256,
+            "downsample_filter": "Disabled",
+            "mst_neighbours": 100
+        }"#;
+        let config: PipelineConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.edge_channels, EdgeChannels::default());
+        assert!(config.edge_channels.luminance);
+        assert!(!config.edge_channels.red);
     }
 
     #[test]
