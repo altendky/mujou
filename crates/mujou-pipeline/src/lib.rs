@@ -28,7 +28,7 @@ pub use diagnostics::PipelineDiagnostics;
 pub use downsample::DownsampleFilter;
 pub use edge::max_gradient_magnitude;
 pub use join::{PathJoiner, PathJoinerKind};
-pub use pipeline::Pipeline;
+pub use pipeline::{Pipeline, PipelineCache};
 pub use types::{
     Dimensions, EdgeChannels, GrayImage, PipelineConfig, PipelineError, Point, Polyline,
     ProcessResult, RgbaImage, StagedResult,

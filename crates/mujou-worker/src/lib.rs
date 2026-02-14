@@ -2,7 +2,7 @@
 //!
 //! This crate compiles to a standalone WASM module that runs inside a
 //! `Worker`. It receives image bytes, a `PipelineConfig`, and theme
-//! colors via `postMessage`, runs `mujou_pipeline::process_staged`,
+//! colors via `postMessage`, runs the pipeline with per-stage caching,
 //! encodes all raster stages to PNG, and posts the results back.
 //!
 //! PNG encoding happens here (off the main thread) so the browser's
@@ -11,12 +11,31 @@
 //!
 //! Vector data (polylines, dimensions) is sent as a small JSON string.
 //! Raster data is sent as pre-encoded PNG `Uint8Array` buffers.
+//!
+//! # Stage caching
+//!
+//! The worker retains a [`PipelineCache`] from the last successful run.
+//! On subsequent runs with the same image, only stages affected by
+//! config changes (and their downstream dependents) are re-executed.
+//! When the worker is terminated and recreated (cancel), the cache is
+//! lost and the next run is a full pipeline execution.
+
+use std::cell::RefCell;
 
 use image::ImageEncoder;
-use mujou_pipeline::{Dimensions, GrayImage, Polyline, StagedResult};
+use mujou_pipeline::{Dimensions, GrayImage, PipelineCache, Polyline, StagedResult};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
+
+thread_local! {
+    /// Cached pipeline state from the last successful run.
+    ///
+    /// Populated after each successful pipeline execution and consumed
+    /// (taken) at the start of the next run.  Lost when the worker is
+    /// terminated.
+    static PIPELINE_CACHE: RefCell<Option<PipelineCache>> = const { RefCell::new(None) };
+}
 
 /// The vector (non-raster) portion of a `StagedResult`, serialized as
 /// JSON. Raster images are sent separately as pre-encoded PNG buffers.
@@ -128,21 +147,18 @@ fn handle_message(event: web_sys::MessageEvent) {
     };
     log("worker: config parsed, running pipeline");
 
-    // Run the pipeline (synchronous — blocks this worker thread only).
-    let outcome = (|| {
-        use mujou_pipeline::pipeline::{Advance, Stage};
+    // Take the cache from the previous run (if any).
+    let prev_cache = PIPELINE_CACHE.with(|c| c.borrow_mut().take());
 
-        let mut stage: Stage = mujou_pipeline::Pipeline::new(image_bytes, config).into();
-        loop {
-            match stage.advance()? {
-                Advance::Next(next) => stage = next,
-                Advance::Complete(done) => break done.complete(),
-            }
-        }
-    })();
+    // Run the pipeline with caching — only changed stages are re-executed
+    // when the image is the same as the previous run.
+    let outcome = PipelineCache::run(prev_cache, image_bytes, config);
 
     match outcome {
-        Ok(staged) => {
+        Ok((staged, new_cache)) => {
+            // Store the updated cache for the next run.
+            PIPELINE_CACHE.with(|c| *c.borrow_mut() = Some(new_cache));
+
             log(&format!(
                 "worker: pipeline ok, {}x{}, encoding PNGs",
                 staged.dimensions.width, staged.dimensions.height,
@@ -151,6 +167,9 @@ fn handle_message(event: web_sys::MessageEvent) {
             log("worker: response posted");
         }
         Err(e) => {
+            // Clear cache on error to avoid stale state.
+            PIPELINE_CACHE.with(|c| *c.borrow_mut() = None);
+
             log(&format!("worker: pipeline error: {e}"));
             let error_json = serde_json::to_string(&e).unwrap_or_else(|ser_err| {
                 serde_json::to_string(&format!("serialization error: {ser_err}"))
