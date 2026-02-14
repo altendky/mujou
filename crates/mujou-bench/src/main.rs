@@ -84,6 +84,13 @@ struct Cli {
     /// Output diagnostics as JSON instead of human-readable report.
     #[arg(long)]
     json: bool,
+
+    /// Full pipeline config as a JSON string.
+    ///
+    /// When provided, all other pipeline parameter flags are ignored.
+    /// The JSON must be a valid `PipelineConfig` serialization.
+    #[arg(long)]
+    config_json: Option<String>,
 }
 
 /// Path joining strategy selection.
@@ -131,10 +138,17 @@ const fn filter_from_pipeline(f: mujou_pipeline::DownsampleFilter) -> Filter {
 const CLI_DEFAULT_FILTER: Filter =
     filter_from_pipeline(mujou_pipeline::PipelineConfig::DEFAULT_DOWNSAMPLE_FILTER);
 
-fn main() -> ExitCode {
-    let cli = Cli::parse();
+/// Build a [`PipelineConfig`](mujou_pipeline::PipelineConfig) from CLI arguments.
+///
+/// If `--config-json` is provided, the JSON is parsed directly and all
+/// individual parameter flags are ignored.  Otherwise, a config is
+/// assembled from the individual flags.
+fn config_from_cli(cli: &Cli) -> Result<mujou_pipeline::PipelineConfig, String> {
+    if let Some(ref json) = cli.config_json {
+        return serde_json::from_str(json).map_err(|e| format!("Error parsing --config-json: {e}"));
+    }
 
-    let config = mujou_pipeline::PipelineConfig {
+    Ok(mujou_pipeline::PipelineConfig {
         blur_sigma: cli.blur_sigma,
         canny_low: cli.canny_low,
         canny_high: cli.canny_high,
@@ -157,6 +171,18 @@ fn main() -> ExitCode {
             Filter::Lanczos3 => mujou_pipeline::DownsampleFilter::Lanczos3,
         },
         ..mujou_pipeline::PipelineConfig::default()
+    })
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+
+    let config = match config_from_cli(&cli) {
+        Ok(c) => c,
+        Err(msg) => {
+            eprintln!("{msg}");
+            return ExitCode::FAILURE;
+        }
     };
 
     let image_bytes = match std::fs::read(&cli.image_path) {
