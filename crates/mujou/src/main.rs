@@ -541,11 +541,12 @@ fn app() -> Element {
                                 div { class: "absolute inset-0 flex items-center justify-center",
                                     div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
                                         // Total elapsed time
-                                        p { class: "text-(--text-secondary) text-sm",
-                                            if pipeline_finished() {
-                                                "Completed ({format_elapsed(elapsed_ms())})"
-                                            } else {
-                                                "Processing... ({format_elapsed(elapsed_ms())})"
+                                        div { class: "flex justify-between w-full text-sm text-(--text-secondary)",
+                                            span {
+                                                if pipeline_finished() { "Completed" } else { "Processing..." }
+                                            }
+                                            span { class: "tabular-nums",
+                                                "{format_elapsed(elapsed_ms())}"
                                             }
                                         }
                                         // Separator
@@ -592,7 +593,7 @@ fn app() -> Element {
                                             }
                                             if pipeline_finished() {
                                                 button {
-                                                    class: "text-xs px-3 py-1 rounded bg-[var(--btn-primary)] text-white hover:bg-[var(--btn-primary-hover)] cursor-pointer",
+                                                    class: "text-xs px-3 py-1 rounded bg-[var(--btn-primary)] text-white hover:bg-[var(--btn-primary-hover)] border border-transparent cursor-pointer",
                                                     onclick: on_cancel_or_done,
                                                     "Done"
                                                 }
