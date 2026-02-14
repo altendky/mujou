@@ -48,6 +48,10 @@ struct StageProgressEntry {
     status: StageStatus,
     /// Elapsed time in milliseconds (final for completed, live for running).
     elapsed_ms: f64,
+    /// Whether this stage was served from the pipeline cache rather
+    /// than actually computed.  When `true`, the UI shows "-" instead
+    /// of a timing value.
+    cached: bool,
 }
 
 /// Cherry blossoms example image bundled at compile time so the app
@@ -124,6 +128,7 @@ fn app() -> Element {
             stage,
             status: StageStatus::Pending,
             elapsed_ms: 0.0,
+            cached: false,
         })
     });
 
@@ -197,6 +202,7 @@ fn app() -> Element {
             stage,
             status: StageStatus::Pending,
             elapsed_ms: 0.0,
+            cached: false,
         }));
         current_stage_start.set(None);
 
@@ -241,7 +247,7 @@ fn app() -> Element {
             // belongs to the UI stage for index N. The *next* piece of
             // work (advance FROM state N) will produce state N+1, so
             // we start the UI stage for N+1 running.
-            let on_progress = move |backend_index: usize| {
+            let on_progress = move |backend_index: usize, cached: bool| {
                 let now = js_sys::Date::now();
                 let mut entries = *stage_progress.peek();
 
@@ -263,11 +269,28 @@ fn app() -> Element {
                     if let Some(ui_idx) = entries.iter().position(|e| e.stage == next_ui_stage) {
                         entries[ui_idx].status = StageStatus::Running;
                         entries[ui_idx].elapsed_ms = 0.0;
+                        entries[ui_idx].cached = false;
                         current_stage_start.set(Some(now));
                     }
                 } else {
                     // Last pipeline stage — no more work to attribute.
                     current_stage_start.set(None);
+                }
+
+                // Apply the cached flag last so it overrides any
+                // transient Running state set above. Multiple backend
+                // indices can map to the same UI stage (e.g. 0 and 1
+                // both map to Original), so a cached stage may have
+                // been briefly set to Running by the "start next"
+                // block and needs to be stamped back to
+                // Completed+cached.
+                if cached
+                    && let Some(ui_stage) = StageId::from_pipeline_index(backend_index)
+                    && let Some(ui_idx) = entries.iter().position(|e| e.stage == ui_stage)
+                {
+                    entries[ui_idx].status = StageStatus::Completed;
+                    entries[ui_idx].elapsed_ms = 0.0;
+                    entries[ui_idx].cached = true;
                 }
 
                 stage_progress.set(entries);
@@ -572,6 +595,7 @@ fn app() -> Element {
                                                             StageStatus::Pending => "",
                                                         },
                                                         match entry.status {
+                                                            StageStatus::Completed if entry.cached => "-".to_string(),
                                                             StageStatus::Running | StageStatus::Completed => format_elapsed(entry.elapsed_ms),
                                                             StageStatus::Pending => String::new(),
                                                         }

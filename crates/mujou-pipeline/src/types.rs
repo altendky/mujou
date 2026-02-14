@@ -505,6 +505,88 @@ impl PipelineConfig {
             && *mst_neighbours == other.mst_neighbours
             && *edge_channels == other.edge_channels
     }
+
+    /// Return the zero-based index of the earliest pipeline stage whose
+    /// output would differ between `self` and `other`, given the same
+    /// input image.
+    ///
+    /// Stages 0 (pending) and 1 (decode) have no config dependencies —
+    /// they only depend on the source image bytes.  The earliest stage
+    /// that can be invalidated by a config change is stage 2
+    /// (downsample).
+    ///
+    /// Returns [`pipeline::STAGE_COUNT`](crate::pipeline::STAGE_COUNT)
+    /// when the configs are pipeline-equivalent (identical modulo
+    /// UI-only fields like `canny_max`).
+    ///
+    /// Uses exhaustive destructuring so that adding a field to
+    /// [`PipelineConfig`] without updating this method causes a compile
+    /// error.
+    #[must_use]
+    #[allow(clippy::float_cmp)]
+    pub fn earliest_changed_stage(&self, other: &Self) -> usize {
+        // Destructure to enforce compile-time coverage of all fields.
+        let Self {
+            blur_sigma,
+            canny_low,
+            canny_high,
+            canny_max: _,
+            contour_tracer,
+            simplify_tolerance,
+            path_joiner,
+            circular_mask,
+            mask_diameter,
+            invert,
+            working_resolution,
+            downsample_filter,
+            mst_neighbours,
+            edge_channels,
+        } = self;
+
+        // Stage 2 — downsample: working_resolution, downsample_filter
+        if *working_resolution != other.working_resolution
+            || *downsample_filter != other.downsample_filter
+        {
+            return 2;
+        }
+
+        // Stage 3 — blur: blur_sigma
+        if *blur_sigma != other.blur_sigma {
+            return 3;
+        }
+
+        // Stage 4 — edge detection: edge_channels, canny_low, canny_high, invert
+        if *edge_channels != other.edge_channels
+            || *canny_low != other.canny_low
+            || *canny_high != other.canny_high
+            || *invert != other.invert
+        {
+            return 4;
+        }
+
+        // Stage 5 — contour tracing: contour_tracer
+        if *contour_tracer != other.contour_tracer {
+            return 5;
+        }
+
+        // Stage 6 — simplification: simplify_tolerance
+        if *simplify_tolerance != other.simplify_tolerance {
+            return 6;
+        }
+
+        // Stage 7 — masking: circular_mask, mask_diameter
+        if *circular_mask != other.circular_mask || *mask_diameter != other.mask_diameter {
+            return 7;
+        }
+
+        // Stage 8 — joining: path_joiner, mst_neighbours
+        if *path_joiner != other.path_joiner || *mst_neighbours != other.mst_neighbours {
+            return 8;
+        }
+
+        // All pipeline-relevant fields match.
+        crate::pipeline::STAGE_COUNT
+    }
 }
 
 /// Result of running the full image processing pipeline.
@@ -1253,5 +1335,183 @@ mod tests {
         let deserialized: Result<StagedResult, PipelineError> =
             serde_json::from_str(&json).unwrap();
         assert!(matches!(deserialized, Err(PipelineError::NoContours)));
+    }
+
+    // ─────────── earliest_changed_stage tests ────────────────────
+
+    #[test]
+    fn earliest_changed_stage_identical_configs() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig::default();
+        assert_eq!(a.earliest_changed_stage(&b), crate::pipeline::STAGE_COUNT,);
+    }
+
+    #[test]
+    fn earliest_changed_stage_canny_max_is_ui_only() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            canny_max: 200.0,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), crate::pipeline::STAGE_COUNT,);
+    }
+
+    #[test]
+    fn earliest_changed_stage_working_resolution() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            working_resolution: 512,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 2);
+    }
+
+    #[test]
+    fn earliest_changed_stage_downsample_filter() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            downsample_filter: crate::DownsampleFilter::Lanczos3,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 2);
+    }
+
+    #[test]
+    fn earliest_changed_stage_blur_sigma() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            blur_sigma: 3.0,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 3);
+    }
+
+    #[test]
+    fn earliest_changed_stage_canny_low() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            canny_low: 20.0,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 4);
+    }
+
+    #[test]
+    fn earliest_changed_stage_canny_high() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            canny_high: 50.0,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 4);
+    }
+
+    #[test]
+    fn earliest_changed_stage_invert() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            invert: true,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 4);
+    }
+
+    #[test]
+    fn earliest_changed_stage_edge_channels() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            edge_channels: EdgeChannels {
+                luminance: true,
+                red: true,
+                ..EdgeChannels::default()
+            },
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 4);
+    }
+
+    #[test]
+    fn earliest_changed_stage_simplify_tolerance() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            simplify_tolerance: 5.0,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 6);
+    }
+
+    #[test]
+    fn earliest_changed_stage_circular_mask() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            circular_mask: !a.circular_mask,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 7);
+    }
+
+    #[test]
+    fn earliest_changed_stage_mask_diameter() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            mask_diameter: 1.2,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 7);
+    }
+
+    #[test]
+    fn earliest_changed_stage_path_joiner() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            path_joiner: crate::PathJoinerKind::StraightLine,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 8);
+    }
+
+    #[test]
+    fn earliest_changed_stage_mst_neighbours() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            mst_neighbours: 50,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 8);
+    }
+
+    #[test]
+    fn earliest_changed_stage_returns_earliest() {
+        // When both blur_sigma (stage 3) and mask_diameter (stage 7)
+        // change, the earliest stage should be 3.
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            blur_sigma: 5.0,
+            mask_diameter: 1.2,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 3);
+    }
+
+    #[test]
+    fn earliest_changed_stage_consistent_with_pipeline_eq() {
+        // If pipeline_eq returns true, earliest_changed_stage should
+        // return STAGE_COUNT (no change).
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            canny_max: 200.0,
+            ..PipelineConfig::default()
+        };
+        assert!(a.pipeline_eq(&b));
+        assert_eq!(a.earliest_changed_stage(&b), crate::pipeline::STAGE_COUNT,);
+
+        // If pipeline_eq returns false, earliest_changed_stage should
+        // return a value less than STAGE_COUNT.
+        let c = PipelineConfig {
+            blur_sigma: 5.0,
+            ..PipelineConfig::default()
+        };
+        assert!(!a.pipeline_eq(&c));
+        assert!(a.earliest_changed_stage(&c) < crate::pipeline::STAGE_COUNT);
     }
 }

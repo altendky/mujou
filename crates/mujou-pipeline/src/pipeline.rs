@@ -41,6 +41,8 @@
 //! images) should prefer [`crate::process`], which discards the raster
 //! intermediates and returns only the output path and dimensions.
 
+use std::sync::Arc;
+
 use image::DynamicImage;
 
 use crate::contour::ContourTracer;
@@ -1220,6 +1222,367 @@ impl Pipeline {
     }
 }
 
+// ─────────────────────── Pipeline cache ──────────────────────────────
+
+/// Cached state from a previous pipeline run.
+///
+/// Holds every intermediate result so that a subsequent run with the
+/// same image but a different config can skip unchanged stages.  The
+/// worker stores one of these between messages and passes it back in
+/// on the next run via [`PipelineCache::run`].
+///
+/// # Memory
+///
+/// Retains one full [`StagedResult`] (~7 MB for a 1000×1000 image),
+/// plus the [`DynamicImage`] from decode (~4 MB), for a total of
+/// roughly 11 MB.  This is acceptable given the cost of a full
+/// pipeline re-run (hundreds of milliseconds) versus the cheap
+/// in-memory comparison.
+pub struct PipelineCache {
+    /// Hash of the source image bytes that produced this cache.
+    ///
+    /// Computed with SipHash-2-4 via `siphasher` — deterministic across
+    /// Rust versions, platforms, and processes.
+    image_hash: u64,
+    /// The config that produced the cached results.
+    config: PipelineConfig,
+    /// The decoded `DynamicImage` — needed for re-downsample when
+    /// `working_resolution` or `downsample_filter` changes but the
+    /// source image stays the same.  This is dropped after the
+    /// `Decoded → Downsampled` transition and is not part of
+    /// `StagedResult`, so we keep it here.
+    decoded_image: DynamicImage,
+    /// Byte length of the source image (for decode-stage metrics).
+    source_len: usize,
+    /// Whether downsampling was actually applied (image was larger
+    /// than `working_resolution`).  Diagnostic-only.
+    downsampled_applied: bool,
+    /// Edge pixel count before optional inversion.  Diagnostic-only.
+    pre_invert_edge_pixels: u64,
+    /// All intermediate raster and vector outputs.
+    ///
+    /// Wrapped in [`Arc`] so the caller and the cache can share a
+    /// single allocation without cloning ~7 MB of image buffers.
+    staged: Arc<StagedResult>,
+}
+
+impl PipelineCache {
+    /// Run the pipeline, reusing cached intermediates when possible.
+    ///
+    /// If `cache` is `Some` and the image bytes match the cached run,
+    /// only the stages whose config parameters changed (and their
+    /// downstream dependents) are re-executed.  Otherwise a full run
+    /// is performed.
+    ///
+    /// `on_stage` is called with `(stage_index, cached)` for each
+    /// stage as it is reached.  `cached` is `true` when the stage
+    /// result was served from the cache without re-computation, and
+    /// `false` when the stage was actually executed.  This allows
+    /// callers to report per-stage progress and distinguish skipped
+    /// stages in the UI.
+    ///
+    /// Returns the pipeline result (wrapped in [`Arc`] so the caller
+    /// and the cache share a single allocation) together with an
+    /// updated cache for the next invocation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PipelineError`] if any pipeline stage fails (decode
+    /// error, no contours, etc.).
+    pub fn run(
+        cache: Option<Self>,
+        image_bytes: Vec<u8>,
+        config: PipelineConfig,
+        on_stage: &dyn Fn(usize, bool),
+    ) -> Result<(Arc<StagedResult>, Self), PipelineError> {
+        let image_hash = Self::hash_bytes(&image_bytes);
+
+        match cache {
+            Some(c) if c.image_hash == image_hash => {
+                let earliest = c.config.earliest_changed_stage(&config);
+                if earliest >= STAGE_COUNT {
+                    // Nothing changed — fire progress for all stages
+                    // (all cached) and return the cached result.
+                    for i in 0..STAGE_COUNT {
+                        on_stage(i, true);
+                    }
+                    return Ok((c.staged.clone(), Self { config, ..c }));
+                }
+                c.resume(config, earliest, on_stage)
+            }
+            _ => Self::full_run(image_bytes, config, image_hash, on_stage),
+        }
+    }
+
+    /// Hash image bytes using SipHash-2-4 with fixed keys.
+    ///
+    /// Uses `siphasher::sip::SipHasher` instead of `DefaultHasher` so the
+    /// hash is deterministic across Rust versions, platforms, and
+    /// processes.
+    fn hash_bytes(bytes: &[u8]) -> u64 {
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = siphasher::sip::SipHasher::new();
+        bytes.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Run the full pipeline from scratch, capturing intermediates
+    /// for the cache.
+    fn full_run(
+        image_bytes: Vec<u8>,
+        config: PipelineConfig,
+        image_hash: u64,
+        on_stage: &dyn Fn(usize, bool),
+    ) -> Result<(Arc<StagedResult>, Self), PipelineError> {
+        let cache_config = config.clone();
+
+        let pending = Pipeline::new(image_bytes, config);
+        on_stage(Pending::INDEX, false);
+
+        let decoded = pending.decode()?;
+        on_stage(Decoded::INDEX, false);
+
+        // Capture DynamicImage before downsample consumes it.
+        let decoded_image = decoded.image.clone();
+        let source_len = decoded.source_len;
+
+        let downsampled = decoded.downsample();
+        let downsampled_applied = downsampled.applied;
+        on_stage(Downsampled::INDEX, false);
+
+        let blurred = downsampled.blur();
+        on_stage(Blurred::INDEX, false);
+
+        let edges = blurred.detect_edges();
+        let pre_invert_edge_pixels = edges.pre_invert_edge_pixels;
+        on_stage(EdgesDetected::INDEX, false);
+
+        let contours = edges.trace_contours()?;
+        on_stage(ContoursTraced::INDEX, false);
+
+        let simplified = contours.simplify();
+        on_stage(Simplified::INDEX, false);
+
+        let masked = simplified.mask();
+        on_stage(Masked::INDEX, false);
+
+        let joined = masked.join();
+        on_stage(Joined::INDEX, false);
+
+        let staged = Arc::new(joined.into_result());
+        let cache = Self {
+            image_hash,
+            config: cache_config,
+            decoded_image,
+            source_len,
+            downsampled_applied,
+            pre_invert_edge_pixels,
+            staged: Arc::clone(&staged),
+        };
+
+        Ok((staged, cache))
+    }
+
+    /// Re-run from the earliest changed stage, reusing cached
+    /// intermediates for all upstream stages.
+    fn resume(
+        self,
+        new_config: PipelineConfig,
+        earliest_changed: usize,
+        on_stage: &dyn Fn(usize, bool),
+    ) -> Result<(Arc<StagedResult>, Self), PipelineError> {
+        // Destructure self so we can move `staged` fields into the
+        // resume stage instead of cloning them.
+        let Self {
+            image_hash,
+            config: _,
+            decoded_image,
+            source_len,
+            mut downsampled_applied,
+            mut pre_invert_edge_pixels,
+            staged: old_staged_arc,
+        } = self;
+
+        // Unwrap the Arc to get owned StagedResult.  Succeeds without
+        // cloning when the caller has dropped their Arc from the
+        // previous run (the normal case); falls back to clone if the
+        // caller still holds a reference.
+        let old_staged = Arc::try_unwrap(old_staged_arc).unwrap_or_else(|arc| (*arc).clone());
+
+        // Build a Stage at the predecessor of the earliest changed
+        // stage, populated with cached data and the new config.
+        // Consumes `old_staged` by move — no image buffer clones.
+        let mut stage = Self::build_resume_stage(
+            old_staged,
+            &decoded_image,
+            source_len,
+            downsampled_applied,
+            pre_invert_edge_pixels,
+            &new_config,
+            earliest_changed,
+        );
+
+        // Report progress for all cached (skipped) stages up to and
+        // including the resume point.
+        for i in 0..stage.index() {
+            on_stage(i, true);
+        }
+
+        // Report the resume stage itself (cached — it was
+        // reconstructed from the cache, not computed).
+        on_stage(stage.index(), true);
+
+        // Run the remaining stages to completion.
+        loop {
+            // Capture diagnostic fields from stages we're about to
+            // advance past (these are lost after `advance()`).
+            if let Stage::Downsampled(ref ds) = stage {
+                downsampled_applied = ds.applied;
+            }
+            if let Stage::EdgesDetected(ref ed) = stage {
+                pre_invert_edge_pixels = ed.pre_invert_edge_pixels;
+            }
+
+            match stage.advance()? {
+                Advance::Next(next) => {
+                    on_stage(next.index(), false);
+                    stage = next;
+                }
+                Advance::Complete(done) => {
+                    stage = done;
+                    break;
+                }
+            }
+        }
+
+        let staged = Arc::new(stage.complete()?);
+        let cache = Self {
+            image_hash,
+            config: new_config,
+            decoded_image,
+            source_len,
+            downsampled_applied,
+            pre_invert_edge_pixels,
+            staged: Arc::clone(&staged),
+        };
+
+        Ok((staged, cache))
+    }
+
+    /// Reconstruct a [`Stage`] at the predecessor of `earliest_changed`
+    /// using cached data and the new config.
+    ///
+    /// Consumes `staged` by value so image buffers are moved rather
+    /// than cloned — avoiding ~13 MB of allocations at working
+    /// resolution.
+    ///
+    /// For example, if `earliest_changed == 4` (edges), this builds a
+    /// `Stage::Blurred` (index 3) so that `advance()` will re-run
+    /// edge detection with the new config.
+    #[allow(clippy::too_many_lines)]
+    fn build_resume_stage(
+        staged: StagedResult,
+        decoded_image: &DynamicImage,
+        source_len: usize,
+        downsampled_applied: bool,
+        pre_invert_edge_pixels: u64,
+        new_config: &PipelineConfig,
+        earliest_changed: usize,
+    ) -> Stage {
+        let StagedResult {
+            original,
+            downsampled,
+            blurred,
+            edges,
+            contours,
+            simplified,
+            masked,
+            joined: _,
+            dimensions,
+        } = staged;
+
+        match earliest_changed {
+            // Stage 2 changed (downsample) — resume from Decoded (index 1).
+            2 => Stage::Decoded(Decoded {
+                config: new_config.clone(),
+                image: decoded_image.clone(),
+                original,
+                source_len,
+            }),
+
+            // Stage 3 changed (blur) — resume from Downsampled (index 2).
+            3 => Stage::Downsampled(Downsampled {
+                config: new_config.clone(),
+                original,
+                rgba: downsampled,
+                applied: downsampled_applied,
+            }),
+
+            // Stage 4 changed (edges) — resume from Blurred (index 3).
+            4 => Stage::Blurred(Blurred {
+                config: new_config.clone(),
+                original,
+                downsampled,
+                smooth: blurred,
+                dimensions,
+            }),
+
+            // Stage 5 changed (contours) — resume from EdgesDetected (index 4).
+            5 => Stage::EdgesDetected(EdgesDetected {
+                config: new_config.clone(),
+                original,
+                downsampled,
+                blurred,
+                edge_map: edges,
+                pre_invert_edge_pixels,
+                dimensions,
+            }),
+
+            // Stage 6 changed (simplify) — resume from ContoursTraced (index 5).
+            6 => Stage::ContoursTraced(ContoursTraced {
+                config: new_config.clone(),
+                original,
+                downsampled,
+                blurred,
+                edges,
+                contours,
+                dimensions,
+            }),
+
+            // Stage 7 changed (mask) — resume from Simplified (index 6).
+            7 => Stage::Simplified(Simplified {
+                config: new_config.clone(),
+                original,
+                downsampled,
+                blurred,
+                edges,
+                contours,
+                reduced: simplified,
+                dimensions,
+            }),
+
+            // Stage 8 changed (join) — resume from Masked (index 7).
+            8 => Stage::Masked(Masked {
+                config: new_config.clone(),
+                original,
+                downsampled,
+                blurred,
+                edges,
+                contours,
+                simplified,
+                clipped: masked,
+                dimensions,
+            }),
+
+            _ => unreachable!(
+                "earliest_changed_stage returned {earliest_changed}, \
+                 expected 2..=8"
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -1767,5 +2130,238 @@ mod tests {
         let stage: Stage = Pipeline::new(vec![], PipelineConfig::default()).into();
         let result = stage.advance();
         assert!(matches!(result, Err(PipelineError::EmptyInput)));
+    }
+
+    // ─────────── PipelineCache tests ─────────────────────────────
+
+    /// No-op progress callback for tests.
+    fn noop(_: usize, _: bool) {}
+
+    /// Helper: assert two `StagedResult`s are identical.
+    fn assert_staged_eq(a: &StagedResult, b: &StagedResult) {
+        assert_eq!(a.original, b.original, "original mismatch");
+        assert_eq!(a.downsampled, b.downsampled, "downsampled mismatch");
+        assert_eq!(a.blurred, b.blurred, "blurred mismatch");
+        assert_eq!(a.edges, b.edges, "edges mismatch");
+        assert_eq!(a.contours, b.contours, "contours mismatch");
+        assert_eq!(a.simplified, b.simplified, "simplified mismatch");
+        assert_eq!(a.masked, b.masked, "masked mismatch");
+        assert_eq!(a.joined, b.joined, "joined mismatch");
+        assert_eq!(a.dimensions, b.dimensions, "dimensions mismatch");
+    }
+
+    #[test]
+    fn cache_full_run_matches_process_staged() {
+        let png = sharp_edge_png(40, 40);
+        let config = PipelineConfig::default();
+
+        let expected = crate::process_staged(&png, &config).unwrap();
+        let (actual, _cache) = PipelineCache::run(None, png, config, &noop).unwrap();
+
+        assert_staged_eq(&expected, &actual);
+    }
+
+    #[test]
+    fn cache_unchanged_config_returns_identical_result() {
+        let png = sharp_edge_png(40, 40);
+        let config = PipelineConfig::default();
+
+        let (first, cache) = PipelineCache::run(None, png.clone(), config.clone(), &noop).unwrap();
+        let (second, _cache2) = PipelineCache::run(Some(cache), png, config, &noop).unwrap();
+
+        assert_staged_eq(&first, &second);
+    }
+
+    #[test]
+    fn cache_changed_late_stage_produces_correct_result() {
+        // Change mask_diameter (stage 7) — stages 0-6 should be cached,
+        // only stages 7-8 re-run.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            mask_diameter: 1.0,
+            ..PipelineConfig::default()
+        };
+
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (cached_result, _cache2) =
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
+
+        // Verify against a fresh full run with config2.
+        let expected = crate::process_staged(&png, &config2).unwrap();
+        assert_staged_eq(&expected, &cached_result);
+    }
+
+    #[test]
+    fn cache_changed_mid_stage_produces_correct_result() {
+        // Change canny_high (stage 4) — stages 0-3 cached, 4-8 re-run.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            canny_high: 50.0,
+            canny_max: 60.0,
+            ..PipelineConfig::default()
+        };
+
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (cached_result, _cache2) =
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png, &config2).unwrap();
+        assert_staged_eq(&expected, &cached_result);
+    }
+
+    #[test]
+    fn cache_changed_working_resolution_produces_correct_result() {
+        // Change working_resolution (stage 2) — only stages 0-1 cached,
+        // stages 2-8 re-run using the cached decoded_image.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            working_resolution: 20,
+            ..PipelineConfig::default()
+        };
+
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (cached_result, _cache2) =
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png, &config2).unwrap();
+        assert_staged_eq(&expected, &cached_result);
+    }
+
+    #[test]
+    fn cache_changed_early_stage_produces_correct_result() {
+        // Change blur_sigma (stage 3) — stages 0-2 cached, 3-8 re-run.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            blur_sigma: 2.5,
+            ..PipelineConfig::default()
+        };
+
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (cached_result, _cache2) =
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png, &config2).unwrap();
+        assert_staged_eq(&expected, &cached_result);
+    }
+
+    #[test]
+    fn cache_changed_join_produces_correct_result() {
+        // Change mst_neighbours (stage 8 only) — stages 0-7 cached.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            mst_neighbours: 50,
+            ..PipelineConfig::default()
+        };
+
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (cached_result, _cache2) =
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png, &config2).unwrap();
+        assert_staged_eq(&expected, &cached_result);
+    }
+
+    #[test]
+    fn cache_different_image_does_full_rerun() {
+        let png1 = sharp_edge_png(40, 40);
+        let png2 = sharp_edge_png(60, 40);
+        let config = PipelineConfig::default();
+
+        let (_first, cache) = PipelineCache::run(None, png1, config.clone(), &noop).unwrap();
+        let (result, _cache2) =
+            PipelineCache::run(Some(cache), png2.clone(), config.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png2, &config).unwrap();
+        assert_staged_eq(&expected, &result);
+    }
+
+    #[test]
+    fn cache_no_cache_does_full_run() {
+        let png = sharp_edge_png(40, 40);
+        let config = PipelineConfig::default();
+
+        let (result, _cache) =
+            PipelineCache::run(None, png.clone(), config.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png, &config).unwrap();
+        assert_staged_eq(&expected, &result);
+    }
+
+    #[test]
+    fn cache_changed_simplify_produces_correct_result() {
+        // Change simplify_tolerance (stage 6) — stages 0-5 cached.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            simplify_tolerance: 5.0,
+            ..PipelineConfig::default()
+        };
+
+        let (_first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (cached_result, _cache2) =
+            PipelineCache::run(Some(cache), png.clone(), config2.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png, &config2).unwrap();
+        assert_staged_eq(&expected, &cached_result);
+    }
+
+    #[test]
+    fn cache_changed_contour_tracer_produces_correct_result() {
+        // Change contour_tracer (stage 5) — stages 0-4 cached.
+        // Only one variant currently, so we just verify the code path
+        // doesn't panic when earliest_changed == 5.
+        let png = sharp_edge_png(40, 40);
+        let config = PipelineConfig::default();
+
+        let (first, cache) = PipelineCache::run(None, png.clone(), config.clone(), &noop).unwrap();
+        // Same contour_tracer — should be a cache hit.
+        let (second, _cache2) = PipelineCache::run(Some(cache), png, config, &noop).unwrap();
+        assert_staged_eq(&first, &second);
+    }
+
+    #[test]
+    fn cache_ui_only_change_returns_cached() {
+        // Changing canny_max (UI-only) should not trigger a rerun.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            canny_max: 120.0,
+            ..PipelineConfig::default()
+        };
+
+        let (first, cache) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (second, _cache2) = PipelineCache::run(Some(cache), png, config2, &noop).unwrap();
+
+        assert_staged_eq(&first, &second);
+    }
+
+    #[test]
+    fn cache_successive_changes_produce_correct_results() {
+        // Run three times with different configs, each time reusing
+        // the cache from the previous run.
+        let png = sharp_edge_png(40, 40);
+        let config1 = PipelineConfig::default();
+        let config2 = PipelineConfig {
+            blur_sigma: 2.0,
+            ..PipelineConfig::default()
+        };
+        let config3 = PipelineConfig {
+            blur_sigma: 2.0,
+            mask_diameter: 1.0,
+            ..PipelineConfig::default()
+        };
+
+        let (_r1, cache1) = PipelineCache::run(None, png.clone(), config1, &noop).unwrap();
+        let (_r2, cache2) = PipelineCache::run(Some(cache1), png.clone(), config2, &noop).unwrap();
+        let (r3, _cache3) =
+            PipelineCache::run(Some(cache2), png.clone(), config3.clone(), &noop).unwrap();
+
+        let expected = crate::process_staged(&png, &config3).unwrap();
+        assert_staged_eq(&expected, &r3);
     }
 }

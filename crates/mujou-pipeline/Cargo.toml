@@ -17,6 +17,7 @@ imageproc.workspace = true
 petgraph.workspace = true
 rstar.workspace = true
 serde.workspace = true
+siphasher.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
