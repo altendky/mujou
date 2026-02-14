@@ -127,6 +127,86 @@ pub struct Dimensions {
     pub height: u32,
 }
 
+/// Channels to use for edge detection.
+///
+/// Canny edge detection is run independently on each enabled channel.
+/// The resulting edge maps are combined via pixel-wise maximum, so edges
+/// detected in *any* enabled channel appear in the final edge map.
+///
+/// By default only [`luminance`](Self::luminance) is enabled, reproducing
+/// the standard single-channel grayscale pipeline. Enabling additional
+/// channels captures edges that luminance alone misses — for example,
+/// boundaries where color changes but brightness stays similar (hue edges).
+///
+/// At least one channel must be enabled. See
+/// [`PipelineConfig::validate`] for the enforcement rule.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct EdgeChannels {
+    /// sRGB/Rec.709 weighted grayscale (`0.2126R + 0.7152G + 0.0722B`).
+    ///
+    /// This is the standard luminance conversion matching the `image`
+    /// crate's `to_luma8()`. It captures edges where brightness changes
+    /// and works well for most photographic images.
+    pub luminance: bool,
+
+    /// Red channel from RGB.
+    ///
+    /// Skin appears bright in the red channel, making it particularly
+    /// useful for detecting skin/lip boundaries in portrait photography.
+    pub red: bool,
+
+    /// Green channel from RGB.
+    ///
+    /// Most similar to luminance (green has the highest weight in
+    /// Rec.709). Captures overall detail.
+    pub green: bool,
+
+    /// Blue channel from RGB.
+    ///
+    /// Skin and hair appear dark in the blue channel. Tends to be
+    /// noisier than red or green in skin regions.
+    pub blue: bool,
+
+    /// Saturation channel from HSV.
+    ///
+    /// Highlights boundaries where colorfulness changes — e.g. lips
+    /// against skin, colored clothing against a neutral background.
+    /// Computed as `(max(R,G,B) - min(R,G,B)) / max(R,G,B)`, scaled
+    /// to 0–255.
+    pub saturation: bool,
+}
+
+impl EdgeChannels {
+    /// Returns `true` if at least one channel is enabled.
+    #[must_use]
+    pub const fn any_enabled(&self) -> bool {
+        self.luminance || self.red || self.green || self.blue || self.saturation
+    }
+
+    /// Returns the number of enabled channels.
+    #[must_use]
+    pub const fn count(&self) -> usize {
+        self.luminance as usize
+            + self.red as usize
+            + self.green as usize
+            + self.blue as usize
+            + self.saturation as usize
+    }
+}
+
+impl Default for EdgeChannels {
+    fn default() -> Self {
+        Self {
+            luminance: true,
+            red: false,
+            green: false,
+            blue: false,
+            saturation: false,
+        }
+    }
+}
+
 /// Configuration for the image processing pipeline.
 ///
 /// All parameters have sensible defaults matching the
@@ -220,6 +300,14 @@ pub struct PipelineConfig {
     /// isolated contours (e.g. scattered petals) at the cost of more
     /// candidate edge generation. Only affects the MST path joiner.
     pub mst_neighbours: usize,
+
+    /// Which image channels to use for edge detection.
+    ///
+    /// Canny is run independently on each enabled channel and the
+    /// results are combined via pixel-wise maximum. See [`EdgeChannels`]
+    /// for per-channel documentation.
+    #[serde(default)]
+    pub edge_channels: EdgeChannels,
 }
 
 impl PipelineConfig {
@@ -245,6 +333,14 @@ impl PipelineConfig {
     pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Disabled;
     /// Default MST nearest-neighbour candidate count per sample point.
     pub const DEFAULT_MST_NEIGHBOURS: usize = 100;
+    /// Default edge channels (luminance only).
+    pub const DEFAULT_EDGE_CHANNELS: EdgeChannels = EdgeChannels {
+        luminance: true,
+        red: false,
+        green: false,
+        blue: false,
+        saturation: false,
+    };
 
     /// Validate that all fields satisfy the documented invariants.
     ///
@@ -323,6 +419,11 @@ impl PipelineConfig {
                 "mst_neighbours must be positive".to_owned(),
             ));
         }
+        if !self.edge_channels.any_enabled() {
+            return Err(PipelineError::InvalidConfig(
+                "at least one edge channel must be enabled".to_owned(),
+            ));
+        }
         Ok(())
     }
 }
@@ -343,6 +444,7 @@ impl Default for PipelineConfig {
             working_resolution: Self::DEFAULT_WORKING_RESOLUTION,
             downsample_filter: Self::DEFAULT_DOWNSAMPLE_FILTER,
             mst_neighbours: Self::DEFAULT_MST_NEIGHBOURS,
+            edge_channels: Self::DEFAULT_EDGE_CHANNELS,
         }
     }
 }
@@ -370,6 +472,7 @@ impl PipelineConfig {
             working_resolution,
             downsample_filter,
             mst_neighbours,
+            edge_channels,
         } = self;
 
         *blur_sigma == other.blur_sigma
@@ -384,6 +487,7 @@ impl PipelineConfig {
             && *working_resolution == other.working_resolution
             && *downsample_filter == other.downsample_filter
             && *mst_neighbours == other.mst_neighbours
+            && *edge_channels == other.edge_channels
     }
 }
 
@@ -423,10 +527,8 @@ pub struct StagedResult {
     pub original: RgbaImage,
     /// Stage 1: downsampled RGBA image (working resolution).
     pub downsampled: RgbaImage,
-    /// Stage 2: decoded + grayscale image.
-    pub grayscale: GrayImage,
-    /// Stage 2: Gaussian-blurred image.
-    pub blurred: GrayImage,
+    /// Stage 2: Gaussian-blurred RGBA image.
+    pub blurred: RgbaImage,
     /// Stages 3+4: Canny edge map (post-inversion when `invert=true`).
     pub edges: GrayImage,
     /// Stage 5: traced contour polylines.
@@ -468,7 +570,6 @@ impl StagedResult {
 struct StagedResultProxy {
     original: (u32, u32, Vec<u8>),
     downsampled: (u32, u32, Vec<u8>),
-    grayscale: (u32, u32, Vec<u8>),
     blurred: (u32, u32, Vec<u8>),
     edges: (u32, u32, Vec<u8>),
     contours: Vec<Polyline>,
@@ -491,11 +592,6 @@ impl Serialize for StagedResult {
                 self.downsampled.height(),
                 self.downsampled.as_raw().clone(),
             ),
-            grayscale: (
-                self.grayscale.width(),
-                self.grayscale.height(),
-                self.grayscale.as_raw().clone(),
-            ),
             blurred: (
                 self.blurred.width(),
                 self.blurred.height(),
@@ -512,6 +608,8 @@ impl Serialize for StagedResult {
             joined: self.joined.clone(),
             dimensions: self.dimensions,
         };
+        // Note: the proxy stores blurred as (w, h, Vec<u8>) — the raw
+        // bytes now contain 4 bytes per pixel (RGBA) instead of 1.
         proxy.serialize(serializer)
     }
 }
@@ -528,10 +626,7 @@ impl<'de> Deserialize<'de> for StagedResult {
             proxy.downsampled.2,
         )
         .ok_or_else(|| serde::de::Error::custom("invalid downsampled image dimensions"))?;
-        let grayscale =
-            GrayImage::from_raw(proxy.grayscale.0, proxy.grayscale.1, proxy.grayscale.2)
-                .ok_or_else(|| serde::de::Error::custom("invalid grayscale image dimensions"))?;
-        let blurred = GrayImage::from_raw(proxy.blurred.0, proxy.blurred.1, proxy.blurred.2)
+        let blurred = RgbaImage::from_raw(proxy.blurred.0, proxy.blurred.1, proxy.blurred.2)
             .ok_or_else(|| serde::de::Error::custom("invalid blurred image dimensions"))?;
         let edges = GrayImage::from_raw(proxy.edges.0, proxy.edges.1, proxy.edges.2)
             .ok_or_else(|| serde::de::Error::custom("invalid edges image dimensions"))?;
@@ -539,7 +634,6 @@ impl<'de> Deserialize<'de> for StagedResult {
         Ok(Self {
             original,
             downsampled,
-            grayscale,
             blurred,
             edges,
             contours: proxy.contours,
@@ -752,6 +846,12 @@ mod tests {
         assert_eq!(config.working_resolution, 256);
         assert_eq!(config.downsample_filter, DownsampleFilter::Disabled);
         assert_eq!(config.mst_neighbours, 100);
+        assert_eq!(config.edge_channels, EdgeChannels::default());
+        assert!(config.edge_channels.luminance);
+        assert!(!config.edge_channels.red);
+        assert!(!config.edge_channels.green);
+        assert!(!config.edge_channels.blue);
+        assert!(!config.edge_channels.saturation);
     }
 
     #[test]
@@ -822,6 +922,37 @@ mod tests {
         assert!(
             !a.pipeline_eq(&b),
             "mst_neighbours change should be detected"
+        );
+
+        let mut b = a.clone();
+        b.edge_channels.red = true;
+        assert!(
+            !a.pipeline_eq(&b),
+            "edge_channels change should be detected"
+        );
+    }
+
+    #[test]
+    fn validate_default_config_is_valid() {
+        PipelineConfig::default().validate().unwrap();
+    }
+
+    #[test]
+    fn validate_rejects_no_edge_channels() {
+        let config = PipelineConfig {
+            edge_channels: EdgeChannels {
+                luminance: false,
+                red: false,
+                green: false,
+                blue: false,
+                saturation: false,
+            },
+            ..PipelineConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("edge channel")),
+            "expected InvalidConfig about edge channels, got {err:?}",
         );
     }
 
@@ -897,10 +1028,42 @@ mod tests {
             working_resolution: 256,
             downsample_filter: DownsampleFilter::Triangle,
             mst_neighbours: 20,
+            edge_channels: EdgeChannels {
+                luminance: true,
+                red: true,
+                green: false,
+                blue: false,
+                saturation: true,
+            },
         };
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: PipelineConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(config, deserialized);
+    }
+
+    #[test]
+    fn pipeline_config_deserializes_without_edge_channels() {
+        // Old configs from before edge_channels was added should still
+        // deserialize, falling back to EdgeChannels::default() (luminance only).
+        let json = r#"{
+            "blur_sigma": 1.4,
+            "canny_low": 15.0,
+            "canny_high": 40.0,
+            "canny_max": 60.0,
+            "contour_tracer": "BorderFollowing",
+            "simplify_tolerance": 2.0,
+            "path_joiner": "Mst",
+            "circular_mask": true,
+            "mask_diameter": 1.0,
+            "invert": false,
+            "working_resolution": 256,
+            "downsample_filter": "Disabled",
+            "mst_neighbours": 100
+        }"#;
+        let config: PipelineConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.edge_channels, EdgeChannels::default());
+        assert!(config.edge_channels.luminance);
+        assert!(!config.edge_channels.red);
     }
 
     #[test]
@@ -923,8 +1086,7 @@ mod tests {
         let staged = StagedResult {
             original: RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255])),
             downsampled: RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255])),
-            grayscale: GrayImage::from_pixel(2, 2, image::Luma([50])),
-            blurred: GrayImage::from_pixel(2, 2, image::Luma([45])),
+            blurred: RgbaImage::from_pixel(2, 2, image::Rgba([40, 45, 50, 255])),
             edges: GrayImage::from_pixel(2, 2, image::Luma([255])),
             contours: vec![Polyline::new(vec![
                 Point::new(0.0, 0.0),
@@ -955,7 +1117,6 @@ mod tests {
             staged.downsampled.as_raw(),
             deserialized.downsampled.as_raw()
         );
-        assert_eq!(staged.grayscale.as_raw(), deserialized.grayscale.as_raw());
         assert_eq!(staged.blurred.as_raw(), deserialized.blurred.as_raw());
         assert_eq!(staged.edges.as_raw(), deserialized.edges.as_raw());
 
@@ -998,8 +1159,7 @@ mod tests {
         let staged = StagedResult {
             original: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
             downsampled: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
-            grayscale: GrayImage::from_pixel(1, 1, image::Luma([0])),
-            blurred: GrayImage::from_pixel(1, 1, image::Luma([0])),
+            blurred: RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 255])),
             edges: GrayImage::from_pixel(1, 1, image::Luma([0])),
             contours: vec![],
             simplified: vec![],
