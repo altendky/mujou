@@ -59,6 +59,8 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         return rsx! {
             div {
                 class: "w-full aspect-[4/3] max-h-[70vh] bg-[var(--preview-bg)] rounded",
+                role: "status",
+                aria_label: "Loading preview",
             }
         };
     };

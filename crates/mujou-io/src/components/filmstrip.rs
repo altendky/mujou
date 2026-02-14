@@ -110,7 +110,11 @@ fn render_tile(
 /// available yet.
 fn render_placeholder() -> Element {
     rsx! {
-        div { class: "w-full h-full animate-pulse bg-[var(--border)]" }
+        div {
+            class: "w-full h-full animate-pulse bg-[var(--border)]",
+            role: "status",
+            aria_label: "Loading thumbnail",
+        }
     }
 }
 
