@@ -41,6 +41,8 @@
 //! images) should prefer [`crate::process`], which discards the raster
 //! intermediates and returns only the output path and dimensions.
 
+use std::sync::Arc;
+
 use image::DynamicImage;
 
 use crate::contour::ContourTracer;
@@ -1258,7 +1260,10 @@ pub struct PipelineCache {
     /// Edge pixel count before optional inversion.  Diagnostic-only.
     pre_invert_edge_pixels: u64,
     /// All intermediate raster and vector outputs.
-    staged: StagedResult,
+    ///
+    /// Wrapped in [`Arc`] so the caller and the cache can share a
+    /// single allocation without cloning ~7 MB of image buffers.
+    staged: Arc<StagedResult>,
 }
 
 impl PipelineCache {
@@ -1276,8 +1281,9 @@ impl PipelineCache {
     /// callers to report per-stage progress and distinguish skipped
     /// stages in the UI.
     ///
-    /// Returns the pipeline result together with an updated cache for
-    /// the next invocation.
+    /// Returns the pipeline result (wrapped in [`Arc`] so the caller
+    /// and the cache share a single allocation) together with an
+    /// updated cache for the next invocation.
     ///
     /// # Errors
     ///
@@ -1288,7 +1294,7 @@ impl PipelineCache {
         image_bytes: Vec<u8>,
         config: PipelineConfig,
         on_stage: &dyn Fn(usize, bool),
-    ) -> Result<(StagedResult, Self), PipelineError> {
+    ) -> Result<(Arc<StagedResult>, Self), PipelineError> {
         let image_hash = Self::hash_bytes(&image_bytes);
 
         match cache {
@@ -1328,7 +1334,7 @@ impl PipelineCache {
         config: PipelineConfig,
         image_hash: u64,
         on_stage: &dyn Fn(usize, bool),
-    ) -> Result<(StagedResult, Self), PipelineError> {
+    ) -> Result<(Arc<StagedResult>, Self), PipelineError> {
         let cache_config = config.clone();
 
         let pending = Pipeline::new(image_bytes, config);
@@ -1364,7 +1370,7 @@ impl PipelineCache {
         let joined = masked.join();
         on_stage(Joined::INDEX, false);
 
-        let staged = joined.into_result();
+        let staged = Arc::new(joined.into_result());
         let cache = Self {
             image_hash,
             config: cache_config,
@@ -1372,7 +1378,7 @@ impl PipelineCache {
             source_len,
             downsampled_applied,
             pre_invert_edge_pixels,
-            staged: staged.clone(),
+            staged: Arc::clone(&staged),
         };
 
         Ok((staged, cache))
@@ -1385,7 +1391,7 @@ impl PipelineCache {
         new_config: PipelineConfig,
         earliest_changed: usize,
         on_stage: &dyn Fn(usize, bool),
-    ) -> Result<(StagedResult, Self), PipelineError> {
+    ) -> Result<(Arc<StagedResult>, Self), PipelineError> {
         // Destructure self so we can move `staged` fields into the
         // resume stage instead of cloning them.
         let Self {
@@ -1395,8 +1401,14 @@ impl PipelineCache {
             source_len,
             mut downsampled_applied,
             mut pre_invert_edge_pixels,
-            staged: old_staged,
+            staged: old_staged_arc,
         } = self;
+
+        // Unwrap the Arc to get owned StagedResult.  Succeeds without
+        // cloning when the caller has dropped their Arc from the
+        // previous run (the normal case); falls back to clone if the
+        // caller still holds a reference.
+        let old_staged = Arc::try_unwrap(old_staged_arc).unwrap_or_else(|arc| (*arc).clone());
 
         // Build a Stage at the predecessor of the earliest changed
         // stage, populated with cached data and the new config.
@@ -1444,7 +1456,7 @@ impl PipelineCache {
             }
         }
 
-        let staged = stage.complete()?;
+        let staged = Arc::new(stage.complete()?);
         let cache = Self {
             image_hash,
             config: new_config,
@@ -1452,7 +1464,7 @@ impl PipelineCache {
             source_len,
             downsampled_applied,
             pre_invert_edge_pixels,
-            staged: staged.clone(),
+            staged: Arc::clone(&staged),
         };
 
         Ok((staged, cache))
