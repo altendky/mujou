@@ -1238,6 +1238,9 @@ impl Pipeline {
 /// in-memory comparison.
 pub struct PipelineCache {
     /// Hash of the source image bytes that produced this cache.
+    ///
+    /// Computed with SipHash-2-4 via `siphasher` — deterministic across
+    /// Rust versions, platforms, and processes.
     image_hash: u64,
     /// The config that produced the cached results.
     config: PipelineConfig,
@@ -1305,11 +1308,15 @@ impl PipelineCache {
         }
     }
 
-    /// Hash image bytes using `DefaultHasher` (`SipHash`).
+    /// Hash image bytes using SipHash-2-4 with fixed keys.
+    ///
+    /// Uses `siphasher::sip::SipHasher` instead of `DefaultHasher` so the
+    /// hash is deterministic across Rust versions, platforms, and
+    /// processes.
     fn hash_bytes(bytes: &[u8]) -> u64 {
         use std::hash::{Hash, Hasher};
 
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = siphasher::sip::SipHasher::new();
         bytes.hash(&mut hasher);
         hasher.finish()
     }

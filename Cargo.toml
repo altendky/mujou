@@ -73,6 +73,9 @@ geo = "0.32"
 rstar = "0.12"
 petgraph = "0.8"
 
+# Hashing
+siphasher = "1"
+
 # Error handling
 thiserror = "2"
 
