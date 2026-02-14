@@ -249,10 +249,10 @@ fn app() -> Element {
                 };
 
                 // If this stage is already running (backend stages 0
-                // and 1 both map to Original), just update the start
-                // time for more accurate timing.
+                // and 1 both map to Original), skip — preserving the
+                // original start time so the elapsed captures the full
+                // span of the UI stage (source + decode).
                 if entries[ui_idx].status == StageStatus::Running {
-                    current_stage_start.set(Some(now));
                     return;
                 }
 
