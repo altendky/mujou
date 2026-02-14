@@ -91,14 +91,24 @@ pub fn max_gradient_magnitude() -> f32 {
     max_mag
 }
 
-/// Extract a single color channel from an RGBA image as a grayscale image.
+/// An RGB color channel that can be extracted from an RGBA pixel.
 ///
-/// `channel` selects which byte of the RGBA pixel to extract:
-/// 0 = Red, 1 = Green, 2 = Blue, 3 = Alpha.
+/// Used by [`extract_channel`] to select which byte of the RGBA pixel
+/// to extract. Alpha is intentionally excluded — it is not used for
+/// edge detection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ColorChannel {
+    Red = 0,
+    Green = 1,
+    Blue = 2,
+}
+
+/// Extract a single color channel from an RGBA image as a grayscale image.
 #[must_use]
-fn extract_channel(rgba: &RgbaImage, channel: usize) -> GrayImage {
+fn extract_channel(rgba: &RgbaImage, channel: ColorChannel) -> GrayImage {
+    let idx = channel as usize;
     GrayImage::from_fn(rgba.width(), rgba.height(), |x, y| {
-        image::Luma([rgba.get_pixel(x, y).0[channel]])
+        image::Luma([rgba.get_pixel(x, y).0[idx]])
     })
 }
 
@@ -173,13 +183,13 @@ pub fn canny_combined(
         ));
     }
     if channels.red {
-        channel_images.push(extract_channel(blurred_rgba, 0));
+        channel_images.push(extract_channel(blurred_rgba, ColorChannel::Red));
     }
     if channels.green {
-        channel_images.push(extract_channel(blurred_rgba, 1));
+        channel_images.push(extract_channel(blurred_rgba, ColorChannel::Green));
     }
     if channels.blue {
-        channel_images.push(extract_channel(blurred_rgba, 2));
+        channel_images.push(extract_channel(blurred_rgba, ColorChannel::Blue));
     }
     if channels.saturation {
         channel_images.push(extract_saturation(blurred_rgba));
@@ -375,25 +385,30 @@ mod tests {
         })
     }
 
+    /// 1x1 RGBA image with distinct per-channel values for extraction tests.
+    fn test_rgba() -> RgbaImage {
+        RgbaImage::from_fn(1, 1, |_, _| image::Rgba([10, 20, 30, 255]))
+    }
+
     #[test]
     fn extract_channel_red() {
-        let rgba = RgbaImage::from_fn(2, 2, |_, _| image::Rgba([100, 150, 200, 255]));
-        let red = extract_channel(&rgba, 0);
-        assert_eq!(red.get_pixel(0, 0).0[0], 100);
+        let rgba = test_rgba();
+        let red = extract_channel(&rgba, ColorChannel::Red);
+        assert_eq!(red.get_pixel(0, 0).0[0], 10);
     }
 
     #[test]
     fn extract_channel_green() {
-        let rgba = RgbaImage::from_fn(2, 2, |_, _| image::Rgba([100, 150, 200, 255]));
-        let green = extract_channel(&rgba, 1);
-        assert_eq!(green.get_pixel(0, 0).0[0], 150);
+        let rgba = test_rgba();
+        let green = extract_channel(&rgba, ColorChannel::Green);
+        assert_eq!(green.get_pixel(0, 0).0[0], 20);
     }
 
     #[test]
     fn extract_channel_blue() {
-        let rgba = RgbaImage::from_fn(2, 2, |_, _| image::Rgba([100, 150, 200, 255]));
-        let blue = extract_channel(&rgba, 2);
-        assert_eq!(blue.get_pixel(0, 0).0[0], 200);
+        let rgba = test_rgba();
+        let blue = extract_channel(&rgba, ColorChannel::Blue);
+        assert_eq!(blue.get_pixel(0, 0).0[0], 30);
     }
 
     #[test]
