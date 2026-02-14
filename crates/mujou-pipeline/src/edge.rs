@@ -112,6 +112,24 @@ fn extract_channel(rgba: &RgbaImage, channel: ColorChannel) -> GrayImage {
     })
 }
 
+/// Convert an RGBA image to grayscale using sRGB/Rec.709 luminance
+/// coefficients, matching the `image` crate's `to_luma8()`.
+///
+/// Uses integer arithmetic: `(2126*R + 7152*G + 722*B) / 10000`,
+/// identical to `image::color::rgb_to_luma` for `u8` pixels.
+///
+/// This avoids the allocation that `DynamicImage::ImageRgba8(img.clone())`
+/// + `to_luma8()` would incur.
+#[must_use]
+#[allow(clippy::cast_possible_truncation)]
+fn rgba_to_luma(rgba: &RgbaImage) -> GrayImage {
+    GrayImage::from_fn(rgba.width(), rgba.height(), |x, y| {
+        let [r, g, b, _] = rgba.get_pixel(x, y).0;
+        let luma = (2126 * u32::from(r) + 7152 * u32::from(g) + 722 * u32::from(b)) / 10_000;
+        image::Luma([luma as u8])
+    })
+}
+
 /// Compute the HSV saturation channel from an RGBA image.
 ///
 /// Saturation is defined as `(max(R,G,B) - min(R,G,B)) / max(R,G,B)`,
@@ -178,9 +196,7 @@ pub fn canny_combined(
     let mut channel_images: Vec<GrayImage> = Vec::with_capacity(channels.count());
 
     if channels.luminance {
-        channel_images.push(crate::grayscale::to_grayscale(
-            &image::DynamicImage::ImageRgba8(blurred_rgba.clone()),
-        ));
+        channel_images.push(rgba_to_luma(blurred_rgba));
     }
     if channels.red {
         channel_images.push(extract_channel(blurred_rgba, ColorChannel::Red));
