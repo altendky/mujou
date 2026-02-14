@@ -137,6 +137,23 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                     }
                 }
 
+                // Upload guidance
+                div { class: "mb-5 text-sm text-[var(--text-secondary)]",
+                    p { class: "font-medium text-[var(--text)] mb-1",
+                        "Upload to your table"
+                    }
+                    p {
+                        "Oasis Mini / One: use SVG, upload at "
+                        a {
+                            href: "https://app.grounded.so",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "underline text-[var(--btn-primary)] hover:opacity-80",
+                            "app.grounded.so"
+                        }
+                    }
+                }
+
                 // Action buttons
                 div { class: "flex gap-3",
                     button {
