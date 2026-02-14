@@ -209,6 +209,9 @@ impl PipelineWorker {
 
                 if msg_type.as_deref() == Some("progress") {
                     if let Some(ref mut cb) = on_progress {
+                        // TODO: unwrap_or(0.0) silently maps a missing/invalid
+                        // stageIndex to stage 0 (Original). Consider skipping
+                        // the callback when stageIndex is absent instead.
                         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                         let stage_index =
                             js_sys::Reflect::get(&data, &JsValue::from_str("stageIndex"))
