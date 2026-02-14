@@ -143,11 +143,11 @@ pub struct Dimensions {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::struct_excessive_bools)]
 pub struct EdgeChannels {
-    /// BT.601 weighted grayscale (`0.299R + 0.587G + 0.114B`).
+    /// sRGB/Rec.709 weighted grayscale (`0.2126R + 0.7152G + 0.0722B`).
     ///
-    /// This is the standard luminance conversion. It captures edges
-    /// where brightness changes and works well for most photographic
-    /// images.
+    /// This is the standard luminance conversion matching the `image`
+    /// crate's `to_luma8()`. It captures edges where brightness changes
+    /// and works well for most photographic images.
     pub luminance: bool,
 
     /// Red channel from RGB.
@@ -159,7 +159,7 @@ pub struct EdgeChannels {
     /// Green channel from RGB.
     ///
     /// Most similar to luminance (green has the highest weight in
-    /// BT.601). Captures overall detail.
+    /// Rec.709). Captures overall detail.
     pub green: bool,
 
     /// Blue channel from RGB.

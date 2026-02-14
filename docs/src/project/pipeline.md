@@ -44,7 +44,7 @@ Canny runs independently on each enabled channel. The per-channel edge maps are 
 
 | Channel | Source | Default | Notes |
 | --- | --- | --- | --- |
-| Luminance | BT.601 grayscale | **on** | Standard luminance, works well for most images |
+| Luminance | sRGB/Rec.709 grayscale | **on** | Standard luminance, works well for most images |
 | Red | R from RGBA | off | Skin appears bright; useful for skin/lip boundaries |
 | Green | G from RGBA | off | Most similar to luminance; captures overall detail |
 | Blue | B from RGBA | off | Skin appears dark; tends to be noisier |

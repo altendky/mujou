@@ -378,24 +378,17 @@ mod tests {
         })
     }
 
-    /// 20x20 RGBA image with an isoluminant hue boundary at x = 10.
+    /// 20x20 RGBA image with a near-isoluminant hue boundary at x = 10.
     ///
-    /// Left half: saturated red (R=180, G=70, B=70)
-    /// Right half: saturated cyan (R=70, G=180, B=180)
+    /// Uses sRGB/Rec.709 luminance (matching `rgba_to_luma` and the
+    /// `image` crate's `to_luma8()`):
+    ///   Left:  R=200, G=100, B=100 → 0.2126*200 + 0.7152*100 + 0.0722*100 = 42.52 + 71.52 + 7.22 ≈ 121
+    ///   Right: R=100, G=140, B=130 → 0.2126*100 + 0.7152*140 + 0.0722*130 = 21.26 + 100.13 + 9.39 ≈ 131
     ///
-    /// Both halves have nearly identical BT.601 luminance:
-    ///   Left:  0.299*180 + 0.587*70 + 0.114*70 = 53.82 + 41.09 + 7.98 = 102.89
-    ///   Right: 0.299*70 + 0.587*180 + 0.114*180 = 20.93 + 105.66 + 20.52 = 147.11
-    ///
-    /// Actually these aren't perfectly isoluminant, but close enough
-    /// that with moderate blur the luminance edge is weak. A tighter
-    /// pair can be used if needed.
-    ///
-    /// For a truly isoluminant pair we use:
-    ///   Left:  R=200, G=100, B=100 → luma = 0.299*200 + 0.587*100 + 0.114*100 = 59.8 + 58.7 + 11.4 = 129.9
-    ///   Right: R=100, G=140, B=130 → luma = 0.299*100 + 0.587*140 + 0.114*130 = 29.9 + 82.18 + 14.82 = 126.9
-    ///
-    /// Difference: ~3 gray levels — below typical Canny thresholds after blur.
+    /// Difference: ~10 gray levels. Not perfectly isoluminant, but
+    /// after Gaussian blur the luminance edge is weak enough that
+    /// adding a color channel (e.g. red) detects significantly more
+    /// edges at this boundary.
     fn isoluminant_hue_boundary_rgba() -> RgbaImage {
         RgbaImage::from_fn(20, 20, |x, _y| {
             if x < 10 {
