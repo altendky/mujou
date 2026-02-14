@@ -36,7 +36,16 @@ pub struct VectorResult {
 /// - `lightBg`, `lightFg`: `String` — hex RGB for light theme (e.g. "f5f5f5,1a1a1a")
 /// - `darkBg`, `darkFg`: `String` — hex RGB for dark theme
 ///
-/// On success the worker responds with a JS object containing:
+/// The worker responds with three types of messages, distinguished by a
+/// `type` field:
+///
+/// **Progress** (sent after each pipeline stage completes):
+/// - `type`: `"progress"`
+/// - `generation`: `f64` matching the request generation
+/// - `stageIndex`: `f64` — the 0-based index of the stage just reached
+/// - `stageCount`: `f64` — total number of pipeline stages
+///
+/// **Success** (sent once when the pipeline completes):
 /// - `generation`: `f64` matching the request generation
 /// - `ok`: `true`
 /// - `vectorJson`: `String` — JSON-serialized `VectorResult`
@@ -46,7 +55,7 @@ pub struct VectorResult {
 /// - `edgesLightPng`: `Uint8Array` — themed edge PNG (light mode)
 /// - `edgesDarkPng`: `Uint8Array` — themed edge PNG (dark mode)
 ///
-/// On error the worker responds with:
+/// **Error** (sent once on pipeline failure):
 /// - `generation`: `f64`
 /// - `ok`: `false`
 /// - `errorJson`: `String` — JSON-serialized `PipelineError`
@@ -129,13 +138,19 @@ fn handle_message(event: web_sys::MessageEvent) {
     log("worker: config parsed, running pipeline");
 
     // Run the pipeline (synchronous — blocks this worker thread only).
+    // After each stage transition, post a progress message so the main
+    // thread can update the per-stage UI.
     let outcome = (|| {
-        use mujou_pipeline::pipeline::{Advance, Stage};
+        use mujou_pipeline::pipeline::{Advance, STAGE_COUNT, Stage};
 
         let mut stage: Stage = mujou_pipeline::Pipeline::new(image_bytes, config).into();
+        post_progress(generation, stage.index(), STAGE_COUNT);
         loop {
             match stage.advance()? {
-                Advance::Next(next) => stage = next,
+                Advance::Next(next) => {
+                    post_progress(generation, next.index(), STAGE_COUNT);
+                    stage = next;
+                }
                 Advance::Complete(done) => break done.complete(),
             }
         }
@@ -351,6 +366,40 @@ fn dilate_soft(image: &GrayImage) -> GrayImage {
         }
         image::Luma([0])
     })
+}
+
+/// Post a stage-progress message back to the main thread.
+///
+/// Sent after each `stage.advance()` call so the main thread can update
+/// the per-stage timing display. The message carries only numeric
+/// indices — the main thread maps these to UI stage labels.
+#[allow(clippy::cast_precision_loss)]
+fn post_progress(generation: f64, stage_index: usize, stage_count: usize) {
+    let msg = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("type"),
+        &JsValue::from_str("progress"),
+    );
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("generation"),
+        &JsValue::from_f64(generation),
+    );
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("stageIndex"),
+        &JsValue::from_f64(stage_index as f64),
+    );
+    let _ = js_sys::Reflect::set(
+        &msg,
+        &JsValue::from_str("stageCount"),
+        &JsValue::from_f64(stage_count as f64),
+    );
+
+    if let Ok(global) = js_sys::global().dyn_into::<web_sys::DedicatedWorkerGlobalScope>() {
+        let _ = global.post_message(&msg);
+    }
 }
 
 /// Post an error response back to the main thread.

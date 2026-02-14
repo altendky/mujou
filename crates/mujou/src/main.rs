@@ -23,6 +23,28 @@ const CONFIG_DEBOUNCE_MS: u32 = 200;
 /// during processing.
 const ELAPSED_UPDATE_MS: u32 = 100;
 
+/// Status of a single stage in the processing popup.
+#[derive(Clone, Copy, PartialEq)]
+enum StageStatus {
+    /// Not yet started.
+    Pending,
+    /// Currently executing — elapsed time is updating live.
+    Running,
+    /// Finished — elapsed time is the final duration.
+    Completed,
+}
+
+/// Per-stage progress entry for the processing popup.
+#[derive(Clone, Copy)]
+struct StageProgressEntry {
+    /// Which UI stage this tracks.
+    stage: StageId,
+    /// Current status.
+    status: StageStatus,
+    /// Elapsed time in milliseconds (final for completed, live for running).
+    elapsed_ms: f64,
+}
+
 /// Cherry blossoms example image bundled at compile time so the app
 /// can show example output immediately on first load.
 static CHERRY_BLOSSOMS: &[u8] = include_bytes!(env!("CHERRY_BLOSSOMS_PATH"));
@@ -90,6 +112,20 @@ fn app() -> Element {
     // it for the final elapsed snapshot).
     let mut processing_start = use_signal(|| Option::<f64>::None);
 
+    // Per-stage progress for the processing popup. One entry per UI
+    // stage (8 total), tracking status and elapsed time.
+    let mut stage_progress = use_signal(|| {
+        StageId::ALL.map(|stage| StageProgressEntry {
+            stage,
+            status: StageStatus::Pending,
+            elapsed_ms: 0.0,
+        })
+    });
+
+    // Timestamp when the currently-running stage began. Used by the
+    // timer loop to compute live elapsed time for the active stage.
+    let mut current_stage_start = use_signal(|| Option::<f64>::None);
+
     // The "committed" config is what the pipeline actually runs with.
     // Updated immediately on image upload, debounced on slider changes.
     let mut committed_config = use_signal(mujou_pipeline::PipelineConfig::default);
@@ -142,6 +178,14 @@ fn app() -> Element {
         let start = js_sys::Date::now();
         processing_start.set(Some(start));
 
+        // Initialize all stages as pending.
+        stage_progress.set(StageId::ALL.map(|stage| StageProgressEntry {
+            stage,
+            status: StageStatus::Pending,
+            elapsed_ms: 0.0,
+        }));
+        current_stage_start.set(None);
+
         let worker = Rc::clone(&worker_for_effect);
         spawn(async move {
             // Spawn a timer task that updates elapsed_ms every 100ms.
@@ -155,18 +199,74 @@ fn app() -> Element {
                 loop {
                     gloo_timers::future::TimeoutFuture::new(ELAPSED_UPDATE_MS).await;
                     match *processing_start.peek() {
-                        Some(s) => elapsed_ms.set(js_sys::Date::now() - s),
+                        Some(s) => {
+                            let now = js_sys::Date::now();
+                            elapsed_ms.set(now - s);
+                            // Also update the currently-running stage's
+                            // elapsed time.
+                            if let Some(stage_start) = *current_stage_start.peek() {
+                                let mut entries = *stage_progress.peek();
+                                for entry in &mut entries {
+                                    if entry.status == StageStatus::Running {
+                                        entry.elapsed_ms = now - stage_start;
+                                    }
+                                }
+                                stage_progress.set(entries);
+                            }
+                        }
                         None => break,
                     }
                 }
             });
+
+            // Progress callback — invoked by the worker wrapper each
+            // time a pipeline stage transition occurs. Maps backend
+            // stage indices to UI stages and updates the progress state.
+            let on_progress = move |backend_index: usize| {
+                let now = js_sys::Date::now();
+                let Some(ui_stage) = StageId::from_pipeline_index(backend_index) else {
+                    return;
+                };
+                let mut entries = *stage_progress.peek();
+
+                // Find the UI stage index for the newly reached stage.
+                let Some(ui_idx) = entries.iter().position(|e| e.stage == ui_stage) else {
+                    return;
+                };
+
+                // If this stage is already running (backend stages 0
+                // and 1 both map to Original), just update the start
+                // time for more accurate timing.
+                if entries[ui_idx].status == StageStatus::Running {
+                    current_stage_start.set(Some(now));
+                    return;
+                }
+
+                // Mark any previously running stage as completed.
+                if let Some(stage_start) = *current_stage_start.peek() {
+                    for entry in &mut entries {
+                        if entry.status == StageStatus::Running {
+                            entry.status = StageStatus::Completed;
+                            entry.elapsed_ms = now - stage_start;
+                        }
+                    }
+                }
+
+                // Mark the new stage as running.
+                entries[ui_idx].status = StageStatus::Running;
+                entries[ui_idx].elapsed_ms = 0.0;
+                current_stage_start.set(Some(now));
+                stage_progress.set(entries);
+            };
 
             // Run the pipeline in the web worker — this .await yields
             // to the browser event loop so animations and cancel clicks
             // keep working. PNG encoding also happens in the worker, so
             // the returned WorkerResult has ready-to-use Blob URLs.
             #[allow(clippy::cast_precision_loss)]
-            let outcome = worker.run(&bytes, &cfg, my_generation as f64).await;
+            let outcome = worker
+                .run(&bytes, &cfg, my_generation as f64, Some(on_progress))
+                .await;
 
             // If another run was triggered while we were processing,
             // discard this stale result silently. The new run already
@@ -179,9 +279,23 @@ fn app() -> Element {
             // Record final elapsed time and hide the overlay. Since
             // PNG encoding happened in the worker, result.set() only
             // triggers a lightweight re-render (no main-thread encoding).
-            elapsed_ms.set(js_sys::Date::now() - start);
+            let now = js_sys::Date::now();
+            elapsed_ms.set(now - start);
             processing.set(false);
             processing_start.set(None);
+
+            // Mark any still-running stage as completed.
+            if let Some(stage_start) = *current_stage_start.peek() {
+                let mut entries = *stage_progress.peek();
+                for entry in &mut entries {
+                    if entry.status == StageStatus::Running {
+                        entry.status = StageStatus::Completed;
+                        entry.elapsed_ms = now - stage_start;
+                    }
+                }
+                stage_progress.set(entries);
+            }
+            current_stage_start.set(None);
 
             match outcome {
                 Ok(res) => {
@@ -391,12 +505,44 @@ fn app() -> Element {
                             // and re-processing)
                             if processing() {
                                 div { class: "absolute inset-0 flex items-center justify-center",
-                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2",
-                                        p { class: "text-(--text-secondary) text-sm animate-pulse",
+                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
+                                        // Total elapsed time
+                                        p { class: "text-(--text-secondary) text-sm",
                                             "Processing... ({format_elapsed(elapsed_ms())})"
                                         }
+                                        // Separator
+                                        hr { class: "w-full border-(--border) my-1" }
+                                        // Per-stage list
+                                        div { class: "w-full text-xs",
+                                            for entry in stage_progress() {
+                                                div {
+                                                    key: "{entry.stage}",
+                                                    class: "flex justify-between py-0.5",
+                                                    span {
+                                                        class: match entry.status {
+                                                            StageStatus::Running => "text-(--text) font-medium animate-pulse",
+                                                            StageStatus::Completed => "text-(--text-secondary)",
+                                                            StageStatus::Pending => "text-(--text-placeholder)",
+                                                        },
+                                                        "{entry.stage.label()}"
+                                                    }
+                                                    span {
+                                                        class: match entry.status {
+                                                            StageStatus::Running => "text-(--text) tabular-nums animate-pulse",
+                                                            StageStatus::Completed => "text-(--text-secondary) tabular-nums",
+                                                            StageStatus::Pending => "",
+                                                        },
+                                                        match entry.status {
+                                                            StageStatus::Running | StageStatus::Completed => format_elapsed(entry.elapsed_ms),
+                                                            StageStatus::Pending => String::new(),
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        // Cancel button
                                         button {
-                                            class: "text-xs px-3 py-1 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer",
+                                            class: "text-xs px-3 py-1 rounded bg-(--error-bg) text-(--text-error) border border-(--error-border) hover:opacity-80 cursor-pointer mt-1",
                                             onclick: on_cancel,
                                             "Cancel"
                                         }
