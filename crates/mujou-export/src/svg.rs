@@ -64,6 +64,88 @@ fn xml_escape(input: &str) -> String {
     out
 }
 
+// ---------------------------------------------------------------------------
+// Shared SVG helpers
+// ---------------------------------------------------------------------------
+
+/// Write the SVG preamble: XML declaration, opening `<svg>` tag, and
+/// optional `<title>`, `<desc>`, and `<metadata>` elements.
+///
+/// Every public `to_*_svg` function calls this first so the preamble
+/// stays consistent.
+fn write_svg_preamble(out: &mut String, dimensions: Dimensions, metadata: &SvgMetadata<'_>) {
+    // XML declaration
+    let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+
+    // Opening <svg> tag with namespace, explicit dimensions, and viewBox
+    let _ = writeln!(
+        out,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
+        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
+    );
+
+    // Optional <title> element
+    if let Some(title) = metadata.title {
+        let _ = writeln!(out, "  <title>{}</title>", xml_escape(title));
+    }
+
+    // Optional <desc> element
+    if let Some(description) = metadata.description {
+        let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
+    }
+
+    // Optional <metadata> element with structured pipeline config
+    if let Some(config_json) = metadata.config_json {
+        let _ = writeln!(out, "  <metadata>");
+        let _ = writeln!(
+            out,
+            "    <mujou:pipeline xmlns:mujou=\"https://mujou.app/ns/1\">{}</mujou:pipeline>",
+            xml_escape(config_json),
+        );
+        let _ = writeln!(out, "  </metadata>");
+    }
+}
+
+/// Build the SVG `d` attribute string for a polyline.
+///
+/// Returns `None` if the polyline has fewer than 2 points (cannot form
+/// a visible line segment).  Coordinates are formatted to 1 decimal
+/// place (0.1 px precision).
+fn polyline_to_path_d(polyline: &Polyline) -> Option<String> {
+    let points = polyline.points();
+    if points.len() < 2 {
+        return None;
+    }
+    Some(
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let cmd = if i == 0 { "M" } else { "L" };
+                format!("{cmd} {:.1} {:.1}", p.x, p.y)
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+/// Write polyline `<path>` elements at the given indentation level.
+///
+/// Each polyline with 2+ points becomes a `<path>` element.  When
+/// `attrs` is non-empty it is appended after the `d` attribute
+/// (e.g. `fill="none" stroke="black" stroke-width="1"`).
+fn write_polyline_paths(out: &mut String, polylines: &[Polyline], indent: &str, attrs: &str) {
+    for polyline in polylines {
+        if let Some(d) = polyline_to_path_d(polyline) {
+            if attrs.is_empty() {
+                let _ = writeln!(out, r#"{indent}<path d="{d}"/>"#);
+            } else {
+                let _ = writeln!(out, r#"{indent}<path d="{d}" {attrs}/>"#);
+            }
+        }
+    }
+}
+
 /// Serialize polylines into an SVG document string.
 ///
 /// Each [`Polyline`] with 2 or more points becomes a `<path>` element.
@@ -110,59 +192,15 @@ pub fn to_svg(
 ) -> String {
     let mut out = String::new();
 
-    // XML declaration
-    let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+    write_svg_preamble(&mut out, dimensions, metadata);
 
-    // Opening <svg> tag with namespace, explicit dimensions, and viewBox
-    let _ = writeln!(
-        out,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
-        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
+    // One <path> per polyline
+    write_polyline_paths(
+        &mut out,
+        polylines,
+        "  ",
+        r#"fill="none" stroke="black" stroke-width="1""#,
     );
-
-    // Optional <title> element
-    if let Some(title) = metadata.title {
-        let _ = writeln!(out, "  <title>{}</title>", xml_escape(title));
-    }
-
-    // Optional <desc> element
-    if let Some(description) = metadata.description {
-        let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
-    }
-
-    // Optional <metadata> element with structured pipeline config
-    if let Some(config_json) = metadata.config_json {
-        let _ = writeln!(out, "  <metadata>");
-        let _ = writeln!(
-            out,
-            "    <mujou:pipeline xmlns:mujou=\"https://mujou.app/ns/1\">{}</mujou:pipeline>",
-            xml_escape(config_json),
-        );
-        let _ = writeln!(out, "  </metadata>");
-    }
-
-    // One <path> per polyline (skip polylines with fewer than 2 points)
-    for polyline in polylines {
-        let points = polyline.points();
-        if points.len() < 2 {
-            continue;
-        }
-
-        let d: String = points
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                let cmd = if i == 0 { "M" } else { "L" };
-                format!("{cmd} {:.1} {:.1}", p.x, p.y)
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let _ = writeln!(
-            out,
-            r#"  <path d="{d}" fill="none" stroke="black" stroke-width="1"/>"#,
-        );
-    }
 
     // Closing tag
     let _ = writeln!(out, "</svg>");
@@ -190,23 +228,7 @@ pub fn to_diagnostic_svg(
 ) -> String {
     let mut out = String::new();
 
-    // XML declaration
-    let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
-
-    // Opening <svg> tag
-    let _ = writeln!(
-        out,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
-        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
-    );
-
-    // Optional metadata
-    if let Some(title) = metadata.title {
-        let _ = writeln!(out, "  <title>{}</title>", xml_escape(title));
-    }
-    if let Some(description) = metadata.description {
-        let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
-    }
+    write_svg_preamble(&mut out, dimensions, metadata);
 
     // Dark background for visibility
     let _ = writeln!(
@@ -220,24 +242,7 @@ pub fn to_diagnostic_svg(
         out,
         r#"  <g id="contours" stroke="white" stroke-width="1" fill="none">"#
     );
-    for polyline in polylines {
-        let points = polyline.points();
-        if points.len() < 2 {
-            continue;
-        }
-
-        let d: String = points
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                let cmd = if i == 0 { "M" } else { "L" };
-                format!("{cmd} {:.1} {:.1}", p.x, p.y)
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let _ = writeln!(out, r#"    <path d="{d}"/>"#);
-    }
+    write_polyline_paths(&mut out, polylines, "    ", "");
     let _ = writeln!(out, "  </g>");
 
     // MST connecting edges in red
@@ -326,23 +331,7 @@ pub fn to_segment_diagnostic_svg(
 ) -> String {
     let mut out = String::new();
 
-    // XML declaration
-    let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
-
-    // Opening <svg> tag
-    let _ = writeln!(
-        out,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
-        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
-    );
-
-    // Optional metadata
-    if let Some(title) = metadata.title {
-        let _ = writeln!(out, "  <title>{}</title>", xml_escape(title));
-    }
-    if let Some(description) = metadata.description {
-        let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
-    }
+    write_svg_preamble(&mut out, dimensions, metadata);
 
     // Dark background for visibility
     let _ = writeln!(
@@ -356,24 +345,7 @@ pub fn to_segment_diagnostic_svg(
         out,
         r#"  <g id="contours" stroke="white" stroke-width="1" fill="none">"#
     );
-    for polyline in polylines {
-        let points = polyline.points();
-        if points.len() < 2 {
-            continue;
-        }
-
-        let d: String = points
-            .iter()
-            .enumerate()
-            .map(|(i, p)| {
-                let cmd = if i == 0 { "M" } else { "L" };
-                format!("{cmd} {:.1} {:.1}", p.x, p.y)
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-
-        let _ = writeln!(out, r#"    <path d="{d}"/>"#);
-    }
+    write_polyline_paths(&mut out, polylines, "    ", "");
     let _ = writeln!(out, "  </g>");
 
     // Find the top N longest segments across all polylines.
