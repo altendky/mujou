@@ -941,6 +941,10 @@ pub fn join_mst(
     if polylines.len() == 1 {
         let path = polylines[0].clone();
         let total_path_length = path_polyline_length(&path);
+        // Single contour: no MST or Euler graph is constructed, so all
+        // graph-related metrics are zero.  Only `total_path_length`
+        // reflects the input — the remaining fields are legitimately
+        // zero because the algorithm's graph phases were skipped.
         return (
             path,
             JoinQualityMetrics {
