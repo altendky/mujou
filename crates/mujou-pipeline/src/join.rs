@@ -73,6 +73,7 @@ pub enum PathJoinerKind {
 ///
 /// Contains the joined polyline and optional quality metrics.  Only the
 /// MST joiner currently produces metrics; other joiners return `None`.
+#[derive(Debug)]
 pub struct JoinOutput {
     /// The single continuous output path.
     pub path: Polyline,
