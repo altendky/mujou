@@ -19,7 +19,8 @@ pub struct ExportPanelProps {
     config_description: String,
     /// Serialized `PipelineConfig` JSON for structured SVG metadata.
     /// Embedded in a `<metadata>` element for machine-parseable reproducibility.
-    config_json: String,
+    /// `None` if serialization failed — the `<metadata>` block is omitted.
+    config_json: Option<String>,
     /// Controls visibility of the export popup.
     show: Signal<bool>,
 }
@@ -95,7 +96,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                     let metadata = mujou_export::SvgMetadata {
                         title: Some(&filename),
                         description: Some(&description),
-                        config_json: Some(&config_json),
+                        config_json: config_json.as_deref(),
                     };
                     let polyline = res.final_polyline();
                     let svg = mujou_export::to_svg(
