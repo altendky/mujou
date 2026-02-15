@@ -115,8 +115,12 @@ impl PathJoiner for PathJoinerKind {
                 quality_metrics: None,
             },
             Self::Mst => {
-                let (path, metrics) =
-                    mst_join::join_mst(contours, config.mst_neighbours, config.working_resolution);
+                let (path, metrics) = mst_join::join_mst(
+                    contours,
+                    config.mst_neighbours,
+                    config.working_resolution,
+                    config.parity_strategy,
+                );
                 JoinOutput {
                     path,
                     quality_metrics: Some(metrics),

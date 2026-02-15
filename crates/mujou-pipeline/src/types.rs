@@ -326,6 +326,13 @@ pub struct PipelineConfig {
     /// candidate edge generation. Only affects the MST path joiner.
     pub mst_neighbours: usize,
 
+    /// Which parity-fixing algorithm to use during MST joining.
+    ///
+    /// Controls how odd-degree vertices are paired before finding the
+    /// Eulerian path. Only affects the MST path joiner.
+    #[serde(default)]
+    pub parity_strategy: crate::mst_join::ParityStrategy,
+
     /// Which image channels to use for edge detection.
     ///
     /// Canny is run independently on each enabled channel and the
@@ -360,6 +367,9 @@ impl PipelineConfig {
     pub const DEFAULT_DOWNSAMPLE_FILTER: DownsampleFilter = DownsampleFilter::Triangle;
     /// Default MST nearest-neighbour candidate count per sample point.
     pub const DEFAULT_MST_NEIGHBOURS: usize = 20;
+    /// Default parity-fixing strategy for MST joining.
+    pub const DEFAULT_PARITY_STRATEGY: crate::mst_join::ParityStrategy =
+        crate::mst_join::ParityStrategy::Greedy;
     /// Default edge channels (luminance only).
     pub const DEFAULT_EDGE_CHANNELS: EdgeChannels = EdgeChannels {
         luminance: true,
@@ -472,6 +482,7 @@ impl Default for PipelineConfig {
             working_resolution: Self::DEFAULT_WORKING_RESOLUTION,
             downsample_filter: Self::DEFAULT_DOWNSAMPLE_FILTER,
             mst_neighbours: Self::DEFAULT_MST_NEIGHBOURS,
+            parity_strategy: Self::DEFAULT_PARITY_STRATEGY,
             edge_channels: Self::DEFAULT_EDGE_CHANNELS,
         }
     }
@@ -501,6 +512,7 @@ impl PipelineConfig {
             working_resolution,
             downsample_filter,
             mst_neighbours,
+            parity_strategy,
             edge_channels,
         } = self;
 
@@ -517,6 +529,7 @@ impl PipelineConfig {
             && *working_resolution == other.working_resolution
             && *downsample_filter == other.downsample_filter
             && *mst_neighbours == other.mst_neighbours
+            && *parity_strategy == other.parity_strategy
             && *edge_channels == other.edge_channels
     }
 
@@ -555,6 +568,7 @@ impl PipelineConfig {
             working_resolution,
             downsample_filter,
             mst_neighbours,
+            parity_strategy,
             edge_channels,
         } = self;
 
@@ -597,8 +611,11 @@ impl PipelineConfig {
             return 7;
         }
 
-        // Stage 8 — joining: path_joiner, mst_neighbours
-        if *path_joiner != other.path_joiner || *mst_neighbours != other.mst_neighbours {
+        // Stage 8 — joining: path_joiner, mst_neighbours, parity_strategy
+        if *path_joiner != other.path_joiner
+            || *mst_neighbours != other.mst_neighbours
+            || *parity_strategy != other.parity_strategy
+        {
             return 8;
         }
 
@@ -962,6 +979,10 @@ mod tests {
         assert_eq!(config.working_resolution, 1000);
         assert_eq!(config.downsample_filter, DownsampleFilter::Triangle);
         assert_eq!(config.mst_neighbours, 20);
+        assert_eq!(
+            config.parity_strategy,
+            crate::mst_join::ParityStrategy::Greedy
+        );
         assert_eq!(config.edge_channels, EdgeChannels::default());
         assert!(config.edge_channels.luminance);
         assert!(!config.edge_channels.red);
@@ -1038,6 +1059,13 @@ mod tests {
         assert!(
             !a.pipeline_eq(&b),
             "mst_neighbours change should be detected"
+        );
+
+        let mut b = a.clone();
+        b.parity_strategy = crate::mst_join::ParityStrategy::Optimal;
+        assert!(
+            !a.pipeline_eq(&b),
+            "parity_strategy change should be detected"
         );
 
         let mut b = a.clone();
@@ -1198,6 +1226,7 @@ mod tests {
             working_resolution: 256,
             downsample_filter: DownsampleFilter::Triangle,
             mst_neighbours: 20,
+            parity_strategy: crate::mst_join::ParityStrategy::Optimal,
             edge_channels: EdgeChannels {
                 luminance: true,
                 red: true,
@@ -1234,6 +1263,11 @@ mod tests {
         assert_eq!(config.edge_channels, EdgeChannels::default());
         assert!(config.edge_channels.luminance);
         assert!(!config.edge_channels.red);
+        // Also verifies parity_strategy defaults when absent.
+        assert_eq!(
+            config.parity_strategy,
+            crate::mst_join::ParityStrategy::Greedy,
+        );
     }
 
     #[test]
@@ -1494,6 +1528,16 @@ mod tests {
         let a = PipelineConfig::default();
         let b = PipelineConfig {
             mst_neighbours: 50,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 8);
+    }
+
+    #[test]
+    fn earliest_changed_stage_parity_strategy() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            parity_strategy: crate::mst_join::ParityStrategy::Optimal,
             ..PipelineConfig::default()
         };
         assert_eq!(a.earliest_changed_stage(&b), 8);
