@@ -488,6 +488,7 @@ fn cherry_blossoms_mst_edge_diagnostics() {
         &mujou_export::SvgMetadata {
             title: Some("cherry-blossoms (MST edge diagnostics)"),
             description: Some("Red lines = MST connecting edges"),
+            config_json: None,
         },
         &quality.mst_edge_details,
     );
@@ -583,6 +584,7 @@ fn cherry_blossoms_segment_diagnostics() {
         &mujou_export::SvgMetadata {
             title: Some("cherry-blossoms (segment diagnostics)"),
             description: Some("Top 5 longest segments highlighted in distinct colors"),
+            config_json: None,
         },
         5,
     );
