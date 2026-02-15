@@ -241,6 +241,7 @@ mod tests {
         assert!(!svg.contains("<path"));
         // Empty SVGs use self-closing <svg .../> tag
         assert!(svg.contains("<svg "));
+        assert!(svg.trim_end().ends_with("/>"));
     }
 
     #[test]
