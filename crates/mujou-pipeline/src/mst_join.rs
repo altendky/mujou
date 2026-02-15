@@ -1244,6 +1244,17 @@ fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
     let graph_ref: &UnGraph<(), f64>;
 
     if odd.len() >= 2 {
+        // After fix_parity there should be exactly 2 odd-degree
+        // vertices (the Euler path endpoints).  More than 2 indicates
+        // a bug in parity fixing or floating-point graph construction.
+        // The chunks(2) fallback below pairs vertices in arbitrary
+        // iteration order, which is acceptable for the expected n=2
+        // case but would produce suboptimal pairings for larger n.
+        debug_assert!(
+            odd.len() == 2,
+            "expected exactly 2 odd-degree vertices after fix_parity, got {}",
+            odd.len(),
+        );
         work_graph = graph.clone();
         virtual_edge_ids = odd
             .chunks(2)
