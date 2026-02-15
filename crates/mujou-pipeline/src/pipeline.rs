@@ -48,6 +48,7 @@ use image::DynamicImage;
 use crate::contour::ContourTracer;
 use crate::diagnostics::StageMetrics;
 use crate::join::PathJoiner;
+use crate::mst_join::JoinQualityMetrics;
 use crate::types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, RgbaImage, StagedResult,
 };
@@ -424,7 +425,7 @@ impl Masked {
     /// Advance to the joining stage — the final pipeline step.
     pub fn join(self) -> Joined {
         let join_input = self.clipped.as_deref().unwrap_or(&self.simplified);
-        let path = self.config.path_joiner.join(join_input, &self.config);
+        let output = self.config.path_joiner.join(join_input, &self.config);
         Joined {
             config: self.config,
             original: self.original,
@@ -434,7 +435,8 @@ impl Masked {
             contours: self.contours,
             simplified: self.simplified,
             masked: self.clipped,
-            path,
+            path: output.path,
+            quality_metrics: output.quality_metrics,
             dimensions: self.dimensions,
         }
     }
@@ -460,6 +462,7 @@ pub struct Joined {
     simplified: Vec<Polyline>,
     masked: Option<Vec<Polyline>>,
     path: Polyline,
+    quality_metrics: Option<JoinQualityMetrics>,
     dimensions: Dimensions,
 }
 
@@ -903,6 +906,7 @@ impl PipelineStage for Joined {
             input_point_count,
             output_point_count,
             expansion_ratio,
+            quality: self.quality_metrics.clone(),
         })
     }
 
