@@ -49,6 +49,7 @@ use crate::contour::ContourTracer;
 use crate::diagnostics::StageMetrics;
 use crate::join::PathJoiner;
 use crate::mask::{BorderPathMode, MaskResult, MaskShape};
+use crate::mst_join::JoinQualityMetrics;
 use crate::types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, RgbaImage, StagedResult,
 };
@@ -447,7 +448,7 @@ impl Masked {
             // both the join input and the stored simplified set.
             self.simplified.clone()
         };
-        let path = self.config.path_joiner.join(&join_input, &self.config);
+        let output = self.config.path_joiner.join(&join_input, &self.config);
         Joined {
             config: self.config,
             original: self.original,
@@ -457,7 +458,8 @@ impl Masked {
             contours: self.contours,
             simplified: self.simplified,
             masked: self.mask_result,
-            path,
+            path: output.path,
+            quality_metrics: output.quality_metrics,
             dimensions: self.dimensions,
         }
     }
@@ -483,6 +485,7 @@ pub struct Joined {
     simplified: Vec<Polyline>,
     masked: Option<MaskResult>,
     path: Polyline,
+    quality_metrics: Option<JoinQualityMetrics>,
     dimensions: Dimensions,
 }
 
@@ -500,6 +503,13 @@ impl Joined {
     }
 
     /// Consume the pipeline and return the full [`StagedResult`].
+    ///
+    /// **Note:** [`StagedResult`] holds only data-oriented raster/vector
+    /// intermediates and does not include join quality metrics.  To
+    /// access quality metrics, call [`metrics()`](PipelineStage::metrics)
+    /// before this method, or use
+    /// [`process_staged_with_diagnostics`](crate::diagnostics::process_staged_with_diagnostics)
+    /// which captures metrics automatically.
     #[must_use]
     pub fn into_result(self) -> StagedResult {
         StagedResult {
@@ -939,6 +949,7 @@ impl PipelineStage for Joined {
             input_point_count,
             output_point_count,
             expansion_ratio,
+            quality: self.quality_metrics.clone(),
         })
     }
 

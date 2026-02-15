@@ -27,6 +27,7 @@ use petgraph::unionfind::UnionFind;
 use petgraph::visit::EdgeRef;
 use rstar::RTree;
 use rstar::primitives::GeomWithData;
+use serde::{Deserialize, Serialize};
 
 use crate::types::{Point, Polyline, polyline_bounding_box};
 
@@ -81,6 +82,82 @@ struct MstEdge {
     seg_a: usize,
     /// Segment index within polyline B where the connection point lies.
     seg_b: usize,
+}
+
+/// Quality metrics collected during MST-based path joining.
+///
+/// These metrics capture the four quality criteria defined in issue #89
+/// for evaluating spanning tree objectives. Computational cost (the fifth
+/// criterion) is already measured by the diagnostics layer's per-stage
+/// timing.
+///
+/// All distance values are in working-resolution pixel units.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct JoinQualityMetrics {
+    /// Number of MST edges (connections between polylines).
+    ///
+    /// For N input polylines this is always N−1.
+    pub mst_edge_count: usize,
+
+    /// Sum of Euclidean distances across all MST connecting edges.
+    ///
+    /// This is the total length of new visible line drawn to connect
+    /// disconnected contours — **criterion #1: visible artifact quality**.
+    pub total_mst_edge_weight: f64,
+
+    /// Longest individual MST connecting edge.
+    ///
+    /// The single worst visible connection between contours —
+    /// **criterion #4: worst-case single connection**.
+    pub max_mst_edge_weight: f64,
+
+    /// Number of odd-degree vertices before parity fixing.
+    ///
+    /// An Eulerian path requires 0 or 2 odd-degree vertices.
+    /// Higher counts indicate more retracing will be needed.
+    pub odd_vertices_before_fix: usize,
+
+    /// Number of odd-degree vertices after parity fixing (0 or 2).
+    pub odd_vertices_after_fix: usize,
+
+    /// Sum of duplicated edge weights during parity fixing.
+    ///
+    /// This is the total distance the tool must retrace through
+    /// already-drawn grooves — **criterion #2: retrace distance**.
+    pub total_retrace_distance: f64,
+
+    /// Total Euclidean length of the final Euler path.
+    ///
+    /// Sum of all segment lengths (original contour segments +
+    /// MST connections + retrace) — **criterion #3: total path length**.
+    pub total_path_length: f64,
+
+    /// Number of nodes in the Eulerian graph after construction.
+    pub graph_node_count: usize,
+
+    /// Number of edges in the Eulerian graph before parity fixing.
+    pub graph_edge_count_before_fix: usize,
+
+    /// Number of edges in the Eulerian graph after parity fixing.
+    pub graph_edge_count_after_fix: usize,
+}
+
+/// Euclidean distance between two `geo::Coord` points.
+fn coord_distance(a: geo::Coord<f64>, b: geo::Coord<f64>) -> f64 {
+    (a.x - b.x).hypot(a.y - b.y)
+}
+
+/// Compute the Euclidean distance between an [`MstEdge`]'s two connection
+/// points.
+fn mst_edge_weight(edge: &MstEdge) -> f64 {
+    coord_distance(edge.point_a, edge.point_b)
+}
+
+/// Compute total Euclidean path length from a sequence of graph nodes.
+fn compute_path_length(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> f64 {
+    path.windows(2)
+        .map(|w| coord_distance(node_coords[w[0].index()], node_coords[w[1].index()]))
+        .sum()
 }
 
 /// Generate sample points along a polyline's segments at adaptive density.
@@ -604,16 +681,26 @@ fn odd_degree_vertices(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
 /// Uses Euclidean distance as a fast heuristic for pairing (avoids
 /// running Dijkstra for every pair), then Dijkstra only for path
 /// reconstruction of the selected pairs.
+///
+/// Returns `(total_retrace_distance, odd_count_before, odd_count_after)`.
+///
 /// # Errors
 ///
 /// Returns an error if shortest-path reconstruction fails for any
 /// odd-degree vertex pair (indicates a graph connectivity bug).
-fn fix_parity(graph: &mut UnGraph<(), f64>, node_coords: &[geo::Coord<f64>]) -> Result<(), String> {
+fn fix_parity(
+    graph: &mut UnGraph<(), f64>,
+    node_coords: &[geo::Coord<f64>],
+) -> Result<(f64, usize, usize), String> {
     let mut odd = odd_degree_vertices(graph);
+    let odd_before = odd.len();
 
-    if odd.len() <= 2 {
-        return Ok(()); // 0 or 2 odd-degree vertices: already Eulerian.
+    if odd_before <= 2 {
+        // 0 or 2 odd-degree vertices: already Eulerian.
+        return Ok((0.0, odd_before, odd_before));
     }
+
+    let mut total_retrace = 0.0;
 
     // Greedy matching using Euclidean distance as heuristic: pair each
     // odd vertex with the nearest unmatched odd peer.
@@ -649,6 +736,7 @@ fn fix_parity(graph: &mut UnGraph<(), f64>, node_coords: &[geo::Coord<f64>]) -> 
                 .find(|e| e.target() == b)
                 .map_or(0.0, |e| *e.weight());
             graph.add_edge(a, b, weight);
+            total_retrace += weight;
         }
 
         // Remove the matched pair (remove higher index first).
@@ -660,7 +748,8 @@ fn fix_parity(graph: &mut UnGraph<(), f64>, node_coords: &[geo::Coord<f64>]) -> 
             odd.swap_remove(best_i);
         }
     }
-    Ok(())
+    let odd_after = odd_degree_vertices(graph).len();
+    Ok((total_retrace, odd_before, odd_after))
 }
 
 /// Reconstruct the shortest path from `start` to `end` using Dijkstra.
@@ -826,6 +915,9 @@ fn emit_polyline(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> Polylin
 ///    shortest paths (retracing is visually free on sand tables).
 /// 4. Finds an Eulerian path through the augmented graph.
 ///
+/// Returns the joined polyline together with [`JoinQualityMetrics`]
+/// capturing the evaluation criteria from issue #89.
+///
 /// # Panics
 ///
 /// Panics if shortest-path reconstruction fails during the parity-fix
@@ -837,37 +929,116 @@ fn emit_polyline(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> Polylin
 /// construction or parity fixing.
 #[must_use]
 #[allow(clippy::expect_used)] // structural invariant: MST guarantees connectivity
-pub fn join_mst(contours: &[Polyline], k_nearest: usize, working_resolution: u32) -> Polyline {
+pub fn join_mst(
+    contours: &[Polyline],
+    k_nearest: usize,
+    working_resolution: u32,
+) -> (Polyline, JoinQualityMetrics) {
     // Filter out empty contours.
     let polylines: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
 
     if polylines.is_empty() {
-        return Polyline::new(Vec::new());
+        return (Polyline::new(Vec::new()), JoinQualityMetrics::empty());
     }
 
     if polylines.len() == 1 {
-        return polylines[0].clone();
+        let path = polylines[0].clone();
+        let total_path_length = path_polyline_length(&path);
+        // Single contour: no MST or Euler graph is constructed, so all
+        // graph-related metrics are zero.  Only `total_path_length`
+        // reflects the input — the remaining fields are legitimately
+        // zero because the algorithm's graph phases were skipped.
+        return (
+            path,
+            JoinQualityMetrics {
+                mst_edge_count: 0,
+                total_mst_edge_weight: 0.0,
+                max_mst_edge_weight: 0.0,
+                odd_vertices_before_fix: 0,
+                odd_vertices_after_fix: 0,
+                total_retrace_distance: 0.0,
+                total_path_length,
+                graph_node_count: 0,
+                graph_edge_count_before_fix: 0,
+                graph_edge_count_after_fix: 0,
+            },
+        );
     }
 
     // Phase 1: Build MST.
     let mst_edges = build_mst(&polylines, k_nearest.max(1), working_resolution);
 
+    // MST edge metrics (criteria #1 and #4).
+    let mst_edge_count = mst_edges.len();
+    let mst_weights: Vec<f64> = mst_edges.iter().map(mst_edge_weight).collect();
+    let total_mst_edge_weight: f64 = mst_weights.iter().sum();
+    let max_mst_edge_weight: f64 = mst_weights.iter().copied().reduce(f64::max).unwrap_or(0.0);
+
     // Phase 2+3: Build graph, fix parity, find Eulerian path.
     let (mut graph, node_coords) = build_graph(&polylines, &mst_edges);
-    fix_parity(&mut graph, &node_coords)
-        .expect("fix_parity: shortest-path reconstruction failed on MST-connected graph");
-    let path = hierholzer(&graph);
+    let graph_node_count = graph.node_count();
+    let graph_edge_count_before_fix = graph.edge_count();
+
+    let (total_retrace_distance, odd_vertices_before_fix, odd_vertices_after_fix) =
+        fix_parity(&mut graph, &node_coords)
+            .expect("fix_parity: shortest-path reconstruction failed on MST-connected graph");
+    let graph_edge_count_after_fix = graph.edge_count();
+
+    let euler_path = hierholzer(&graph);
 
     // Phase 4: Emit.
     assert!(
-        !path.is_empty(),
+        !euler_path.is_empty(),
         "hierholzer returned empty path on a graph with {} nodes and {} edges — \
          this indicates a bug in build_graph or fix_parity",
         graph.node_count(),
         graph.edge_count(),
     );
 
-    emit_polyline(&path, &node_coords)
+    let total_path_length = compute_path_length(&euler_path, &node_coords);
+    let polyline = emit_polyline(&euler_path, &node_coords);
+
+    let metrics = JoinQualityMetrics {
+        mst_edge_count,
+        total_mst_edge_weight,
+        max_mst_edge_weight,
+        odd_vertices_before_fix,
+        odd_vertices_after_fix,
+        total_retrace_distance,
+        total_path_length,
+        graph_node_count,
+        graph_edge_count_before_fix,
+        graph_edge_count_after_fix,
+    };
+
+    (polyline, metrics)
+}
+
+impl JoinQualityMetrics {
+    /// Metrics for an empty input (no contours to join).
+    #[must_use]
+    const fn empty() -> Self {
+        Self {
+            mst_edge_count: 0,
+            total_mst_edge_weight: 0.0,
+            max_mst_edge_weight: 0.0,
+            odd_vertices_before_fix: 0,
+            odd_vertices_after_fix: 0,
+            total_retrace_distance: 0.0,
+            total_path_length: 0.0,
+            graph_node_count: 0,
+            graph_edge_count_before_fix: 0,
+            graph_edge_count_after_fix: 0,
+        }
+    }
+}
+
+/// Compute the total Euclidean length of a `Polyline`.
+fn path_polyline_length(polyline: &Polyline) -> f64 {
+    let pts = polyline.points();
+    pts.windows(2)
+        .map(|w| coord_distance(point_to_coord(w[0]), point_to_coord(w[1])))
+        .sum()
 }
 
 #[cfg(test)]
@@ -882,8 +1053,9 @@ mod tests {
 
     #[test]
     fn mst_join_empty() {
-        let result = join_mst(&[], TEST_K, TEST_RESOLUTION);
+        let (result, metrics) = join_mst(&[], TEST_K, TEST_RESOLUTION);
         assert!(result.is_empty());
+        assert_eq!(metrics.mst_edge_count, 0);
     }
 
     #[test]
@@ -893,14 +1065,16 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let result = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
+        let (result, metrics) = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
         assert_eq!(result, contour);
+        assert_eq!(metrics.mst_edge_count, 0);
+        assert!(metrics.total_path_length > 0.0);
     }
 
     #[test]
     fn mst_join_single_point_contour() {
         let contour = Polyline::new(vec![Point::new(5.0, 5.0)]);
-        let result = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
         assert_eq!(result.len(), 1);
     }
 
@@ -908,7 +1082,7 @@ mod tests {
     fn mst_join_two_contours_produces_single_path() {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let result = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION);
+        let (result, metrics) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION);
 
         // Must be non-empty and cover all original points.
         assert!(
@@ -916,6 +1090,8 @@ mod tests {
             "expected >= 4 points, got {}",
             result.len()
         );
+        // Two contours → 1 MST edge.
+        assert_eq!(metrics.mst_edge_count, 1);
     }
 
     #[test]
@@ -923,7 +1099,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let empty = Polyline::new(Vec::new());
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let result = join_mst(&[c1, empty, c2], TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&[c1, empty, c2], TEST_K, TEST_RESOLUTION);
         assert!(result.len() >= 4);
     }
 
@@ -942,7 +1118,7 @@ mod tests {
             Point::new(60.0, 60.0),
         ]);
 
-        let result = join_mst(
+        let (result, _metrics) = join_mst(
             &[c1.clone(), c2.clone(), c3.clone()],
             TEST_K,
             TEST_RESOLUTION,
@@ -973,7 +1149,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(25.0, 0.0)]);
 
-        let result = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
         assert!(!result.is_empty());
         // All points should be finite.
         for p in result.points() {
@@ -988,7 +1164,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(6.0, 0.0), Point::new(7.0, 0.0)]);
 
-        let result = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
         // Output should contain all 6 original points plus MST connections
         // and any retrace edges.
         assert!(
@@ -1014,7 +1190,7 @@ mod tests {
             .collect();
 
         let total_points: usize = contours.iter().map(Polyline::len).sum();
-        let result = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
 
         assert!(
             result.len() >= total_points,
@@ -1122,12 +1298,15 @@ mod tests {
             geo::Coord { x: 0.0, y: -1.0 }, // l4
         ];
 
-        fix_parity(&mut g, &node_coords).unwrap();
-        let odd = odd_degree_vertices(&g);
+        let (retrace, odd_before, odd_after) = fix_parity(&mut g, &node_coords).unwrap();
+        assert!(retrace >= 0.0, "retrace distance should be non-negative");
+        assert_eq!(
+            odd_before, 4,
+            "star graph should have 4 odd vertices before fix"
+        );
         assert!(
-            odd.len() <= 2,
-            "after parity fix, should have <= 2 odd vertices, got {}",
-            odd.len(),
+            odd_after <= 2,
+            "after parity fix, should have <= 2 odd vertices, got {odd_after}",
         );
     }
 
@@ -1141,7 +1320,7 @@ mod tests {
         // Polyline B: short vertical segment above the midpoint of A.
         let b = Polyline::new(vec![Point::new(50.0, 5.0), Point::new(50.0, 10.0)]);
 
-        let result = join_mst(&[a, b], TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&[a, b], TEST_K, TEST_RESOLUTION);
         let pts = result.points();
         assert!(
             pts.len() >= 4,
@@ -1186,7 +1365,7 @@ mod tests {
             Point::new(10010.0, 10000.0),
         ]);
 
-        let result = join_mst(
+        let (result, _metrics) = join_mst(
             &[close_a.clone(), close_b.clone(), far.clone()],
             1,
             TEST_RESOLUTION,
@@ -1222,5 +1401,190 @@ mod tests {
         assert!(check_endpoint(10.0, 5.0), "close_b end missing");
         assert!(check_endpoint(10000.0, 10000.0), "far start missing");
         assert!(check_endpoint(10010.0, 10000.0), "far end missing");
+    }
+
+    // --- Quality metrics tests ---
+
+    #[test]
+    fn metrics_edge_count_equals_n_minus_one() {
+        // N contours → N−1 MST edges.
+        let contours: Vec<Polyline> = (0..5)
+            .map(|i| {
+                let base = f64::from(i) * 20.0;
+                Polyline::new(vec![Point::new(base, 0.0), Point::new(base + 5.0, 0.0)])
+            })
+            .collect();
+
+        let (_result, metrics) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+        assert_eq!(
+            metrics.mst_edge_count,
+            contours.len() - 1,
+            "MST should have N-1={} edges for {} contours, got {}",
+            contours.len() - 1,
+            contours.len(),
+            metrics.mst_edge_count,
+        );
+    }
+
+    #[test]
+    fn metrics_values_are_non_negative() {
+        let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
+        let c2 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(30.0, 0.0)]);
+        let c3 = Polyline::new(vec![Point::new(40.0, 0.0), Point::new(50.0, 0.0)]);
+
+        let (_result, m) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
+
+        assert!(m.total_mst_edge_weight >= 0.0);
+        assert!(m.max_mst_edge_weight >= 0.0);
+        assert!(m.total_retrace_distance >= 0.0);
+        assert!(m.total_path_length >= 0.0);
+    }
+
+    #[test]
+    fn metrics_path_length_positive_for_multi_contour() {
+        let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
+        let c2 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(30.0, 0.0)]);
+
+        let (_result, m) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION);
+
+        assert!(
+            m.total_path_length > 0.0,
+            "total_path_length should be positive for multi-contour input, got {}",
+            m.total_path_length,
+        );
+    }
+
+    #[test]
+    fn metrics_max_edge_leq_total_weight() {
+        let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
+        let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
+        let c3 = Polyline::new(vec![Point::new(30.0, 0.0), Point::new(35.0, 0.0)]);
+
+        let (_result, m) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
+
+        assert!(
+            m.max_mst_edge_weight <= m.total_mst_edge_weight,
+            "max edge ({}) should be <= total weight ({})",
+            m.max_mst_edge_weight,
+            m.total_mst_edge_weight,
+        );
+    }
+
+    #[test]
+    fn metrics_odd_vertices_after_fix_at_most_two() {
+        let contours: Vec<Polyline> = (0..10)
+            .map(|i| {
+                let base = f64::from(i) * 15.0;
+                Polyline::new(vec![
+                    Point::new(base, 0.0),
+                    Point::new(base + 5.0, 5.0),
+                    Point::new(base + 10.0, 0.0),
+                ])
+            })
+            .collect();
+
+        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+
+        assert!(
+            m.odd_vertices_after_fix <= 2,
+            "after parity fix should have <= 2 odd vertices, got {}",
+            m.odd_vertices_after_fix,
+        );
+    }
+
+    #[test]
+    fn metrics_graph_edge_count_increases_with_parity_fix() {
+        // When parity fixing adds duplicated edges, edge count after
+        // should be >= edge count before.
+        let contours: Vec<Polyline> = (0..4)
+            .map(|i| {
+                let base = f64::from(i) * 20.0;
+                Polyline::new(vec![Point::new(base, 0.0), Point::new(base + 5.0, 0.0)])
+            })
+            .collect();
+
+        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+
+        assert!(
+            m.graph_edge_count_after_fix >= m.graph_edge_count_before_fix,
+            "edge count after fix ({}) should be >= before ({})",
+            m.graph_edge_count_after_fix,
+            m.graph_edge_count_before_fix,
+        );
+    }
+
+    #[test]
+    fn metrics_retrace_positive_when_edges_duplicated() {
+        // When parity fixing duplicates edges (edge count increases),
+        // the retrace distance must be strictly positive.
+        let contours: Vec<Polyline> = (0..10)
+            .map(|i| {
+                let base = f64::from(i) * 15.0;
+                Polyline::new(vec![
+                    Point::new(base, 0.0),
+                    Point::new(base + 5.0, 5.0),
+                    Point::new(base + 10.0, 0.0),
+                ])
+            })
+            .collect();
+
+        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+
+        if m.graph_edge_count_after_fix > m.graph_edge_count_before_fix {
+            assert!(
+                m.total_retrace_distance > 0.0,
+                "parity fix added edges but retrace distance is {}, expected > 0",
+                m.total_retrace_distance,
+            );
+        }
+    }
+
+    #[test]
+    fn metrics_empty_returns_zero_metrics() {
+        let (_result, m) = join_mst(&[], TEST_K, TEST_RESOLUTION);
+
+        assert_eq!(m.mst_edge_count, 0);
+        assert!(m.total_mst_edge_weight.abs() < f64::EPSILON);
+        assert!(m.max_mst_edge_weight.abs() < f64::EPSILON);
+        assert!(m.total_retrace_distance.abs() < f64::EPSILON);
+        assert!(m.total_path_length.abs() < f64::EPSILON);
+        assert_eq!(m.graph_node_count, 0);
+    }
+
+    #[test]
+    fn metrics_single_contour_has_zero_mst_weight() {
+        let contour = Polyline::new(vec![
+            Point::new(0.0, 0.0),
+            Point::new(10.0, 0.0),
+            Point::new(10.0, 10.0),
+        ]);
+
+        let (_result, m) = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
+
+        assert_eq!(m.mst_edge_count, 0);
+        assert!(m.total_mst_edge_weight.abs() < f64::EPSILON);
+        assert!(m.total_retrace_distance.abs() < f64::EPSILON);
+        // Path length should equal the contour length: 10 + 10 = 20.
+        assert!(
+            (m.total_path_length - 20.0).abs() < 1e-10,
+            "expected path length ~20.0, got {}",
+            m.total_path_length,
+        );
+    }
+
+    #[test]
+    fn metrics_total_path_length_geq_mst_weight() {
+        // Total path must include at least the MST connection segments.
+        let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
+        let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
+
+        let (_result, m) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION);
+
+        assert!(
+            m.total_path_length >= m.total_mst_edge_weight,
+            "total_path_length ({}) should be >= total_mst_edge_weight ({})",
+            m.total_path_length,
+            m.total_mst_edge_weight,
+        );
     }
 }

@@ -16,6 +16,8 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::mst_join::JoinQualityMetrics;
+
 /// Serde support for `std::time::Duration` as fractional seconds.
 mod duration_serde {
     use std::time::Duration;
@@ -195,6 +197,10 @@ pub enum StageMetrics {
         output_point_count: usize,
         /// Ratio of output to input points (> 1.0 means retrace added points).
         expansion_ratio: f64,
+        /// Quality metrics from the MST joiner (issue #89 evaluation criteria).
+        ///
+        /// `None` for non-MST joiners.
+        quality: Option<JoinQualityMetrics>,
     },
 }
 
@@ -285,6 +291,7 @@ fn duration_ms(d: Duration) -> f64 {
 }
 
 /// Format stage metrics into a compact detail string.
+#[allow(clippy::too_many_lines)]
 fn format_metrics(metrics: &StageMetrics) -> String {
     match metrics {
         StageMetrics::Decode {
@@ -374,10 +381,25 @@ fn format_metrics(metrics: &StageMetrics) -> String {
             input_point_count,
             output_point_count,
             expansion_ratio,
+            quality,
         } => {
-            format!(
+            let base = format!(
                 "{strategy} {input_polyline_count} polys, {input_point_count}->{output_point_count} pts (x{expansion_ratio:.2})",
-            )
+            );
+            if let Some(q) = quality {
+                format!(
+                    "{base} | mst={} edges, conn={:.1}px max={:.1}px retrace={:.1}px path={:.1}px odd={}->{}",
+                    q.mst_edge_count,
+                    q.total_mst_edge_weight,
+                    q.max_mst_edge_weight,
+                    q.total_retrace_distance,
+                    q.total_path_length,
+                    q.odd_vertices_before_fix,
+                    q.odd_vertices_after_fix,
+                )
+            } else {
+                base
+            }
         }
     }
 }
@@ -821,6 +843,7 @@ mod tests {
                     input_point_count: 100,
                     output_point_count: 150,
                     expansion_ratio: 1.5,
+                    quality: None,
                 },
             },
             total_duration: Duration::from_millis(110),
@@ -908,6 +931,7 @@ mod tests {
                     input_point_count: 80,
                     output_point_count: 120,
                     expansion_ratio: 1.5,
+                    quality: None,
                 },
             },
             total_duration: Duration::from_millis(80),

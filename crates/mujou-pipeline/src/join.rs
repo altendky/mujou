@@ -11,7 +11,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::mst_join;
+use crate::mst_join::{self, JoinQualityMetrics};
 use crate::optimize;
 use crate::types::{PipelineConfig, Point, Polyline, polyline_bounding_box};
 
@@ -69,16 +69,28 @@ pub enum PathJoinerKind {
     Mst,
 }
 
+/// Result of a path joining operation.
+///
+/// Contains the joined polyline and optional quality metrics.  Only the
+/// MST joiner currently produces metrics; other joiners return `None`.
+#[derive(Debug)]
+pub struct JoinOutput {
+    /// The single continuous output path.
+    pub path: Polyline,
+    /// Quality metrics for the join operation (MST only).
+    pub quality_metrics: Option<JoinQualityMetrics>,
+}
+
 /// Trait for path joining strategies.
 ///
 /// Input: **unordered** disconnected contours (from simplification).
-/// Output: a single continuous polyline.
+/// Output: a single continuous polyline with optional quality metrics.
 ///
 /// Each implementation is responsible for ordering the contours as part
 /// of joining them.
 pub trait PathJoiner {
     /// Order and join the given contours into a single continuous path.
-    fn join(&self, contours: &[Polyline], config: &PipelineConfig) -> Polyline;
+    fn join(&self, contours: &[Polyline], config: &PipelineConfig) -> JoinOutput;
 }
 
 impl fmt::Display for PathJoinerKind {
@@ -92,12 +104,23 @@ impl fmt::Display for PathJoinerKind {
 }
 
 impl PathJoiner for PathJoinerKind {
-    fn join(&self, contours: &[Polyline], config: &PipelineConfig) -> Polyline {
+    fn join(&self, contours: &[Polyline], config: &PipelineConfig) -> JoinOutput {
         match *self {
-            Self::StraightLine => join_straight_line(contours),
-            Self::Retrace => join_retrace(contours),
+            Self::StraightLine => JoinOutput {
+                path: join_straight_line(contours),
+                quality_metrics: None,
+            },
+            Self::Retrace => JoinOutput {
+                path: join_retrace(contours),
+                quality_metrics: None,
+            },
             Self::Mst => {
-                mst_join::join_mst(contours, config.mst_neighbours, config.working_resolution)
+                let (path, metrics) =
+                    mst_join::join_mst(contours, config.mst_neighbours, config.working_resolution);
+                JoinOutput {
+                    path,
+                    quality_metrics: Some(metrics),
+                }
             }
         }
     }
@@ -576,8 +599,9 @@ mod tests {
 
     #[test]
     fn join_empty_contours() {
-        let result = PathJoinerKind::StraightLine.join(&[], &default_config());
-        assert!(result.is_empty());
+        let output = PathJoinerKind::StraightLine.join(&[], &default_config());
+        assert!(output.path.is_empty());
+        assert!(output.quality_metrics.is_none());
     }
 
     #[test]
@@ -587,15 +611,17 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let result =
+        let output =
             PathJoinerKind::StraightLine.join(std::slice::from_ref(&contour), &default_config());
-        assert_eq!(result, contour);
+        assert_eq!(output.path, contour);
+        assert!(output.quality_metrics.is_none());
     }
 
     #[test]
     fn retrace_empty_contours() {
-        let result = PathJoinerKind::Retrace.join(&[], &default_config());
-        assert!(result.is_empty());
+        let output = PathJoinerKind::Retrace.join(&[], &default_config());
+        assert!(output.path.is_empty());
+        assert!(output.quality_metrics.is_none());
     }
 
     #[test]
@@ -605,10 +631,11 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let result =
+        let output =
             PathJoinerKind::Retrace.join(std::slice::from_ref(&contour), &default_config());
         // Single contour: no joining needed, output equals input.
-        assert_eq!(result, contour);
+        assert_eq!(output.path, contour);
+        assert!(output.quality_metrics.is_none());
     }
 
     #[test]
@@ -619,8 +646,8 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(50.0, 0.0), Point::new(11.0, 0.0)]);
 
-        let result = PathJoinerKind::Retrace.join(&[c1, c2], &default_config());
-        let pts = result.points();
+        let output = PathJoinerKind::Retrace.join(&[c1, c2], &default_config());
+        let pts = output.path.points();
 
         // c2 should be emitted reversed: (11,0) then (50,0).
         // c1 forward: (0,0), (10,0)
@@ -641,8 +668,8 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(100.0, 0.0), Point::new(101.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(2.0, 0.0), Point::new(3.0, 0.0)]);
 
-        let result = PathJoinerKind::Retrace.join(&[c0, c1, c2], &default_config());
-        let pts = result.points();
+        let output = PathJoinerKind::Retrace.join(&[c0, c1, c2], &default_config());
+        let pts = output.path.points();
 
         // c0 emitted first, then c2 (nearby), then c1 (far).
         // c0: (0,0), (1,0)
@@ -673,12 +700,12 @@ mod tests {
             .collect();
 
         let total_contour_points: usize = contours.iter().map(Polyline::len).sum();
-        let result = PathJoinerKind::Retrace.join(&contours, &default_config());
+        let output = PathJoinerKind::Retrace.join(&contours, &default_config());
 
         assert!(
-            result.len() >= total_contour_points,
+            output.path.len() >= total_contour_points,
             "retrace output ({}) should be >= sum of contour points ({total_contour_points})",
-            result.len(),
+            output.path.len(),
         );
     }
 
@@ -702,8 +729,8 @@ mod tests {
                 .collect(),
         );
 
-        let result = PathJoinerKind::Retrace.join(&[c0.clone(), c1.clone()], &default_config());
-        let output_pts = result.points();
+        let output = PathJoinerKind::Retrace.join(&[c0.clone(), c1.clone()], &default_config());
+        let output_pts = output.path.points();
 
         // All of c1's points must appear in the output.
         let c1_set: std::collections::HashSet<_> = c1
@@ -724,9 +751,9 @@ mod tests {
         // back to entry, backward to other end), producing more output
         // points than c0.len() + c1.len().
         assert!(
-            result.len() > c0.len() + c1.len(),
+            output.path.len() > c0.len() + c1.len(),
             "split traversal should produce extra retrace points: got {} but expected > {}",
-            result.len(),
+            output.path.len(),
             c0.len() + c1.len(),
         );
     }

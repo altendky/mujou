@@ -27,8 +27,9 @@ pub use contour::{ContourTracer, ContourTracerKind};
 pub use diagnostics::PipelineDiagnostics;
 pub use downsample::DownsampleFilter;
 pub use edge::max_gradient_magnitude;
-pub use join::{PathJoiner, PathJoinerKind};
+pub use join::{JoinOutput, PathJoiner, PathJoinerKind};
 pub use mask::{BorderPathMode, ClippedPolyline, MaskResult, MaskShape};
+pub use mst_join::JoinQualityMetrics;
 pub use pipeline::{Pipeline, PipelineCache};
 pub use types::{
     Dimensions, EdgeChannels, GrayImage, PipelineConfig, PipelineError, Point, Polyline,
