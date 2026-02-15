@@ -130,6 +130,30 @@ struct MstEdge {
     seg_b: usize,
 }
 
+/// Diagnostic information about a single MST connecting edge.
+///
+/// Each MST edge represents a new straight-line connection between two
+/// previously disconnected polyline components.  These are the only
+/// visible artifacts the MST joiner introduces — all other traversal
+/// follows existing contour geometry or retrace paths.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MstEdgeInfo {
+    /// Index of the first polyline in the joiner's input contour list.
+    pub poly_a: usize,
+    /// Index of the second polyline in the joiner's input contour list.
+    pub poly_b: usize,
+    /// Connection point on polyline A (image coordinates, `(x, y)`).
+    pub point_a: (f64, f64),
+    /// Connection point on polyline B (image coordinates, `(x, y)`).
+    pub point_b: (f64, f64),
+    /// Segment index within polyline A where the connection point lies.
+    pub seg_a: usize,
+    /// Segment index within polyline B where the connection point lies.
+    pub seg_b: usize,
+    /// Euclidean distance between the two connection points (pixels).
+    pub weight: f64,
+}
+
 /// Quality metrics collected during MST-based path joining.
 ///
 /// These metrics capture the four quality criteria defined in issue #89
@@ -186,6 +210,14 @@ pub struct JoinQualityMetrics {
 
     /// Number of edges in the Eulerian graph after parity fixing.
     pub graph_edge_count_after_fix: usize,
+
+    /// Per-MST-edge diagnostic details.
+    ///
+    /// One entry per MST connecting edge, in the order Kruskal's
+    /// algorithm accepted them (ascending weight).  Use this to
+    /// identify which connections produce the longest visible
+    /// artifacts and evaluate alternative routing strategies.
+    pub mst_edge_details: Vec<MstEdgeInfo>,
 }
 
 /// Euclidean distance between two `geo::Coord` points.
@@ -651,7 +683,7 @@ fn build_graph(
                         get_or_insert(prev, &mut graph, &mut coord_to_node, &mut node_coords);
                     let n_sp = get_or_insert(*sp, &mut graph, &mut coord_to_node, &mut node_coords);
                     let dist = (prev.x - sp.x).hypot(prev.y - sp.y);
-                    if dist > 1e-12 {
+                    if n_prev != n_sp && dist > 1e-12 {
                         graph.add_edge(n_prev, n_sp, dist);
                     }
                     prev = *sp;
@@ -660,7 +692,7 @@ fn build_graph(
                 let n_end =
                     get_or_insert(seg_end, &mut graph, &mut coord_to_node, &mut node_coords);
                 let dist = (prev.x - seg_end.x).hypot(prev.y - seg_end.y);
-                if dist > 1e-12 {
+                if n_prev != n_end && dist > 1e-12 {
                     graph.add_edge(n_prev, n_end, dist);
                 }
             } else {
@@ -668,7 +700,7 @@ fn build_graph(
                 let na = get_or_insert(seg_start, &mut graph, &mut coord_to_node, &mut node_coords);
                 let nb = get_or_insert(seg_end, &mut graph, &mut coord_to_node, &mut node_coords);
                 let dist = (seg_start.x - seg_end.x).hypot(seg_start.y - seg_end.y);
-                if dist > 1e-12 {
+                if na != nb && dist > 1e-12 {
                     graph.add_edge(na, nb, dist);
                 }
             }
@@ -692,14 +724,12 @@ fn build_graph(
 
         let na = get_or_insert(snapped_a, &mut graph, &mut coord_to_node, &mut node_coords);
         let nb = get_or_insert(snapped_b, &mut graph, &mut coord_to_node, &mut node_coords);
-        let dist = (snapped_a.x - snapped_b.x).hypot(snapped_a.y - snapped_b.y);
-        if dist > 1e-12 {
-            graph.add_edge(na, nb, dist);
-        } else {
-            // Zero-length MST edge: the points coincide. Still add an edge
-            // so the graph stays connected.
-            graph.add_edge(na, nb, 0.0);
+        if na != nb {
+            let dist = (snapped_a.x - snapped_b.x).hypot(snapped_a.y - snapped_b.y);
+            graph.add_edge(na, nb, dist.max(0.0));
         }
+        // When na == nb the two endpoints snapped to the same graph
+        // node — no edge is needed (the node is already connected).
     }
 
     (graph, node_coords)
@@ -1183,32 +1213,80 @@ fn shortest_path(
 ///
 /// Assumes the graph has been fixed to have 0 or 2 odd-degree vertices.
 /// Returns the node sequence of the path.
+#[allow(clippy::too_many_lines)]
 fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
     if graph.node_count() == 0 {
         return Vec::new();
     }
 
-    // Choose start vertex: prefer an odd-degree vertex if one exists.
-    let start = graph
+    // Identify odd-degree vertices.
+    let odd: Vec<NodeIndex> = graph
         .node_indices()
-        .find(|&n| graph.edges(n).count() % 2 != 0)
-        .or_else(|| graph.node_indices().find(|&n| graph.edges(n).count() > 0))
-        .unwrap_or_else(|| {
-            graph
-                .node_indices()
-                .next()
-                .unwrap_or_else(|| NodeIndex::new(0))
-        });
+        .filter(|&n| graph.edges(n).count() % 2 != 0)
+        .collect();
+
+    // Add virtual edges to convert an Euler PATH problem (2 odd-degree
+    // vertices) into an Euler CIRCUIT problem.  Also handles the
+    // defensive case of >2 odd vertices (which shouldn't happen after
+    // fix_parity but can occur due to floating-point graph construction
+    // issues).
+    //
+    // Strategy: pair up odd-degree vertices and add one virtual edge per
+    // pair.  Each virtual edge flips the parity of both endpoints, making
+    // them even.  After running Hierholzer on the resulting Euler circuit,
+    // we remove all virtual-edge transitions to recover the path.
+    // `work_graph` must be declared before the `if` so that `graph_ref`
+    // can borrow it across the rest of the function.  The alternative
+    // (always cloning) wastes time when no virtual edges are needed.
+    let mut work_graph;
+    #[allow(clippy::useless_let_if_seq)]
+    let virtual_edge_ids: Vec<petgraph::graph::EdgeIndex>;
+    #[allow(clippy::useless_let_if_seq)]
+    let graph_ref: &UnGraph<(), f64>;
+
+    if odd.len() >= 2 {
+        work_graph = graph.clone();
+        virtual_edge_ids = odd
+            .chunks(2)
+            .filter(|chunk| chunk.len() == 2)
+            .map(|pair| work_graph.add_edge(pair[0], pair[1], 0.0))
+            .collect();
+        graph_ref = &work_graph;
+    } else {
+        virtual_edge_ids = Vec::new();
+        // No clone needed: borrow the original graph directly.
+        // SAFETY: we need `graph_ref` to live as long as we use it below.
+        // Since `work_graph` is only initialised in the `if` branch and
+        // `graph` outlives this function, the borrow is sound.
+        graph_ref = graph;
+    }
+
+    // Choose start vertex: prefer one of the original odd-degree vertices
+    // (now even due to the virtual edge) so that virtual edges are
+    // traversed first/last.
+    let start = if odd.is_empty() {
+        graph_ref
+            .node_indices()
+            .find(|&n| graph_ref.edges(n).count() > 0)
+            .unwrap_or_else(|| {
+                graph_ref
+                    .node_indices()
+                    .next()
+                    .unwrap_or_else(|| NodeIndex::new(0))
+            })
+    } else {
+        odd[0]
+    };
 
     let mut stack = vec![start];
     let mut path = Vec::new();
 
     // Track which edges have been used (by edge index).
-    let mut used_edges = vec![false; graph.edge_count()];
+    let mut used_edges = vec![false; graph_ref.edge_count()];
 
     while let Some(&current) = stack.last() {
         // Find an unused edge from current.
-        let next_edge = graph.edges(current).find_map(|e| {
+        let next_edge = graph_ref.edges(current).find_map(|e| {
             let eidx = e.id().index();
             if used_edges[eidx] {
                 None
@@ -1226,6 +1304,81 @@ fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
     }
 
     path.reverse();
+
+    // Remove virtual-edge transitions from the circuit to recover the
+    // Euler path.  Each virtual edge appears as one consecutive pair in
+    // the circuit; removing it splits the circuit at that point.
+    //
+    // For a single virtual edge (the common case), we split the circuit
+    // into a path.  For multiple virtual edges, we iteratively remove
+    // each transition and concatenate the fragments.
+    if !virtual_edge_ids.is_empty() {
+        // Collect the set of virtual edge endpoint pairs for matching.
+        let virtual_endpoints: Vec<(NodeIndex, NodeIndex)> = virtual_edge_ids
+            .iter()
+            .filter_map(|&eid| graph_ref.edge_endpoints(eid))
+            .collect();
+
+        // Find ALL positions in the path that correspond to virtual
+        // edge transitions.  Scan once, mark positions.
+        let mut virtual_positions: Vec<usize> = Vec::new();
+        for (i, w) in path.windows(2).enumerate() {
+            let (s, t) = (w[0], w[1]);
+            if virtual_endpoints
+                .iter()
+                .any(|&(src, dst)| (s == src && t == dst) || (s == dst && t == src))
+            {
+                virtual_positions.push(i);
+            }
+        }
+
+        if virtual_positions.len() == 1 {
+            // Single virtual edge — split the circuit into a path.
+            let pos = virtual_positions[0];
+            let mut result = Vec::with_capacity(path.len() - 1);
+            result.extend_from_slice(&path[pos + 1..]);
+            result.extend_from_slice(&path[1..=pos]);
+            return result;
+        } else if virtual_positions.len() > 1 {
+            // Multiple virtual edges — extract path fragments between
+            // virtual-edge positions and concatenate them.  The circuit
+            // is: [... real ... | virtual | ... real ... | virtual | ...]
+            // We want all the "real" fragments joined together.
+            //
+            // Sort positions so we can iterate in order.
+            virtual_positions.sort_unstable();
+
+            let mut fragments: Vec<&[NodeIndex]> = Vec::new();
+
+            // Fragment after the last virtual edge to the end, wrapping
+            // to the beginning up to the first virtual edge.
+            let last_pos = *virtual_positions.last().unwrap_or(&0);
+            let first_pos = virtual_positions[0];
+
+            // Wrap-around fragment: [last_virtual+1 .. end] + [1 .. first_virtual+1]
+            // This is the fragment that spans the circuit's wrap point.
+            let tail = &path[last_pos + 1..];
+            let head = &path[1..=first_pos];
+
+            // Interior fragments: between consecutive virtual edges.
+            for w in virtual_positions.windows(2) {
+                let frag = &path[w[0] + 1..=w[1]];
+                if frag.len() > 1 {
+                    fragments.push(frag);
+                }
+            }
+
+            // Build the result: wrap-around fragment first, then interiors.
+            let mut result = Vec::with_capacity(path.len() - virtual_positions.len());
+            result.extend_from_slice(tail);
+            result.extend_from_slice(head);
+            for frag in fragments {
+                result.extend_from_slice(frag);
+            }
+            return result;
+        }
+    }
+
     path
 }
 
@@ -1307,6 +1460,7 @@ pub fn join_mst(
                 graph_node_count: 0,
                 graph_edge_count_before_fix: 0,
                 graph_edge_count_after_fix: 0,
+                mst_edge_details: Vec::new(),
             },
         );
     }
@@ -1319,6 +1473,21 @@ pub fn join_mst(
     let mst_weights: Vec<f64> = mst_edges.iter().map(mst_edge_weight).collect();
     let total_mst_edge_weight: f64 = mst_weights.iter().sum();
     let max_mst_edge_weight: f64 = mst_weights.iter().copied().reduce(f64::max).unwrap_or(0.0);
+
+    // Per-edge diagnostic details.
+    let mst_edge_details: Vec<MstEdgeInfo> = mst_edges
+        .iter()
+        .zip(&mst_weights)
+        .map(|(e, &w)| MstEdgeInfo {
+            poly_a: e.poly_a,
+            poly_b: e.poly_b,
+            point_a: (e.point_a.x, e.point_a.y),
+            point_b: (e.point_b.x, e.point_b.y),
+            seg_a: e.seg_a,
+            seg_b: e.seg_b,
+            weight: w,
+        })
+        .collect();
 
     // Phase 2+3: Build graph, fix parity, find Eulerian path.
     let (mut graph, node_coords) = build_graph(&polylines, &mst_edges);
@@ -1355,6 +1524,7 @@ pub fn join_mst(
         graph_node_count,
         graph_edge_count_before_fix,
         graph_edge_count_after_fix,
+        mst_edge_details,
     };
 
     (polyline, metrics)
@@ -1375,6 +1545,7 @@ impl JoinQualityMetrics {
             graph_node_count: 0,
             graph_edge_count_before_fix: 0,
             graph_edge_count_after_fix: 0,
+            mst_edge_details: Vec::new(),
         }
     }
 }

@@ -29,7 +29,7 @@ pub use downsample::DownsampleFilter;
 pub use edge::max_gradient_magnitude;
 pub use join::{JoinOutput, PathJoiner, PathJoinerKind};
 pub use mask::{BorderPathMode, ClippedPolyline, MaskResult, MaskShape};
-pub use mst_join::{JoinQualityMetrics, ParityStrategy};
+pub use mst_join::{JoinQualityMetrics, MstEdgeInfo, ParityStrategy};
 pub use pipeline::{Pipeline, PipelineCache};
 pub use types::{
     Dimensions, EdgeChannels, GrayImage, PipelineConfig, PipelineError, Point, Polyline,

@@ -11,7 +11,7 @@
 
 use std::fmt::Write;
 
-use mujou_pipeline::{Dimensions, Polyline};
+use mujou_pipeline::{Dimensions, MstEdgeInfo, Polyline};
 
 /// Metadata to embed in the SVG document.
 ///
@@ -138,6 +138,318 @@ pub fn to_svg(
             out,
             r#"  <path d="{d}" fill="none" stroke="black" stroke-width="1"/>"#,
         );
+    }
+
+    // Closing tag
+    let _ = writeln!(out, "</svg>");
+
+    out
+}
+
+/// Serialize polylines into a diagnostic SVG with MST edges highlighted.
+///
+/// Produces the same output as [`to_svg`] but additionally renders each
+/// MST connecting edge as a red `<line>` element, grouped under
+/// `<g id="mst-edges">`.  This makes it visually obvious which lines
+/// are new connections introduced by the MST joiner vs. original contour
+/// geometry.
+///
+/// Each MST edge line element includes a `data-weight` attribute with
+/// the edge weight and a `data-polys` attribute identifying the
+/// connected polyline indices.
+#[must_use]
+pub fn to_diagnostic_svg(
+    polylines: &[Polyline],
+    dimensions: Dimensions,
+    metadata: &SvgMetadata<'_>,
+    mst_edges: &[MstEdgeInfo],
+) -> String {
+    let mut out = String::new();
+
+    // XML declaration
+    let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+
+    // Opening <svg> tag
+    let _ = writeln!(
+        out,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
+        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
+    );
+
+    // Optional metadata
+    if let Some(title) = metadata.title {
+        let _ = writeln!(out, "  <title>{}</title>", xml_escape(title));
+    }
+    if let Some(description) = metadata.description {
+        let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
+    }
+
+    // Dark background for visibility
+    let _ = writeln!(
+        out,
+        "  <rect width=\"{}\" height=\"{}\" fill=\"#1a1a1a\"/>",
+        dimensions.width, dimensions.height,
+    );
+
+    // Contour paths in white
+    let _ = writeln!(
+        out,
+        r#"  <g id="contours" stroke="white" stroke-width="1" fill="none">"#
+    );
+    for polyline in polylines {
+        let points = polyline.points();
+        if points.len() < 2 {
+            continue;
+        }
+
+        let d: String = points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let cmd = if i == 0 { "M" } else { "L" };
+                format!("{cmd} {:.1} {:.1}", p.x, p.y)
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let _ = writeln!(out, r#"    <path d="{d}"/>"#);
+    }
+    let _ = writeln!(out, "  </g>");
+
+    // MST connecting edges in red
+    if !mst_edges.is_empty() {
+        let _ = writeln!(
+            out,
+            r"  <!-- MST connecting edges: {} total -->",
+            mst_edges.len(),
+        );
+        let _ = writeln!(
+            out,
+            r#"  <g id="mst-edges" stroke="red" stroke-width="1.5" opacity="0.9">"#,
+        );
+        for (i, edge) in mst_edges.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                r#"    <line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" data-weight="{:.2}" data-polys="{},{}" data-index="{}"/>"#,
+                edge.point_a.0,
+                edge.point_a.1,
+                edge.point_b.0,
+                edge.point_b.1,
+                edge.weight,
+                edge.poly_a,
+                edge.poly_b,
+                i,
+            );
+        }
+        let _ = writeln!(out, "  </g>");
+    }
+
+    // Closing tag
+    let _ = writeln!(out, "</svg>");
+
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Segment diagnostic SVG
+// ---------------------------------------------------------------------------
+
+/// Distinct colors for the top-N highlighted segments.
+///
+/// Chosen for visibility against a dark background and mutual
+/// distinguishability. The palette cycles if `top_n` exceeds the
+/// array length.
+const SEGMENT_COLORS: &[&str] = &[
+    "#ff3333", // red
+    "#ff8800", // orange
+    "#ffdd00", // yellow
+    "#33cc33", // green
+    "#3399ff", // blue
+];
+
+/// A single segment identified for highlighting.
+struct RankedSegment {
+    /// Polyline index within the input slice.
+    poly_idx: usize,
+    /// Segment index within the polyline (from point `seg_idx` to `seg_idx + 1`).
+    seg_idx: usize,
+    /// Start point.
+    from: (f64, f64),
+    /// End point.
+    to: (f64, f64),
+    /// Euclidean length in pixels.
+    length: f64,
+}
+
+/// Generate a diagnostic SVG highlighting the longest segments.
+///
+/// Renders all polylines in white on a dark background, then overlays
+/// the `top_n` longest individual segments in distinct colors with a
+/// legend.  This makes it easy to visually identify unexpectedly long
+/// segments — whether they are MST connecting edges, retrace artifacts,
+/// contour segments, or algorithmic bugs.
+///
+/// Each highlighted segment `<line>` element includes `data-rank`,
+/// `data-length`, `data-from`, and `data-to` attributes for
+/// programmatic inspection.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn to_segment_diagnostic_svg(
+    polylines: &[Polyline],
+    dimensions: Dimensions,
+    metadata: &SvgMetadata<'_>,
+    top_n: usize,
+) -> String {
+    let mut out = String::new();
+
+    // XML declaration
+    let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+
+    // Opening <svg> tag
+    let _ = writeln!(
+        out,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
+        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
+    );
+
+    // Optional metadata
+    if let Some(title) = metadata.title {
+        let _ = writeln!(out, "  <title>{}</title>", xml_escape(title));
+    }
+    if let Some(description) = metadata.description {
+        let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
+    }
+
+    // Dark background for visibility
+    let _ = writeln!(
+        out,
+        "  <rect width=\"{}\" height=\"{}\" fill=\"#1a1a1a\"/>",
+        dimensions.width, dimensions.height,
+    );
+
+    // Contour paths in white
+    let _ = writeln!(
+        out,
+        r#"  <g id="contours" stroke="white" stroke-width="1" fill="none">"#
+    );
+    for polyline in polylines {
+        let points = polyline.points();
+        if points.len() < 2 {
+            continue;
+        }
+
+        let d: String = points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let cmd = if i == 0 { "M" } else { "L" };
+                format!("{cmd} {:.1} {:.1}", p.x, p.y)
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        let _ = writeln!(out, r#"    <path d="{d}"/>"#);
+    }
+    let _ = writeln!(out, "  </g>");
+
+    // Find the top N longest segments across all polylines.
+    let mut all_segments: Vec<RankedSegment> = Vec::new();
+    for (poly_idx, polyline) in polylines.iter().enumerate() {
+        let pts = polyline.points();
+        for seg_idx in 0..pts.len().saturating_sub(1) {
+            let from = pts[seg_idx];
+            let to = pts[seg_idx + 1];
+            let length = from.distance(to);
+            all_segments.push(RankedSegment {
+                poly_idx,
+                seg_idx,
+                from: (from.x, from.y),
+                to: (to.x, to.y),
+                length,
+            });
+        }
+    }
+
+    // Sort descending by length, take top N.
+    all_segments.sort_by(|a, b| {
+        b.length
+            .partial_cmp(&a.length)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    all_segments.truncate(top_n);
+
+    // Highlighted segments
+    if !all_segments.is_empty() {
+        let _ = writeln!(
+            out,
+            r"  <!-- Top {} longest segments -->",
+            all_segments.len(),
+        );
+        let _ = writeln!(
+            out,
+            r#"  <g id="top-segments" stroke-width="3" opacity="0.9" fill="none">"#,
+        );
+        for (rank, seg) in all_segments.iter().enumerate() {
+            let color = SEGMENT_COLORS[rank % SEGMENT_COLORS.len()];
+            let _ = writeln!(
+                out,
+                r#"    <line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" data-rank="{}" data-length="{:.2}" data-from="{:.1},{:.1}" data-to="{:.1},{:.1}"/>"#,
+                seg.from.0,
+                seg.from.1,
+                seg.to.0,
+                seg.to.1,
+                color,
+                rank + 1,
+                seg.length,
+                seg.from.0,
+                seg.from.1,
+                seg.to.0,
+                seg.to.1,
+            );
+        }
+        let _ = writeln!(out, "  </g>");
+
+        // Legend in the top-left corner
+        let _ = writeln!(
+            out,
+            r#"  <g id="legend" font-family="monospace" font-size="12">"#
+        );
+        let legend_height = 20 + all_segments.len() * 18;
+        let _ = writeln!(
+            out,
+            "    <rect x=\"8\" y=\"8\" width=\"340\" height=\"{legend_height}\" rx=\"4\" fill=\"#000000\" opacity=\"0.7\"/>",
+        );
+        let _ = writeln!(
+            out,
+            r#"    <text x="16" y="24" fill="white" font-weight="bold">Top {} longest segments</text>"#,
+            all_segments.len(),
+        );
+        for (rank, seg) in all_segments.iter().enumerate() {
+            let color = SEGMENT_COLORS[rank % SEGMENT_COLORS.len()];
+            let y = 42 + rank * 18;
+            // Color swatch
+            let _ = writeln!(
+                out,
+                r#"    <rect x="16" y="{}" width="12" height="12" fill="{}"/>"#,
+                y - 9,
+                color,
+            );
+            // Label
+            let _ = writeln!(
+                out,
+                r#"    <text x="34" y="{}" fill="white">#{}: {:.1}px  ({:.0},{:.0})->({:.0},{:.0})  poly={} seg={}</text>"#,
+                y,
+                rank + 1,
+                seg.length,
+                seg.from.0,
+                seg.from.1,
+                seg.to.0,
+                seg.to.1,
+                seg.poly_idx,
+                seg.seg_idx,
+            );
+        }
+        let _ = writeln!(out, "  </g>");
     }
 
     // Closing tag

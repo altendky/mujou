@@ -387,8 +387,23 @@ fn format_metrics(metrics: &StageMetrics) -> String {
                 "{strategy} {input_polyline_count} polys, {input_point_count}->{output_point_count} pts (x{expansion_ratio:.2})",
             );
             if let Some(q) = quality {
+                let longest_info = q
+                    .mst_edge_details
+                    .iter()
+                    .max_by(|a, b| {
+                        a.weight
+                            .partial_cmp(&b.weight)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|e| {
+                        format!(
+                            " longest={:.1}px (poly {} <-> poly {})",
+                            e.weight, e.poly_a, e.poly_b,
+                        )
+                    })
+                    .unwrap_or_default();
                 format!(
-                    "{base} | mst={} edges, conn={:.1}px max={:.1}px retrace={:.1}px path={:.1}px odd={}->{}",
+                    "{base} | mst={} edges, conn={:.1}px max={:.1}px retrace={:.1}px path={:.1}px odd={}->{}{longest_info}",
                     q.mst_edge_count,
                     q.total_mst_edge_weight,
                     q.max_mst_edge_weight,
