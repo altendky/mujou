@@ -219,8 +219,7 @@ mod tests {
             Point::new(14.0, 20.1),
         ]);
         let d = build_path_data(&polyline);
-        assert!(d.starts_with("M10,15 L12.5,"));
-        assert!(d.contains("L14,"));
+        assert_eq!(d, "M10,15 L12.5,18.3 L14,20.1");
     }
 
     #[test]
