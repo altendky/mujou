@@ -879,6 +879,10 @@ impl PipelineStage for Masked {
     fn metrics(&self) -> Option<StageMetrics> {
         let mr = self.mask_result.as_ref()?;
         let radius_px = self.dimensions.mask_radius(self.config.mask_diameter);
+        // Counts only clipped polylines (excludes the optional border
+        // polyline, which is an addition rather than a clipping result).
+        // The subsequent Joined stage uses `all_polylines()` which
+        // includes the border, so its input count may differ.
         Some(StageMetrics::Mask {
             diameter: self.config.mask_diameter,
             radius_px,
