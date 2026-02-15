@@ -206,11 +206,16 @@ fn clip_polyline_to_circle(
             }
             (true, false) => {
                 // Exiting the circle: add intersection, finish segment.
+                // Explicit `if let` preferred over `is_some_and`/`map_or`
+                // because the closure mutates `current_segment`.
+                #[allow(clippy::option_if_let_else)]
                 let end_clipped =
-                    line_circle_intersection(prev, p, center, radius).is_some_and(|ix| {
+                    if let Some(ix) = line_circle_intersection(prev, p, center, radius) {
                         current_segment.push(ix);
                         true
-                    });
+                    } else {
+                        false
+                    };
                 if current_segment.len() >= 2 {
                     result.push(ClippedPolyline {
                         polyline: Polyline::new(std::mem::take(&mut current_segment)),
