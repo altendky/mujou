@@ -172,7 +172,7 @@ pub fn to_svg(
     }
 
     // The svg crate omits the XML declaration, so we prepend it.
-    format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{doc}\n",)
+    format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{doc}\n")
 }
 
 #[cfg(test)]
