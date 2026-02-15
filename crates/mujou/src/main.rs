@@ -533,6 +533,7 @@ fn app() -> Element {
                         cfg.working_resolution,
                     )
                 },
+                config_json: serde_json::to_string(&committed_config()).ok(),
                 show: show_export,
             }
 
