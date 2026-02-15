@@ -288,6 +288,7 @@ fn clip_polyline_to_circle(
     clippy::cast_precision_loss
 )]
 fn generate_circle_border(center: Point, radius: f64) -> Polyline {
+    debug_assert!(radius > 0.0, "border radius must be positive, got {radius}");
     let circumference = 2.0 * PI * radius;
     let n = (circumference / BORDER_POINT_SPACING)
         .ceil()
