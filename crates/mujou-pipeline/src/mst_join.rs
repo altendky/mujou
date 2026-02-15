@@ -1514,6 +1514,32 @@ mod tests {
     }
 
     #[test]
+    fn metrics_retrace_positive_when_edges_duplicated() {
+        // When parity fixing duplicates edges (edge count increases),
+        // the retrace distance must be strictly positive.
+        let contours: Vec<Polyline> = (0..10)
+            .map(|i| {
+                let base = f64::from(i) * 15.0;
+                Polyline::new(vec![
+                    Point::new(base, 0.0),
+                    Point::new(base + 5.0, 5.0),
+                    Point::new(base + 10.0, 0.0),
+                ])
+            })
+            .collect();
+
+        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+
+        if m.graph_edge_count_after_fix > m.graph_edge_count_before_fix {
+            assert!(
+                m.total_retrace_distance > 0.0,
+                "parity fix added edges but retrace distance is {}, expected > 0",
+                m.total_retrace_distance,
+            );
+        }
+    }
+
+    #[test]
     fn metrics_empty_returns_zero_metrics() {
         let (_result, m) = join_mst(&[], TEST_K, TEST_RESOLUTION);
 
