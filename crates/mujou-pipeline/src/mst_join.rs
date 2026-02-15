@@ -92,7 +92,7 @@ struct MstEdge {
 /// timing.
 ///
 /// All distance values are in working-resolution pixel units.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JoinQualityMetrics {
     /// Number of MST edges (connections between polylines).
     ///
