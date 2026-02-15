@@ -3,6 +3,20 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+/// Shared `Clock` implementation for test functions that need
+/// `process_staged_with_diagnostics`.
+struct StdClock;
+impl mujou_pipeline::diagnostics::Clock for StdClock {
+    type Instant = Instant;
+    fn now(&self) -> Instant {
+        Instant::now()
+    }
+    fn elapsed(&self, since: &Instant) -> Duration {
+        since.elapsed()
+    }
+}
 
 /// Locate the workspace root by searching upward from the crate directory for `Cargo.lock`.
 fn workspace_root() -> PathBuf {
@@ -103,19 +117,6 @@ fn cherry_blossoms_default_config() {
 /// `JoinQualityMetrics` for both strategies on the same pipeline input.
 #[test]
 fn cherry_blossoms_parity_strategy_comparison() {
-    use std::time::{Duration, Instant};
-
-    struct StdClock;
-    impl mujou_pipeline::diagnostics::Clock for StdClock {
-        type Instant = Instant;
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-        fn elapsed(&self, since: &Instant) -> Duration {
-            since.elapsed()
-        }
-    }
-
     let workspace_root = workspace_root();
     let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
     let image_bytes = std::fs::read(&image_path).unwrap();
@@ -233,19 +234,6 @@ fn cherry_blossoms_parity_strategy_comparison() {
 #[test]
 #[allow(clippy::too_many_lines)]
 fn cherry_blossoms_mst_edge_diagnostics() {
-    use std::time::{Duration, Instant};
-
-    struct StdClock;
-    impl mujou_pipeline::diagnostics::Clock for StdClock {
-        type Instant = Instant;
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-        fn elapsed(&self, since: &Instant) -> Duration {
-            since.elapsed()
-        }
-    }
-
     let workspace_root = workspace_root();
     let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
     let image_bytes = std::fs::read(&image_path).unwrap();
@@ -511,19 +499,6 @@ fn cherry_blossoms_mst_edge_diagnostics() {
 /// Output: `target/cherry-blossoms-segments.svg`
 #[test]
 fn cherry_blossoms_segment_diagnostics() {
-    use std::time::{Duration, Instant};
-
-    struct StdClock;
-    impl mujou_pipeline::diagnostics::Clock for StdClock {
-        type Instant = Instant;
-        fn now(&self) -> Instant {
-            Instant::now()
-        }
-        fn elapsed(&self, since: &Instant) -> Duration {
-            since.elapsed()
-        }
-    }
-
     let workspace_root = workspace_root();
     let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
     let image_bytes = std::fs::read(&image_path).unwrap();
