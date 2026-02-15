@@ -13,6 +13,8 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
+use mujou_export::build_path_data;
+
 use crate::stage::StageId;
 use crate::worker::WorkerResult;
 
@@ -162,7 +164,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             let w = result.dimensions.width;
             let h = result.dimensions.height;
             let view_box = format!("0 0 {w} {h}");
-            let d = mujou_export::build_path_data(polyline);
+            let d = build_path_data(polyline);
 
             rsx! {
                 svg {
@@ -198,7 +200,7 @@ fn render_img_thumb(url: &str, alt: &str) -> Element {
 
 /// Render a single polyline as an SVG path for a thumbnail.
 fn render_thumbnail_path(polyline: &mujou_pipeline::Polyline) -> Element {
-    let d = mujou_export::build_path_data(polyline);
+    let d = build_path_data(polyline);
     if d.is_empty() {
         return rsx! {};
     }
