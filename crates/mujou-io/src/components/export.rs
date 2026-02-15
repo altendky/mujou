@@ -17,6 +17,9 @@ pub struct ExportPanelProps {
     /// Pre-formatted description of pipeline parameters for SVG metadata.
     /// Embedded in the `<desc>` element so exported files are distinguishable.
     config_description: String,
+    /// Serialized `PipelineConfig` JSON for structured SVG metadata.
+    /// Embedded in a `<metadata>` element for machine-parseable reproducibility.
+    config_json: String,
     /// Controls visibility of the export popup.
     show: Signal<bool>,
 }
@@ -31,6 +34,7 @@ impl PartialEq for ExportPanelProps {
         results_eq
             && self.filename == other.filename
             && self.config_description == other.config_description
+            && self.config_json == other.config_json
             && self.show == other.show
     }
 }
@@ -82,6 +86,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
         let result = props.result.clone();
         let filename = props.filename;
         let config_description = props.config_description;
+        let config_json = props.config_json;
         move |_| {
             if let Some(ref res) = result {
                 if svg_selected() {
@@ -90,6 +95,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                     let metadata = mujou_export::SvgMetadata {
                         title: Some(&filename),
                         description: Some(&description),
+                        config_json: Some(&config_json),
                     };
                     let polyline = res.final_polyline();
                     let svg = mujou_export::to_svg(

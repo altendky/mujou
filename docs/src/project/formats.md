@@ -97,6 +97,7 @@ Useful for plotters, laser cutters, vinyl cutters, or viewing in a browser.
 - Standard SVG XML
 - Optional `<title>` element with the source image name (for accessibility and file manager identification)
 - Optional `<desc>` element with pipeline parameters and export timestamp
+- Optional `<metadata>` element containing the full `PipelineConfig` as JSON, wrapped in a namespaced `<mujou:pipeline>` element for machine-parseable reproducibility
 - Each polyline becomes a `<path>` element with a `d` attribute containing `M` (move to) and `L` (line to) commands
 - Disconnected contours are separate `<path>` elements
 - `viewBox` set to the image dimensions
@@ -109,6 +110,9 @@ Useful for plotters, laser cutters, vinyl cutters, or viewing in a browser.
   <title>cherry-blossoms</title>
   <desc>blur=1.4, canny=15/40, simplify=2, tracer=BorderFollowing, joiner=Mst, mask=75%, res=256
 Exported: 2026-02-14_12-30-45</desc>
+  <metadata>
+    <mujou:pipeline xmlns:mujou="https://mujou.app/ns/1">{"blur_sigma":1.4,"canny_low":15.0,...}</mujou:pipeline>
+  </metadata>
   <path d="M 10.0 15.0 L 12.5 18.3 L 14.0 20.1" fill="none" stroke="black" stroke-width="1"/>
   <path d="M 30.0 5.0 L 32.5 7.8 L 35.0 10.2" fill="none" stroke="black" stroke-width="1"/>
 </svg>
