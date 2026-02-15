@@ -48,6 +48,7 @@ use image::DynamicImage;
 use crate::contour::ContourTracer;
 use crate::diagnostics::StageMetrics;
 use crate::join::PathJoiner;
+use crate::mask::{BorderPathMode, MaskResult, MaskShape};
 use crate::types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, RgbaImage, StagedResult,
 };
@@ -363,19 +364,33 @@ impl Simplified {
     /// Advance to the masking stage.
     ///
     /// When `config.circular_mask` is `true`, polylines are clipped to a
-    /// circular boundary. When `false`, this is a no-op pass-through.
+    /// circular boundary and an optional border polyline is generated
+    /// based on [`BorderPathMode`]. When `false`, this is a no-op
+    /// pass-through.
     pub fn mask(self) -> Masked {
-        let clipped = if self.config.circular_mask {
+        let mask_result = if self.config.circular_mask {
             let center = Point::new(
                 f64::from(self.dimensions.width) / 2.0,
                 f64::from(self.dimensions.height) / 2.0,
             );
             let radius = self.dimensions.mask_radius(self.config.mask_diameter);
-            Some(crate::mask::apply_circular_mask(
-                &self.reduced,
-                center,
-                radius,
-            ))
+            let shape = MaskShape::Circle { center, radius };
+            let clipped = crate::mask::apply_mask(&self.reduced, &shape);
+
+            let border = match self.config.border_path {
+                BorderPathMode::Off => None,
+                BorderPathMode::On => Some(shape.border_polyline()),
+                BorderPathMode::Auto => {
+                    let any_clipped = clipped.iter().any(|c| c.start_clipped || c.end_clipped);
+                    if any_clipped {
+                        Some(shape.border_polyline())
+                    } else {
+                        None
+                    }
+                }
+            };
+
+            Some(MaskResult { clipped, border })
         } else {
             None
         };
@@ -387,7 +402,7 @@ impl Simplified {
             edges: self.edges,
             contours: self.contours,
             simplified: self.reduced,
-            clipped,
+            mask_result,
             dimensions: self.dimensions,
         }
     }
@@ -410,21 +425,29 @@ pub struct Masked {
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    clipped: Option<Vec<Polyline>>,
+    mask_result: Option<MaskResult>,
     dimensions: Dimensions,
 }
 
 impl Masked {
-    /// The masked polylines, or `None` if masking was disabled.
+    /// The mask result, or `None` if masking was disabled.
     #[must_use]
-    pub fn masked(&self) -> Option<&[Polyline]> {
-        self.clipped.as_deref()
+    pub const fn masked(&self) -> Option<&MaskResult> {
+        self.mask_result.as_ref()
     }
 
     /// Advance to the joining stage — the final pipeline step.
     pub fn join(self) -> Joined {
-        let join_input = self.clipped.as_deref().unwrap_or(&self.simplified);
-        let path = self.config.path_joiner.join(join_input, &self.config);
+        let join_input: Vec<Polyline> = if let Some(ref mr) = self.mask_result {
+            mr.all_polylines().cloned().collect()
+        } else {
+            // No mask — use simplified polylines directly. We need an
+            // owned Vec because the joiner borrows a slice, and we move
+            // `self.simplified` into `Joined` below. Clone to keep
+            // both the join input and the stored simplified set.
+            self.simplified.clone()
+        };
+        let path = self.config.path_joiner.join(&join_input, &self.config);
         Joined {
             config: self.config,
             original: self.original,
@@ -433,7 +456,7 @@ impl Masked {
             edges: self.edges,
             contours: self.contours,
             simplified: self.simplified,
-            masked: self.clipped,
+            masked: self.mask_result,
             path,
             dimensions: self.dimensions,
         }
@@ -458,7 +481,7 @@ pub struct Joined {
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<Vec<Polyline>>,
+    masked: Option<MaskResult>,
     path: Polyline,
     dimensions: Dimensions,
 }
@@ -542,8 +565,8 @@ pub enum StageOutput<'a> {
     },
     /// Circular mask result.
     Masked {
-        /// The masked polylines, or `None` if masking was disabled.
-        masked: Option<&'a [Polyline]>,
+        /// The mask result, or `None` if masking was disabled.
+        masked: Option<&'a MaskResult>,
     },
     /// Path joining result.
     Joined {
@@ -849,20 +872,24 @@ impl PipelineStage for Masked {
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::Masked {
-            masked: self.clipped.as_deref(),
+            masked: self.mask_result.as_ref(),
         }
     }
 
     fn metrics(&self) -> Option<StageMetrics> {
-        let clipped = self.clipped.as_ref()?;
+        let mr = self.mask_result.as_ref()?;
         let radius_px = self.dimensions.mask_radius(self.config.mask_diameter);
+        // Counts only clipped polylines (excludes the optional border
+        // polyline, which is an addition rather than a clipping result).
+        // The subsequent Joined stage uses `all_polylines()` which
+        // includes the border, so its input count may differ.
         Some(StageMetrics::Mask {
             diameter: self.config.mask_diameter,
             radius_px,
             polylines_before: self.simplified.len(),
-            polylines_after: clipped.len(),
+            polylines_after: mr.clipped.len(),
             points_before: self.simplified.iter().map(Polyline::len).sum(),
-            points_after: clipped.iter().map(Polyline::len).sum(),
+            points_after: mr.clipped.iter().map(|c| c.polyline.len()).sum(),
         })
     }
 
@@ -888,9 +915,18 @@ impl PipelineStage for Joined {
 
     #[allow(clippy::cast_precision_loss)]
     fn metrics(&self) -> Option<StageMetrics> {
-        let join_input = self.masked.as_deref().unwrap_or(&self.simplified);
-        let input_polyline_count = join_input.len();
-        let input_point_count: usize = join_input.iter().map(Polyline::len).sum();
+        let (input_polyline_count, input_point_count) = self.masked.as_ref().map_or_else(
+            || {
+                let count = self.simplified.len();
+                let points: usize = self.simplified.iter().map(Polyline::len).sum();
+                (count, points)
+            },
+            |mr| {
+                let count: usize = mr.all_polylines().count();
+                let points: usize = mr.all_polylines().map(Polyline::len).sum();
+                (count, points)
+            },
+        );
         let output_point_count = self.path.len();
         let expansion_ratio = if input_point_count > 0 {
             output_point_count as f64 / input_point_count as f64
@@ -1571,7 +1607,7 @@ impl PipelineCache {
                 edges,
                 contours,
                 simplified,
-                clipped: masked,
+                mask_result: masked,
                 dimensions,
             }),
 

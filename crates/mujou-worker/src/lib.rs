@@ -24,7 +24,7 @@ use std::cell::RefCell;
 
 use image::ImageEncoder;
 use mujou_pipeline::pipeline::STAGE_COUNT;
-use mujou_pipeline::{Dimensions, GrayImage, PipelineCache, Polyline, StagedResult};
+use mujou_pipeline::{Dimensions, GrayImage, MaskResult, PipelineCache, Polyline, StagedResult};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -44,7 +44,7 @@ thread_local! {
 pub struct VectorResult {
     pub contours: Vec<Polyline>,
     pub simplified: Vec<Polyline>,
-    pub masked: Option<Vec<Polyline>>,
+    pub masked: Option<MaskResult>,
     pub joined: Polyline,
     pub dimensions: Dimensions,
 }

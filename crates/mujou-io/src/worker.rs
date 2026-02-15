@@ -9,10 +9,13 @@
 //! creates Blob URLs from the pre-encoded bytes — a near-instant
 //! operation that doesn't block the UI.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mujou_pipeline::{Dimensions, PipelineConfig, PipelineError, Polyline};
+use mujou_pipeline::{Dimensions, MaskResult, PipelineConfig, PipelineError, Polyline};
+
+use crate::stage::StageId;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -25,7 +28,7 @@ use crate::raster;
 struct VectorResult {
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<Vec<Polyline>>,
+    masked: Option<MaskResult>,
     joined: Polyline,
     dimensions: Dimensions,
 }
@@ -50,8 +53,8 @@ pub struct WorkerResult {
     pub contours: Vec<Polyline>,
     /// Simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Masked polylines (if circular mask was applied, before joining).
-    pub masked: Option<Vec<Polyline>>,
+    /// Mask result (if circular mask was applied, before joining).
+    pub masked: Option<MaskResult>,
     /// Joined single polyline (always the final output).
     pub joined: Polyline,
     /// Image dimensions.
@@ -67,6 +70,32 @@ impl WorkerResult {
     #[must_use]
     pub const fn final_polyline(&self) -> &Polyline {
         &self.joined
+    }
+
+    /// Select the polylines to display for a given vector stage.
+    ///
+    /// Returns the appropriate polyline slice for Contours, Simplified,
+    /// and Masked stages. For Masked, all polylines (clipped + border)
+    /// are collected; if no mask result is available, falls back to
+    /// simplified.
+    #[must_use]
+    pub fn polylines_for_stage(&self, stage: StageId) -> Cow<'_, [Polyline]> {
+        match stage {
+            StageId::Contours => Cow::Borrowed(&self.contours),
+            StageId::Masked => self.masked.as_ref().map_or_else(
+                || Cow::Borrowed(self.simplified.as_slice()),
+                |mr| Cow::Owned(mr.all_polylines().cloned().collect()),
+            ),
+            // Simplified is the natural default; raster and Join stages
+            // don't use this helper but are listed explicitly so new
+            // StageId variants trigger a compiler error.
+            StageId::Simplified
+            | StageId::Original
+            | StageId::Downsampled
+            | StageId::Blur
+            | StageId::Edges
+            | StageId::Join => Cow::Borrowed(&self.simplified),
+        }
     }
 }
 
