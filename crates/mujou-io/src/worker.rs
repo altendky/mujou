@@ -86,7 +86,15 @@ impl WorkerResult {
                 || Cow::Borrowed(self.simplified.as_slice()),
                 |mr| Cow::Owned(mr.all_polylines().cloned().collect()),
             ),
-            _ => Cow::Borrowed(&self.simplified),
+            // Simplified is the natural default; raster and Join stages
+            // don't use this helper but are listed explicitly so new
+            // StageId variants trigger a compiler error.
+            StageId::Simplified
+            | StageId::Original
+            | StageId::Downsampled
+            | StageId::Blur
+            | StageId::Edges
+            | StageId::Join => Cow::Borrowed(&self.simplified),
         }
     }
 }
