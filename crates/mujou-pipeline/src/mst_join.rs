@@ -142,22 +142,21 @@ pub struct JoinQualityMetrics {
     pub graph_edge_count_after_fix: usize,
 }
 
+/// Euclidean distance between two `geo::Coord` points.
+fn coord_distance(a: geo::Coord<f64>, b: geo::Coord<f64>) -> f64 {
+    (a.x - b.x).hypot(a.y - b.y)
+}
+
 /// Compute the Euclidean distance between an [`MstEdge`]'s two connection
 /// points.
 fn mst_edge_weight(edge: &MstEdge) -> f64 {
-    let dx = edge.point_a.x - edge.point_b.x;
-    let dy = edge.point_a.y - edge.point_b.y;
-    dx.hypot(dy)
+    coord_distance(edge.point_a, edge.point_b)
 }
 
 /// Compute total Euclidean path length from a sequence of graph nodes.
 fn compute_path_length(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> f64 {
     path.windows(2)
-        .map(|w| {
-            let a = node_coords[w[0].index()];
-            let b = node_coords[w[1].index()];
-            (a.x - b.x).hypot(a.y - b.y)
-        })
+        .map(|w| coord_distance(node_coords[w[0].index()], node_coords[w[1].index()]))
         .sum()
 }
 
@@ -1032,11 +1031,7 @@ impl JoinQualityMetrics {
 fn path_polyline_length(polyline: &Polyline) -> f64 {
     let pts = polyline.points();
     pts.windows(2)
-        .map(|w| {
-            let dx = w[1].x - w[0].x;
-            let dy = w[1].y - w[0].y;
-            dx.hypot(dy)
-        })
+        .map(|w| coord_distance(point_to_coord(w[0]), point_to_coord(w[1])))
         .sum()
 }
 
