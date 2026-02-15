@@ -33,6 +33,16 @@ pub struct SvgMetadata<'a> {
     /// Typically contains pipeline parameters and a timestamp so
     /// exported files are distinguishable.
     pub description: Option<&'a str>,
+
+    /// Structured pipeline configuration JSON — emitted inside a
+    /// `<metadata>` element wrapped in a namespaced `<mujou:pipeline>`
+    /// element.
+    ///
+    /// When present, the full serialized [`PipelineConfig`] is embedded
+    /// so exported files carry machine-parseable settings for
+    /// reproducibility.  The human-readable `description` is retained
+    /// separately.
+    pub config_json: Option<&'a str>,
 }
 
 /// Escape the five XML special characters for safe embedding in element
@@ -67,7 +77,9 @@ fn xml_escape(input: &str) -> String {
 ///
 /// If [`SvgMetadata::title`] or [`SvgMetadata::description`] is
 /// provided, the corresponding `<title>` / `<desc>` element is emitted
-/// after the opening `<svg>` tag.
+/// after the opening `<svg>` tag.  If [`SvgMetadata::config_json`] is
+/// provided, a `<metadata>` element is emitted containing the JSON
+/// wrapped in a namespaced `<mujou:pipeline>` element.
 ///
 /// # Examples
 ///
@@ -82,6 +94,7 @@ fn xml_escape(input: &str) -> String {
 /// let metadata = SvgMetadata {
 ///     title: Some("cherry-blossoms"),
 ///     description: Some("Exported by mujou"),
+///     ..SvgMetadata::default()
 /// };
 /// let svg = to_svg(&polylines, dims, &metadata);
 /// assert!(svg.contains("width=\"800\" height=\"600\""));
@@ -115,6 +128,17 @@ pub fn to_svg(
     // Optional <desc> element
     if let Some(description) = metadata.description {
         let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
+    }
+
+    // Optional <metadata> element with structured pipeline config
+    if let Some(config_json) = metadata.config_json {
+        let _ = writeln!(out, "  <metadata>");
+        let _ = writeln!(
+            out,
+            "    <mujou:pipeline xmlns:mujou=\"https://mujou.app/ns/1\">{}</mujou:pipeline>",
+            xml_escape(config_json),
+        );
+        let _ = writeln!(out, "  </metadata>");
     }
 
     // One <path> per polyline (skip polylines with fewer than 2 points)
@@ -646,6 +670,7 @@ mod tests {
         let meta = SvgMetadata {
             title: Some("my-image"),
             description: Some("blur=1.4, canny=15/40"),
+            ..SvgMetadata::default()
         };
         let svg = to_svg(&[], dims(100, 100), &meta);
         assert!(svg.contains("  <title>my-image</title>"));
@@ -668,6 +693,7 @@ mod tests {
         let meta = SvgMetadata {
             title: Some("test"),
             description: Some("desc"),
+            ..SvgMetadata::default()
         };
         let svg = to_svg(&polylines, dims(100, 100), &meta);
 
@@ -696,6 +722,64 @@ mod tests {
         };
         let svg = to_svg(&[], dims(100, 100), &meta);
         assert!(svg.contains("<desc>x &lt; y &amp; z &gt; w</desc>"));
+    }
+
+    // --- Config JSON / <metadata> ---
+
+    #[test]
+    fn metadata_element_emitted_when_config_json_present() {
+        let meta = SvgMetadata {
+            config_json: Some(r#"{"blur_sigma":1.4}"#),
+            ..SvgMetadata::default()
+        };
+        let svg = to_svg(&[], dims(100, 100), &meta);
+        assert!(svg.contains("<metadata>"));
+        assert!(svg.contains("</metadata>"));
+        assert!(svg.contains(r#"<mujou:pipeline xmlns:mujou="https://mujou.app/ns/1">"#));
+        // JSON quotes are XML-escaped
+        assert!(svg.contains(r"{&quot;blur_sigma&quot;:1.4}</mujou:pipeline>"));
+    }
+
+    #[test]
+    fn metadata_element_omitted_when_config_json_none() {
+        let svg = to_svg(&[], dims(100, 100), &no_meta());
+        assert!(!svg.contains("<metadata>"));
+    }
+
+    #[test]
+    fn config_json_special_characters_are_escaped() {
+        // JSON with quotes won't normally contain XML specials, but
+        // verify the escaping works if they do appear.
+        let meta = SvgMetadata {
+            config_json: Some(r#"{"note":"a < b & c > d"}"#),
+            ..SvgMetadata::default()
+        };
+        let svg = to_svg(&[], dims(100, 100), &meta);
+        assert!(
+            svg.contains(
+                r"{&quot;note&quot;:&quot;a &lt; b &amp; c &gt; d&quot;}</mujou:pipeline>"
+            )
+        );
+    }
+
+    #[test]
+    fn metadata_appears_after_desc_and_before_paths() {
+        let polylines = vec![Polyline::new(vec![
+            Point::new(1.0, 2.0),
+            Point::new(3.0, 4.0),
+        ])];
+        let meta = SvgMetadata {
+            title: Some("test"),
+            description: Some("desc"),
+            config_json: Some(r#"{"blur_sigma":1.4}"#),
+        };
+        let svg = to_svg(&polylines, dims(100, 100), &meta);
+
+        let desc_pos = svg.find("<desc>").unwrap();
+        let metadata_pos = svg.find("<metadata>").unwrap();
+        let path_pos = svg.find("<path").unwrap();
+        assert!(desc_pos < metadata_pos, "desc should come before metadata");
+        assert!(metadata_pos < path_pos, "metadata should come before paths");
     }
 
     // --- XML escaping ---

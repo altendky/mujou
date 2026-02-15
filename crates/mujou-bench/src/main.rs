@@ -254,9 +254,11 @@ fn main() -> ExitCode {
                         .and_then(|s| s.to_str())
                         .unwrap_or("bench");
                     let desc = format!("{config:#?}");
+                    let config_json = serde_json::to_string(&config).ok();
                     let metadata = mujou_export::SvgMetadata {
                         title: Some(title),
                         description: Some(&desc),
+                        config_json: config_json.as_deref(),
                     };
                     let svg = mujou_export::to_svg(
                         &[staged.final_polyline().clone()],
