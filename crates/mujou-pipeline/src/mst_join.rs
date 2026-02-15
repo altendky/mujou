@@ -682,7 +682,7 @@ fn odd_degree_vertices(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
 /// running Dijkstra for every pair), then Dijkstra only for path
 /// reconstruction of the selected pairs.
 ///
-/// Returns the total retrace distance (sum of duplicated edge weights).
+/// Returns `(total_retrace_distance, odd_count_before, odd_count_after)`.
 ///
 /// # Errors
 ///
@@ -691,11 +691,13 @@ fn odd_degree_vertices(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
 fn fix_parity(
     graph: &mut UnGraph<(), f64>,
     node_coords: &[geo::Coord<f64>],
-) -> Result<f64, String> {
+) -> Result<(f64, usize, usize), String> {
     let mut odd = odd_degree_vertices(graph);
+    let odd_before = odd.len();
 
-    if odd.len() <= 2 {
-        return Ok(0.0); // 0 or 2 odd-degree vertices: already Eulerian.
+    if odd_before <= 2 {
+        // 0 or 2 odd-degree vertices: already Eulerian.
+        return Ok((0.0, odd_before, odd_before));
     }
 
     let mut total_retrace = 0.0;
@@ -746,7 +748,8 @@ fn fix_parity(
             odd.swap_remove(best_i);
         }
     }
-    Ok(total_retrace)
+    let odd_after = odd_degree_vertices(graph).len();
+    Ok((total_retrace, odd_before, odd_after))
 }
 
 /// Reconstruct the shortest path from `start` to `end` using Dijkstra.
@@ -976,10 +979,9 @@ pub fn join_mst(
     let graph_node_count = graph.node_count();
     let graph_edge_count_before_fix = graph.edge_count();
 
-    let odd_vertices_before_fix = odd_degree_vertices(&graph).len();
-    let total_retrace_distance = fix_parity(&mut graph, &node_coords)
-        .expect("fix_parity: shortest-path reconstruction failed on MST-connected graph");
-    let odd_vertices_after_fix = odd_degree_vertices(&graph).len();
+    let (total_retrace_distance, odd_vertices_before_fix, odd_vertices_after_fix) =
+        fix_parity(&mut graph, &node_coords)
+            .expect("fix_parity: shortest-path reconstruction failed on MST-connected graph");
     let graph_edge_count_after_fix = graph.edge_count();
 
     let euler_path = hierholzer(&graph);
@@ -1296,13 +1298,15 @@ mod tests {
             geo::Coord { x: 0.0, y: -1.0 }, // l4
         ];
 
-        let retrace = fix_parity(&mut g, &node_coords).unwrap();
+        let (retrace, odd_before, odd_after) = fix_parity(&mut g, &node_coords).unwrap();
         assert!(retrace >= 0.0, "retrace distance should be non-negative");
-        let odd = odd_degree_vertices(&g);
+        assert_eq!(
+            odd_before, 4,
+            "star graph should have 4 odd vertices before fix"
+        );
         assert!(
-            odd.len() <= 2,
-            "after parity fix, should have <= 2 odd vertices, got {}",
-            odd.len(),
+            odd_after <= 2,
+            "after parity fix, should have <= 2 odd vertices, got {odd_after}",
         );
     }
 
