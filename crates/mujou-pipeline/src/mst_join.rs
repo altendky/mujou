@@ -932,9 +932,13 @@ fn all_pairs_graph_distances(graph: &UnGraph<(), f64>, vertices: &[NodeIndex]) -
 /// total graph distance, leaving exactly 2 vertices unpaired as Euler
 /// path endpoints.
 ///
-/// The DP state is a bitmask of which vertices still need to be matched.
-/// For each state, the lowest-indexed unmatched vertex is paired with
-/// each other unmatched vertex.
+/// The DP state is a "to-match" bitmask: `dp[mask]` is the minimum
+/// cost to perfectly match all vertices whose bits are set in `mask`.
+/// For each even-popcount mask, the lowest set bit `i` is paired with
+/// each other set bit `j`, and the cost is built from the sub-problem
+/// `dp[mask ^ (1<<i) ^ (1<<j)]`.  This ensures that the same `i`
+/// (lowest set bit) is used in both the forward pass and backtracking,
+/// making `choice[mask]` consistent.
 ///
 /// We compute `dp[mask]` for masks with even popcount (the vertices to
 /// pair), then the answer is: min over all 2-element subsets S of
@@ -964,45 +968,39 @@ fn dp_bitmask_matching(
     // DP table over all n vertices (matching ALL of them), then derive
     // the "leave 2 out" answer by trying all C(n,2) endpoint choices.
     //
-    // Actually, the simpler approach: compute the DP that matches all
-    // subsets of even size, then read off dp[full ^ (1<<a) ^ (1<<b)] for
-    // each (a,b).
+    // The simpler approach: compute the DP that matches all subsets of
+    // even size, then read off dp[full ^ (1<<a) ^ (1<<b)] for each (a,b).
 
     let states = 1usize << n;
+    // dp[mask] = minimum cost to perfectly match all vertices in `mask`.
     let mut dp = vec![f64::INFINITY; states];
-    // `choice[mask]` records which vertex the lowest-bit vertex was
-    // paired with, for backtracking.
+    // choice[mask] = the vertex that the lowest set bit of `mask` was
+    // paired with in the optimal matching for `mask`.
     let mut choice = vec![0u8; states];
     dp[0] = 0.0;
 
-    for mask in 0..states {
-        if dp[mask].is_infinite() {
-            continue;
-        }
-        // Only process even-popcount states (we pair two at a time).
+    for mask in 1..states {
+        // Only even-popcount masks can be perfectly matched.
         if mask.count_ones() % 2 != 0 {
             continue;
         }
 
-        // Find the lowest unset bit — this is the next vertex to pair.
-        let full = states - 1;
-        let remaining = full & !mask; // bits not yet matched
-        if remaining == 0 {
-            continue;
-        }
-        let i = remaining.trailing_zeros() as usize;
+        // Pick the lowest set bit — this vertex must be paired with
+        // someone.  Fixing this choice avoids counting each pairing
+        // multiple times.
+        let i = mask.trailing_zeros() as usize;
 
-        // Try pairing i with each other unmatched vertex j.
-        let mut rest = remaining & !(1 << i);
+        // Try pairing i with each other set bit j in mask.
+        let mut rest = mask & !(1 << i);
         while rest != 0 {
             let j = rest.trailing_zeros() as usize;
-            let new_mask = mask | (1 << i) | (1 << j);
-            let cost = dp[mask] + dist_matrix[i][j];
-            if cost < dp[new_mask] {
-                dp[new_mask] = cost;
+            let prev = mask ^ (1 << i) ^ (1 << j);
+            let cost = dp[prev] + dist_matrix[i][j];
+            if cost < dp[mask] {
+                dp[mask] = cost;
                 #[allow(clippy::cast_possible_truncation)]
                 {
-                    choice[new_mask] = j as u8;
+                    choice[mask] = j as u8;
                 }
             }
             rest &= rest - 1; // clear lowest set bit
@@ -1017,9 +1015,9 @@ fn dp_bitmask_matching(
 
     for a in 0..n {
         for b in (a + 1)..n {
-            let matched_mask = full_mask ^ (1 << a) ^ (1 << b);
-            if dp[matched_mask] < best_cost {
-                best_cost = dp[matched_mask];
+            let to_match = full_mask ^ (1 << a) ^ (1 << b);
+            if dp[to_match] < best_cost {
+                best_cost = dp[to_match];
                 best_a = a;
                 best_b = b;
             }
@@ -1030,12 +1028,13 @@ fn dp_bitmask_matching(
         return Err("dp_bitmask_matching: no valid matching found".to_owned());
     }
 
-    // Backtrack to reconstruct the pairs.
+    // Backtrack to reconstruct the pairs.  `i = mask.trailing_zeros()`
+    // is the same lowest set bit used in the forward pass, so
+    // `choice[mask]` gives the correct partner.
     let mut pairs = Vec::new();
     let mut mask = full_mask ^ (1 << best_a) ^ (1 << best_b);
     while mask != 0 {
-        let remaining = mask;
-        let i = remaining.trailing_zeros() as usize;
+        let i = mask.trailing_zeros() as usize;
         let j = choice[mask] as usize;
         pairs.push((odd[i], odd[j]));
         mask ^= (1 << i) | (1 << j);
