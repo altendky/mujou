@@ -900,8 +900,8 @@ fn matching_graph_cost(
     pairs
         .iter()
         .map(|&(a, b)| {
-            let ia = index_of.get(&a).copied().unwrap_or(0);
-            let ib = index_of.get(&b).copied().unwrap_or(0);
+            let ia = index_of[&a];
+            let ib = index_of[&b];
             dist_matrix[ia][ib]
         })
         .sum()
