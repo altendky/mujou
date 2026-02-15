@@ -162,7 +162,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             let w = result.dimensions.width;
             let h = result.dimensions.height;
             let view_box = format!("0 0 {w} {h}");
-            let d = super::preview::build_path_data(polyline);
+            let d = mujou_export::build_path_data(polyline);
 
             rsx! {
                 svg {
@@ -198,7 +198,7 @@ fn render_img_thumb(url: &str, alt: &str) -> Element {
 
 /// Render a single polyline as an SVG path for a thumbnail.
 fn render_thumbnail_path(polyline: &mujou_pipeline::Polyline) -> Element {
-    let d = super::preview::build_path_data(polyline);
+    let d = mujou_export::build_path_data(polyline);
     if d.is_empty() {
         return rsx! {};
     }

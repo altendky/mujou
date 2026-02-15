@@ -1,10 +1,10 @@
 //! SVG preview component for rendering traced paths.
 
-use std::fmt::Write;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use mujou_pipeline::{Polyline, ProcessResult};
+use mujou_export::build_path_data;
+use mujou_pipeline::ProcessResult;
 
 /// Props for the [`Preview`] component.
 #[derive(Props, Clone, PartialEq)]
@@ -43,23 +43,4 @@ pub fn Preview(props: PreviewProps) -> Element {
             }
         }
     }
-}
-
-/// Build an SVG path `d` attribute from a polyline.
-///
-/// Uses `M` for the first point and `L` for subsequent points.
-/// Coordinates are formatted to 1 decimal place (matching the export
-/// serializer).
-pub fn build_path_data(polyline: &Polyline) -> String {
-    let points = polyline.points();
-    if points.len() < 2 {
-        return String::new();
-    }
-
-    let mut d = String::new();
-    for (i, p) in points.iter().enumerate() {
-        let cmd = if i == 0 { "M" } else { "L" };
-        let _ = write!(d, "{cmd} {:.1} {:.1} ", p.x, p.y);
-    }
-    d
 }

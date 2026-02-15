@@ -1548,6 +1548,7 @@ version = "0.1.0"
 dependencies = [
  "image",
  "mujou-pipeline",
+ "svg",
  "thiserror 2.0.18",
 ]
 
@@ -2337,6 +2338,12 @@ checksum = "1e72f747606fc19fe81d6c59e491af93ed7dcbcb6aad9d1d18b05129914ec298"
 dependencies = [
  "serde",
 ]
+
+[[package]]
+name = "svg"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94afda9cd163c04f6bee8b4bf2501c91548deae308373c436f36aeff3cf3c4a3"
 
 [[package]]
 name = "syn"

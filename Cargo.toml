@@ -76,6 +76,9 @@ petgraph = "0.8"
 # Hashing
 siphasher = "1"
 
+# SVG construction
+svg = "0.18"
+
 # Error handling
 thiserror = "2"
 
