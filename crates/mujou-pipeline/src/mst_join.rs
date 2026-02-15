@@ -1355,6 +1355,13 @@ fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
             // is: [... real ... | virtual | ... real ... | virtual | ...]
             // We want all the "real" fragments joined together.
             //
+            // NOTE: this branch should not be reached after fix_parity
+            // (which ensures exactly 2 odd vertices → 1 virtual edge).
+            // If it IS reached, the concatenated fragments may be
+            // discontinuous because the end of one fragment is not
+            // guaranteed to connect to the start of the next — they
+            // are separated by the removed virtual edges.
+            //
             // Sort positions so we can iterate in order.
             virtual_positions.sort_unstable();
 
@@ -1385,6 +1392,20 @@ fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
             for frag in fragments {
                 result.extend_from_slice(frag);
             }
+
+            // Verify adjacency: every consecutive pair in the result
+            // should be connected by an edge in the original graph.
+            // If not, the path has discontinuities ("teleportation").
+            let has_discontinuity = result.windows(2).any(|w| {
+                graph.find_edge(w[0], w[1]).is_none() && graph.find_edge(w[1], w[0]).is_none()
+            });
+            debug_assert!(
+                !has_discontinuity,
+                "multi-virtual-edge removal produced a discontinuous path \
+                 ({} virtual edges at positions {virtual_positions:?})",
+                virtual_positions.len(),
+            );
+
             return result;
         }
     }
