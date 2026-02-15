@@ -480,6 +480,13 @@ impl Joined {
     }
 
     /// Consume the pipeline and return the full [`StagedResult`].
+    ///
+    /// **Note:** [`StagedResult`] holds only data-oriented raster/vector
+    /// intermediates and does not include join quality metrics.  To
+    /// access quality metrics, call [`metrics()`](PipelineStage::metrics)
+    /// before this method, or use
+    /// [`process_staged_with_diagnostics`](crate::diagnostics::process_staged_with_diagnostics)
+    /// which captures metrics automatically.
     #[must_use]
     pub fn into_result(self) -> StagedResult {
         StagedResult {
