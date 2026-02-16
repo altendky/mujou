@@ -434,8 +434,14 @@ fn cherry_blossoms_mst_edge_diagnostics() {
         .mst_edge_details
         .iter()
         .flat_map(|e| {
-            let a = ((e.point_a.0 * 10.0) as i64, (e.point_a.1 * 10.0) as i64);
-            let b = ((e.point_b.0 * 10.0) as i64, (e.point_b.1 * 10.0) as i64);
+            let a = (
+                (e.point_a.0 * 10.0).round() as i64,
+                (e.point_a.1 * 10.0).round() as i64,
+            );
+            let b = (
+                (e.point_b.0 * 10.0).round() as i64,
+                (e.point_b.1 * 10.0).round() as i64,
+            );
             // Both directions
             vec![(a, b), (b, a)]
         })
@@ -447,8 +453,11 @@ fn cherry_blossoms_mst_edge_diagnostics() {
         let dy = to.y - from.y;
 
         // Classify: is this an MST edge?
-        let from_key = ((from.x * 10.0) as i64, (from.y * 10.0) as i64);
-        let to_key = ((to.x * 10.0) as i64, (to.y * 10.0) as i64);
+        let from_key = (
+            (from.x * 10.0).round() as i64,
+            (from.y * 10.0).round() as i64,
+        );
+        let to_key = ((to.x * 10.0).round() as i64, (to.y * 10.0).round() as i64);
         let is_mst = mst_set.contains(&(from_key, to_key));
 
         // Is either endpoint on the border circle?
