@@ -19,7 +19,7 @@ use svg::node::element::path::Data;
 use svg::node::element::{Description, Element, Path, Title};
 use svg::node::{Node, Text, Value};
 
-use mujou_pipeline::{Dimensions, MstEdgeInfo, Polyline};
+use mujou_pipeline::{Dimensions, MaskShape, MstEdgeInfo, Polyline};
 
 /// Metadata to embed in the SVG document.
 ///
@@ -200,8 +200,13 @@ fn write_polyline_paths(out: &mut String, polylines: &[Polyline], indent: &str, 
 /// Polylines with fewer than 2 points are skipped (a single point
 /// cannot form a visible line segment).
 ///
-/// The `viewBox` is set from [`Dimensions`] so the SVG coordinate
-/// space matches the source image pixel grid.
+/// When `mask_shape` is `Some`, the `viewBox` is set to a **square**
+/// bounding box centered on the mask circle, with explicit
+/// `preserveAspectRatio="xMidYMid meet"`.  This ensures the output
+/// is correctly centered and fills the drawing area on circular
+/// devices (e.g. Oasis Mini).  When `None`, the `viewBox` is set
+/// from [`Dimensions`] so the SVG coordinate space matches the source
+/// image pixel grid.
 ///
 /// If [`SvgMetadata::title`] or [`SvgMetadata::description`] is
 /// provided, the corresponding `<title>` / `<desc>` element is emitted
@@ -224,7 +229,7 @@ fn write_polyline_paths(out: &mut String, polylines: &[Polyline], indent: &str, 
 ///     description: Some("Exported by mujou"),
 ///     ..SvgMetadata::default()
 /// };
-/// let svg = to_svg(&polylines, dims, &metadata);
+/// let svg = to_svg(&polylines, dims, &metadata, None);
 /// assert!(svg.contains("<title>cherry-blossoms</title>"));
 /// assert!(svg.contains("<desc>Exported by mujou</desc>"));
 /// assert!(svg.contains("M10,15 L12.5,18.3"));
@@ -234,14 +239,32 @@ pub fn to_svg(
     polylines: &[Polyline],
     dimensions: Dimensions,
     metadata: &SvgMetadata<'_>,
+    mask_shape: Option<&MaskShape>,
 ) -> String {
-    let w = dimensions.width;
-    let h = dimensions.height;
-
-    let mut doc = Document::new()
-        .set("width", w)
-        .set("height", h)
-        .set("viewBox", (0, 0, w, h));
+    // Exhaustive match on MaskShape ensures new variants get a compile
+    // error here, matching the convention in mask.rs.
+    let mut doc = mask_shape.map_or_else(
+        || {
+            let w = dimensions.width;
+            let h = dimensions.height;
+            Document::new()
+                .set("width", w)
+                .set("height", h)
+                .set("viewBox", (0, 0, w, h))
+        },
+        |shape| match shape {
+            MaskShape::Circle { center, radius } => {
+                let size = 2.0 * radius;
+                let min_x = center.x - radius;
+                let min_y = center.y - radius;
+                Document::new()
+                    .set("width", size)
+                    .set("height", size)
+                    .set("viewBox", format!("{min_x} {min_y} {size} {size}"))
+                    .set("preserveAspectRatio", "xMidYMid meet")
+            }
+        },
+    );
 
     // Optional <title> element
     if let Some(title) = metadata.title {
@@ -616,7 +639,7 @@ mod tests {
 
     #[test]
     fn empty_polylines_produces_valid_svg_with_no_paths() {
-        let svg = to_svg(&[], dims(100, 50), &no_meta());
+        let svg = to_svg(&[], dims(100, 50), &no_meta(), None);
         assert!(svg.contains(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
         assert!(svg.contains(r#"width="100""#));
         assert!(svg.contains(r#"height="50""#));
@@ -630,14 +653,14 @@ mod tests {
     #[test]
     fn single_point_polyline_is_skipped() {
         let polylines = vec![Polyline::new(vec![Point::new(5.0, 5.0)])];
-        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta(), None);
         assert!(!svg.contains("<path"));
     }
 
     #[test]
     fn zero_point_polyline_is_skipped() {
         let polylines = vec![Polyline::new(vec![])];
-        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta(), None);
         assert!(!svg.contains("<path"));
     }
 
@@ -649,7 +672,7 @@ mod tests {
             Point::new(10.0, 20.0),
             Point::new(30.0, 40.0),
         ])];
-        let svg = to_svg(&polylines, dims(800, 600), &no_meta());
+        let svg = to_svg(&polylines, dims(800, 600), &no_meta(), None);
 
         assert!(svg.contains(r#"width="800""#));
         assert!(svg.contains(r#"height="600""#));
@@ -667,7 +690,7 @@ mod tests {
             Point::new(12.5, 18.3),
             Point::new(14.0, 20.1),
         ])];
-        let svg = to_svg(&polylines, dims(800, 600), &no_meta());
+        let svg = to_svg(&polylines, dims(800, 600), &no_meta(), None);
         // Verify move-to and line-to commands are present
         assert!(svg.contains("M10,15"));
         assert!(svg.contains("L12.5,"));
@@ -680,7 +703,7 @@ mod tests {
             Polyline::new(vec![Point::new(1.0, 2.0), Point::new(3.0, 4.0)]),
             Polyline::new(vec![Point::new(5.0, 6.0), Point::new(7.0, 8.0)]),
         ];
-        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta(), None);
 
         // Count <path occurrences
         let path_count = svg.matches("<path").count();
@@ -700,7 +723,7 @@ mod tests {
             Polyline::new(vec![Point::new(2.0, 3.0), Point::new(4.0, 5.0)]), // kept
             Polyline::new(vec![]),                                           // skipped
         ];
-        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta(), None);
 
         let path_count = svg.matches("<path").count();
         assert_eq!(path_count, 1);
@@ -711,7 +734,7 @@ mod tests {
 
     #[test]
     fn viewbox_reflects_dimensions() {
-        let svg = to_svg(&[], dims(1920, 1080), &no_meta());
+        let svg = to_svg(&[], dims(1920, 1080), &no_meta(), None);
         assert!(svg.contains(r#"width="1920""#));
         assert!(svg.contains(r#"height="1080""#));
         assert!(svg.contains(r#"viewBox="0 0 1920 1080""#));
@@ -721,13 +744,13 @@ mod tests {
 
     #[test]
     fn svg_has_xml_declaration() {
-        let svg = to_svg(&[], dims(100, 100), &no_meta());
+        let svg = to_svg(&[], dims(100, 100), &no_meta(), None);
         assert!(svg.starts_with(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
     }
 
     #[test]
     fn svg_has_xmlns_namespace() {
-        let svg = to_svg(&[], dims(100, 100), &no_meta());
+        let svg = to_svg(&[], dims(100, 100), &no_meta(), None);
         assert!(svg.contains(r#"xmlns="http://www.w3.org/2000/svg""#));
     }
 
@@ -738,7 +761,7 @@ mod tests {
             Point::new(1.0, 2.0),
             Point::new(3.0, 4.0),
         ])];
-        let svg = to_svg(&polylines, dims(100, 100), &no_meta());
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta(), None);
         let trimmed = svg.trim_end();
         assert!(trimmed.ends_with("</svg>"));
     }
@@ -751,7 +774,7 @@ mod tests {
             title: Some("cherry-blossoms"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], dims(100, 100), &meta);
+        let svg = to_svg(&[], dims(100, 100), &meta, None);
         assert!(svg.contains("<title>cherry-blossoms</title>"));
         assert!(!svg.contains("<desc>"));
     }
@@ -762,7 +785,7 @@ mod tests {
             description: Some("Exported by mujou"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], dims(100, 100), &meta);
+        let svg = to_svg(&[], dims(100, 100), &meta, None);
         assert!(svg.contains("<desc>Exported by mujou</desc>"));
         assert!(!svg.contains("<title>"));
     }
@@ -774,14 +797,14 @@ mod tests {
             description: Some("blur=1.4, canny=15/40"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], dims(100, 100), &meta);
+        let svg = to_svg(&[], dims(100, 100), &meta, None);
         assert!(svg.contains("<title>my-image</title>"));
         assert!(svg.contains("<desc>blur=1.4, canny=15/40</desc>"));
     }
 
     #[test]
     fn title_and_desc_omitted_when_none() {
-        let svg = to_svg(&[], dims(100, 100), &no_meta());
+        let svg = to_svg(&[], dims(100, 100), &no_meta(), None);
         assert!(!svg.contains("<title>"));
         assert!(!svg.contains("<desc>"));
     }
@@ -797,7 +820,7 @@ mod tests {
             description: Some("desc"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&polylines, dims(100, 100), &meta);
+        let svg = to_svg(&polylines, dims(100, 100), &meta, None);
 
         let title_pos = svg.find("<title>").unwrap();
         let desc_pos = svg.find("<desc>").unwrap();
@@ -812,7 +835,7 @@ mod tests {
             title: Some("A <B> & C"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], dims(100, 100), &meta);
+        let svg = to_svg(&[], dims(100, 100), &meta, None);
         assert!(svg.contains("<title>A &lt;B&gt; &amp; C</title>"));
     }
 
@@ -822,7 +845,7 @@ mod tests {
             description: Some("x < y & z > w"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], dims(100, 100), &meta);
+        let svg = to_svg(&[], dims(100, 100), &meta, None);
         assert!(svg.contains("<desc>x &lt; y &amp; z &gt; w</desc>"));
     }
 
@@ -834,7 +857,7 @@ mod tests {
             config_json: Some(r#"{"blur_sigma":1.4}"#),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], dims(100, 100), &meta);
+        let svg = to_svg(&[], dims(100, 100), &meta, None);
         assert!(svg.contains("<metadata>"));
         assert!(svg.contains("</metadata>"));
         assert!(svg.contains(r#"<mujou:pipeline xmlns:mujou="https://mujou.app/ns/1">"#));
@@ -843,7 +866,7 @@ mod tests {
 
     #[test]
     fn metadata_element_omitted_when_config_json_none() {
-        let svg = to_svg(&[], dims(100, 100), &no_meta());
+        let svg = to_svg(&[], dims(100, 100), &no_meta(), None);
         assert!(!svg.contains("<metadata>"));
     }
 
@@ -853,7 +876,7 @@ mod tests {
             config_json: Some(r#"{"note":"a < b & c > d"}"#),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], dims(100, 100), &meta);
+        let svg = to_svg(&[], dims(100, 100), &meta, None);
         // The svg crate escapes <, >, & in text content
         assert!(svg.contains("&lt;"));
         assert!(svg.contains("&amp;"));
@@ -871,7 +894,7 @@ mod tests {
             description: Some("desc"),
             config_json: Some(r#"{"blur_sigma":1.4}"#),
         };
-        let svg = to_svg(&polylines, dims(100, 100), &meta);
+        let svg = to_svg(&polylines, dims(100, 100), &meta, None);
 
         let desc_pos = svg.find("<desc>").unwrap();
         let metadata_pos = svg.find("<metadata>").unwrap();
@@ -927,7 +950,7 @@ mod tests {
 
         let png = sharp_edge_png(40, 40);
         let result = process(&png, &PipelineConfig::default()).unwrap();
-        let svg = to_svg(&[result.polyline], result.dimensions, &no_meta());
+        let svg = to_svg(&[result.polyline], result.dimensions, &no_meta(), None);
 
         // Valid SVG structure
         assert!(svg.contains(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
@@ -958,7 +981,7 @@ mod tests {
                 Point::new(35.0, 10.2),
             ]),
         ];
-        let svg = to_svg(&polylines, dims(800, 600), &no_meta());
+        let svg = to_svg(&polylines, dims(800, 600), &no_meta(), None);
 
         assert!(svg.contains(r#"width="800""#));
         assert!(svg.contains(r#"height="600""#));
@@ -969,5 +992,101 @@ mod tests {
         assert!(svg.contains(r#"fill="none""#));
         assert!(svg.contains(r#"stroke="black""#));
         assert!(svg.contains(r#"stroke-width="1""#));
+    }
+
+    // --- Mask-aware square viewBox ---
+
+    #[test]
+    fn mask_shape_produces_square_viewbox() {
+        let shape = MaskShape::Circle {
+            center: Point::new(500.0, 333.5),
+            radius: 450.0,
+        };
+        let polylines = vec![Polyline::new(vec![
+            Point::new(100.0, 100.0),
+            Point::new(200.0, 200.0),
+        ])];
+        let svg = to_svg(&polylines, dims(1000, 667), &no_meta(), Some(&shape));
+
+        // Square dimensions: 2 * 450 = 900
+        assert!(svg.contains(r#"width="900""#), "width should be 900");
+        assert!(svg.contains(r#"height="900""#), "height should be 900");
+        // viewBox origin: (500-450, 333.5-450) = (50, -116.5)
+        assert!(
+            svg.contains("viewBox=\"50 -116.5 900 900\""),
+            "viewBox should be square centered on mask circle, got:\n{svg}",
+        );
+        assert!(
+            svg.contains(r#"preserveAspectRatio="xMidYMid meet""#),
+            "should have explicit preserveAspectRatio",
+        );
+    }
+
+    #[test]
+    fn mask_shape_none_uses_dimensions_viewbox() {
+        let svg = to_svg(&[], dims(800, 600), &no_meta(), None);
+        assert!(svg.contains(r#"width="800""#));
+        assert!(svg.contains(r#"height="600""#));
+        assert!(svg.contains(r#"viewBox="0 0 800 600""#));
+        // No preserveAspectRatio for non-mask export.
+        assert!(!svg.contains("preserveAspectRatio"));
+    }
+
+    #[test]
+    fn mask_shape_square_image_viewbox_extends_beyond() {
+        // For a square 1000x1000 image with default mask_diameter=0.75:
+        // diagonal = 1414.21, radius = 1414.21 * 0.75 / 2 = 530.33
+        // The circle diameter (1060.66) exceeds the image (1000).
+        let radius = 530.33;
+        let shape = MaskShape::Circle {
+            center: Point::new(500.0, 500.0),
+            radius,
+        };
+        let svg = to_svg(&[], dims(1000, 1000), &no_meta(), Some(&shape));
+
+        // viewBox origin: (500-530.33, 500-530.33) = (-30.33, -30.33)
+        // viewBox size: 1060.66
+        assert!(
+            svg.contains("viewBox=\"-30.33"),
+            "viewBox should have negative origin"
+        );
+        assert!(svg.contains(r#"preserveAspectRatio="xMidYMid meet""#));
+    }
+
+    #[test]
+    fn mask_shape_viewbox_still_renders_paths() {
+        let shape = MaskShape::Circle {
+            center: Point::new(50.0, 50.0),
+            radius: 40.0,
+        };
+        let polylines = vec![Polyline::new(vec![
+            Point::new(30.0, 30.0),
+            Point::new(70.0, 70.0),
+        ])];
+        let svg = to_svg(&polylines, dims(100, 100), &no_meta(), Some(&shape));
+
+        assert!(svg.contains("<path"));
+        assert!(svg.contains(r#"d="M30,30 L70,70""#));
+        // Square viewBox: side = 80, origin = (10, 10)
+        assert!(svg.contains("viewBox=\"10 10 80 80\""));
+    }
+
+    #[test]
+    fn mask_shape_with_metadata() {
+        let shape = MaskShape::Circle {
+            center: Point::new(100.0, 100.0),
+            radius: 80.0,
+        };
+        let meta = SvgMetadata {
+            title: Some("test"),
+            description: Some("masked export"),
+            config_json: Some(r#"{"circular_mask":true}"#),
+        };
+        let svg = to_svg(&[], dims(200, 200), &meta, Some(&shape));
+
+        assert!(svg.contains("<title>test</title>"));
+        assert!(svg.contains("<desc>masked export</desc>"));
+        assert!(svg.contains("<metadata>"));
+        assert!(svg.contains("viewBox=\"20 20 160 160\""));
     }
 }

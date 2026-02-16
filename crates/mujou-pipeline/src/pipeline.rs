@@ -391,7 +391,11 @@ impl Simplified {
                 }
             };
 
-            Some(MaskResult { clipped, border })
+            Some(MaskResult {
+                clipped,
+                border,
+                shape,
+            })
         } else {
             None
         };

@@ -260,10 +260,12 @@ fn main() -> ExitCode {
                         description: Some(&desc),
                         config_json: config_json.as_deref(),
                     };
+                    let mask_shape = staged.masked.as_ref().map(|mr| &mr.shape);
                     let svg = mujou_export::to_svg(
                         &[staged.final_polyline().clone()],
                         staged.dimensions,
                         &metadata,
+                        mask_shape,
                     );
                     match std::fs::write(svg_path, &svg) {
                         Ok(()) => {

@@ -21,7 +21,7 @@ use crate::types::{Point, Polyline};
 /// Adding a new shape variant requires implementing both clipping (in
 /// [`apply_mask`]) and border generation (in [`MaskShape::border_polyline`]),
 /// enforced by exhaustive `match` arms.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub enum MaskShape {
     /// Circular mask centred on a point with a given radius.
     Circle {
@@ -77,6 +77,11 @@ pub struct MaskResult {
     /// Present when [`BorderPathMode`] resolves to enabled (either `On`,
     /// or `Auto` with at least one clipped endpoint).
     pub border: Option<Polyline>,
+    /// The resolved mask geometry used for clipping.
+    ///
+    /// Stored so downstream consumers (e.g. SVG export) can derive the
+    /// correct coordinate space without recomputing from config values.
+    pub shape: MaskShape,
 }
 
 impl MaskResult {
@@ -577,6 +582,10 @@ mod tests {
                 end_clipped: false,
             }],
             border: None,
+            shape: MaskShape::Circle {
+                center: CENTER,
+                radius: RADIUS,
+            },
         };
         assert!(mr.any_clipped());
     }
@@ -590,6 +599,10 @@ mod tests {
                 end_clipped: false,
             }],
             border: None,
+            shape: MaskShape::Circle {
+                center: CENTER,
+                radius: RADIUS,
+            },
         };
         assert!(!mr.any_clipped());
     }
@@ -605,6 +618,10 @@ mod tests {
                 end_clipped: false,
             }],
             border: Some(border_pl.clone()),
+            shape: MaskShape::Circle {
+                center: CENTER,
+                radius: RADIUS,
+            },
         };
         let all: Vec<&Polyline> = mr.all_polylines().collect();
         assert_eq!(all.len(), 2);
@@ -622,6 +639,10 @@ mod tests {
                 end_clipped: false,
             }],
             border: None,
+            shape: MaskShape::Circle {
+                center: CENTER,
+                radius: RADIUS,
+            },
         };
         let all: Vec<&Polyline> = mr.all_polylines().collect();
         assert_eq!(all.len(), 1);
