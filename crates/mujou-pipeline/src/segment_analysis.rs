@@ -60,7 +60,11 @@ pub struct RankedSegment {
 /// ```
 #[must_use]
 pub fn find_top_segments(polylines: &[Polyline], top_n: usize) -> Vec<RankedSegment> {
-    let mut all_segments: Vec<RankedSegment> = Vec::new();
+    let total: usize = polylines
+        .iter()
+        .map(|p| p.points().len().saturating_sub(1))
+        .sum();
+    let mut all_segments: Vec<RankedSegment> = Vec::with_capacity(total);
 
     for (poly_idx, polyline) in polylines.iter().enumerate() {
         let pts = polyline.points();
