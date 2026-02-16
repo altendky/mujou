@@ -30,7 +30,7 @@ pub fn Preview(props: PreviewProps) -> Element {
         svg {
             xmlns: "http://www.w3.org/2000/svg",
             view_box: "{view_box}",
-            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded",
+            class: "w-full h-full bg-[var(--preview-bg)] rounded",
             "preserveAspectRatio": "xMidYMid meet",
 
             if !d.is_empty() {

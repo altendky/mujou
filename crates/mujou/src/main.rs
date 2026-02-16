@@ -431,7 +431,7 @@ fn app() -> Element {
             href: "https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Noto+Sans+JP:wght@400&display=swap",
         }
 
-        div { class: "min-h-screen bg-(--bg) text-(--text) flex flex-col overflow-x-hidden",
+        div { class: "h-screen bg-(--bg) text-(--text) flex flex-col overflow-hidden",
             // Dismiss popups on Escape key (export takes priority).
             onkeydown: move |e: KeyboardEvent| {
                 if e.key() == Key::Escape {
@@ -454,11 +454,10 @@ fn app() -> Element {
             script { dangerous_inner_html: include_str!(env!("THEME_TOGGLE_JS_PATH")) }
 
             // Header
-            // Extra right padding leaves room for the fixed-position theme
-            // toggle (--btn-height wide at right:1rem). The calc gives a 1rem
-            // gap between the upload button and the toggle, matching the
-            // toggle's own offset from the viewport edge.
-            header { class: "pl-6 pr-[calc(var(--btn-height)+2rem)] py-4 border-b border-(--border) flex items-center justify-between gap-4",
+            // Right padding via --toggle-clearance leaves room for the
+            // fixed-position theme toggle. Vertical padding is tied to
+            // --toggle-inset so header buttons and toggle always align.
+            header { class: "pl-6 pr-[var(--toggle-clearance)] py-[var(--toggle-inset)] border-b border-(--border) flex items-center justify-between gap-4",
                 h1 { class: "text-2xl title-brand", "mujou" }
                 div { class: "flex items-center gap-3",
                     FileUpload {
@@ -486,7 +485,7 @@ fn app() -> Element {
             // overlay in upload.rs. Clicking the backdrop dismisses it.
             if show_info() {
                 div {
-                    class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]",
+                    class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-[var(--backdrop)]",
                     // Backdrop — click outside the card to dismiss.
                     onclick: move |_| show_info.set(false),
                     // Card — stop propagation so clicking inside doesn't dismiss.
@@ -538,20 +537,20 @@ fn app() -> Element {
             }
 
             // Main content area
-            div { class: "flex-1 flex flex-col gap-6 p-6 min-w-0",
+            div { class: "flex-1 flex flex-col gap-2 lg:gap-4 p-3 lg:p-4 min-w-0 min-h-0 overflow-y-auto",
                 // Left column: Preview + Filmstrip + Controls
-                div { class: "flex-1 flex flex-col gap-4 min-w-0",
+                div { class: "flex-1 flex flex-col gap-2 lg:gap-3 min-w-0 min-h-0",
 
                     if image_bytes().is_some() {
                         // Full layout skeleton — always rendered when an
                         // image is loaded, even during first-time processing.
 
                         // Stage preview with processing overlay
-                        div { class: "relative",
+                        div { class: "relative flex-1 min-h-24",
                             // Preview content (stays visible during re-processing,
                             // shows placeholder when no result yet)
                             div {
-                                class: if processing() && !pipeline_finished() { "opacity-50 transition-opacity" } else { "transition-opacity" },
+                                class: if processing() && !pipeline_finished() { "h-full opacity-50 transition-opacity" } else { "h-full transition-opacity" },
 
                                 StagePreview {
                                     result: result(),
@@ -562,8 +561,8 @@ fn app() -> Element {
                             // Processing indicator overlay (both first-time
                             // and re-processing)
                             if processing() {
-                                div { class: "absolute inset-0 flex items-center justify-center",
-                                    div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
+                                div { class: "absolute inset-0 z-[60] flex flex-col items-center pointer-events-none",
+                                    div { class: "my-auto pointer-events-auto bg-[var(--surface)] rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
                                         // Total elapsed time
                                         div { class: "flex justify-between w-full text-sm text-(--text-secondary)",
                                             span {
@@ -643,7 +642,7 @@ fn app() -> Element {
                         }
 
                         // Per-stage controls with copy/paste config buttons
-                        div { class: "flex gap-2",
+                        div { class: "flex gap-2 flex-shrink-0",
                             // Config clipboard buttons (left column)
                             ConfigButtons {
                                 live_config: live_config,
@@ -652,7 +651,7 @@ fn app() -> Element {
                             }
 
                             // Controls (right, fills remaining space)
-                            div { class: "flex-1 bg-[var(--surface)] rounded p-4",
+                            div { class: "flex-1 bg-[var(--surface)] rounded p-4 h-56 overflow-y-auto",
                                 h3 { class: "text-sm font-semibold text-[var(--text-heading)] mb-2",
                                     "{selected_stage()} Controls"
                                 }

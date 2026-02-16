@@ -21,6 +21,8 @@
 
   /* -- Shared sizing -- */
   --btn-height: 2.5rem;
+  --toggle-inset: 0.5rem;  /* theme-toggle distance from viewport edge */
+  --toggle-clearance: calc(var(--btn-height) + var(--toggle-inset) * 2);
 
   /* -- Light palette (default) -- */
   --bg: #fafafa;
@@ -45,8 +47,9 @@
   --text-error: #dc2626;
   --error-bg: rgba(220, 38, 38, 0.1);
   --error-border: #f87171;
-  --preview-bg: #fff;
-  --preview-stroke: #000;
+  --preview-bg: #fafafa;
+  --preview-stroke: #1a1a1a;
+  --backdrop: rgba(0, 0, 0, 0.2);
 }
 
 [data-theme="dark"] {
@@ -74,13 +77,20 @@
   --error-border: #b91c1c;
   --preview-bg: #171717;
   --preview-stroke: #fafafa;
+  --backdrop: rgba(255, 255, 255, 0.2);
+}
+
+@media (min-width: 1024px) {
+  :root {
+    --toggle-inset: 1rem;
+  }
 }
 
 /* Theme toggle button — shared appearance and position */
 .theme-toggle {
   position: fixed;
-  top: 1rem;
-  right: 1rem;
+  top: var(--toggle-inset);
+  right: var(--toggle-inset);
   z-index: 50;
   -webkit-appearance: none;
   appearance: none;

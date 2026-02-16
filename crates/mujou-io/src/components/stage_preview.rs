@@ -58,7 +58,7 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         // No result yet — show placeholder matching the preview area
         return rsx! {
             div {
-                class: "w-full aspect-[4/3] max-h-[70vh] bg-[var(--preview-bg)] rounded",
+                class: "w-full h-full bg-[var(--preview-bg)] rounded",
                 role: "status",
                 aria_label: "Loading preview",
             }
@@ -92,7 +92,7 @@ fn render_raster_img(url: &str, label: &str, visible: bool) -> Element {
     rsx! {
         img {
             src: "{url}",
-            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain{hidden}",
+            class: "w-full h-full bg-[var(--preview-bg)] rounded object-contain{hidden}",
             alt: "{label} stage preview",
         }
     }
@@ -109,7 +109,7 @@ fn render_raster_edges(result: &WorkerResult, visible: bool, is_dark: bool) -> E
     rsx! {
         img {
             src: "{url}",
-            class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded object-contain{hidden}",
+            class: "w-full h-full bg-[var(--preview-bg)] rounded object-contain{hidden}",
             alt: "Edges stage preview",
         }
     }
@@ -121,14 +121,14 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
     match selected {
         StageId::Contours | StageId::Simplified | StageId::Masked => {
             let polylines = result.polylines_for_stage(selected);
-            let view_box = format!("0 0 {w} {h}");
+            let view_box = compute_view_box(&polylines, w, h);
             let path_data = build_multi_path_data(&polylines);
 
             rsx! {
                 svg {
                     xmlns: "http://www.w3.org/2000/svg",
                     view_box: "{view_box}",
-                    class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded",
+                    class: "w-full h-full bg-[var(--preview-bg)] rounded",
                     "preserveAspectRatio": "xMidYMid meet",
 
                     for (i, d) in path_data.iter().enumerate() {
@@ -146,14 +146,14 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
 
         StageId::Join => {
             let polyline = &result.joined;
-            let view_box = format!("0 0 {w} {h}");
+            let view_box = compute_view_box(std::slice::from_ref(polyline), w, h);
             let d = build_path_data(polyline);
 
             rsx! {
                 svg {
                     xmlns: "http://www.w3.org/2000/svg",
                     view_box: "{view_box}",
-                    class: "w-full h-auto max-h-[70vh] bg-[var(--preview-bg)] rounded",
+                    class: "w-full h-full bg-[var(--preview-bg)] rounded",
                     "preserveAspectRatio": "xMidYMid meet",
 
                     if !d.is_empty() {
@@ -182,4 +182,35 @@ fn build_multi_path_data(polylines: &[mujou_pipeline::Polyline]) -> Vec<String> 
             if d.is_empty() { None } else { Some(d) }
         })
         .collect()
+}
+
+/// Compute an SVG `viewBox` that contains all polyline data.
+///
+/// Encompasses both the image area (`0,0` to `w,h`) and any polyline
+/// data that extends beyond it (e.g. a border circle).  Adds a small
+/// padding so strokes aren't clipped at the boundary.
+#[must_use]
+pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline], w: u32, h: u32) -> String {
+    let mut min_x: f64 = 0.0;
+    let mut min_y: f64 = 0.0;
+    let mut max_x = f64::from(w);
+    let mut max_y = f64::from(h);
+
+    for poly in polylines {
+        for p in poly.points() {
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        }
+    }
+
+    // Small padding so strokes at the boundary aren't clipped.
+    let pad = 1.0;
+    min_x -= pad;
+    min_y -= pad;
+    max_x += pad;
+    max_y += pad;
+
+    format!("{min_x} {min_y} {} {}", max_x - min_x, max_y - min_y)
 }
