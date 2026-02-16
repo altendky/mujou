@@ -24,7 +24,9 @@ use std::cell::RefCell;
 
 use image::ImageEncoder;
 use mujou_pipeline::pipeline::STAGE_COUNT;
-use mujou_pipeline::{Dimensions, GrayImage, MaskResult, PipelineCache, Polyline, StagedResult};
+use mujou_pipeline::{
+    Dimensions, GrayImage, MaskResult, MstEdgeInfo, PipelineCache, Polyline, StagedResult,
+};
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -46,6 +48,7 @@ pub struct VectorResult {
     pub simplified: Vec<Polyline>,
     pub masked: Option<MaskResult>,
     pub joined: Polyline,
+    pub mst_edge_details: Vec<MstEdgeInfo>,
     pub dimensions: Dimensions,
 }
 
@@ -238,6 +241,7 @@ fn post_success_response(
         simplified: staged.simplified.clone(),
         masked: staged.masked.clone(),
         joined: staged.joined.clone(),
+        mst_edge_details: staged.mst_edge_details.clone(),
         dimensions: staged.dimensions,
     };
 
