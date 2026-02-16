@@ -235,7 +235,9 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             let ch_desc = desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined.");
                             rsx! {
                                 if !ch_desc.is_empty() {
-                                    p { class: "text-xs text-[var(--text-secondary)]",
+                                    p {
+                                        id: "edge-ch-desc",
+                                        class: "text-xs text-[var(--text-secondary)]",
                                         "{ch_desc}"
                                     }
                                 }
@@ -251,6 +253,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                                 c.edge_channels.luminance = v;
                                 if c.edge_channels.any_enabled() { on_change.call(c); }
                             },
+                            "edge-ch-desc",
                         )}
                         {render_channel_toggle(
                             "ch_red",
@@ -262,6 +265,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                                 c.edge_channels.red = v;
                                 if c.edge_channels.any_enabled() { on_change.call(c); }
                             },
+                            "edge-ch-desc",
                         )}
                         {render_channel_toggle(
                             "ch_green",
@@ -273,6 +277,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                                 c.edge_channels.green = v;
                                 if c.edge_channels.any_enabled() { on_change.call(c); }
                             },
+                            "edge-ch-desc",
                         )}
                         {render_channel_toggle(
                             "ch_blue",
@@ -284,6 +289,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                                 c.edge_channels.blue = v;
                                 if c.edge_channels.any_enabled() { on_change.call(c); }
                             },
+                            "edge-ch-desc",
                         )}
                         {render_channel_toggle(
                             "ch_saturation",
@@ -295,6 +301,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                                 c.edge_channels.saturation = v;
                                 if c.edge_channels.any_enabled() { on_change.call(c); }
                             },
+                            "edge-ch-desc",
                         )}
                     }
                 }
@@ -602,15 +609,18 @@ fn render_toggle(
 ///
 /// When `disabled` is `true` the checkbox is shown as disabled (used to
 /// prevent unchecking the last enabled channel).
+#[allow(clippy::if_not_else)]
 fn render_channel_toggle(
     id: &str,
     label: &str,
     checked: bool,
     disabled: bool,
     on_change: impl Fn(bool) + 'static,
+    description_id: &str,
 ) -> Element {
     let id = id.to_string();
     let label = label.to_string();
+    let description_id = description_id.to_string();
 
     rsx! {
         div { class: "flex items-center gap-2",
@@ -619,6 +629,7 @@ fn render_channel_toggle(
                 id: "{id}",
                 checked: checked,
                 disabled: disabled,
+                "aria-describedby": if !description_id.is_empty() { "{description_id}" },
                 class: "w-4 h-4 accent-[var(--btn-primary)]",
                 onchange: move |e| {
                     on_change(e.checked());
