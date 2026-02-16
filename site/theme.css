@@ -49,6 +49,7 @@
   --error-border: #f87171;
   --preview-bg: #fafafa;
   --preview-stroke: #1a1a1a;
+  --backdrop: rgba(0, 0, 0, 0.2);
 }
 
 [data-theme="dark"] {
@@ -76,6 +77,7 @@
   --error-border: #b91c1c;
   --preview-bg: #171717;
   --preview-stroke: #fafafa;
+  --backdrop: rgba(255, 255, 255, 0.2);
 }
 
 @media (min-width: 1024px) {

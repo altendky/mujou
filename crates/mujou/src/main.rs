@@ -485,7 +485,7 @@ fn app() -> Element {
             // overlay in upload.rs. Clicking the backdrop dismisses it.
             if show_info() {
                 div {
-                    class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]",
+                    class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-[var(--backdrop)]",
                     // Backdrop — click outside the card to dismiss.
                     onclick: move |_| show_info.set(false),
                     // Card — stop propagation so clicking inside doesn't dismiss.
@@ -561,7 +561,7 @@ fn app() -> Element {
                             // Processing indicator overlay (both first-time
                             // and re-processing)
                             if processing() {
-                                div { class: "fixed inset-0 z-[60] flex items-center justify-center",
+                                div { class: "fixed inset-0 z-[60] flex items-center justify-center bg-[var(--backdrop)]",
                                     div { class: "bg-[var(--surface)] bg-opacity-90 rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
                                         // Total elapsed time
                                         div { class: "flex justify-between w-full text-sm text-(--text-secondary)",
