@@ -29,6 +29,22 @@ fn track_event(name: &str) {
 /// Record a successful file export with the given format (e.g., `"svg"`).
 ///
 /// Fires an event named `export_<format>` (e.g., `export_svg`).
+///
+/// # Panics (debug only)
+///
+/// Debug-asserts that `format` is lowercase alphanumeric/underscore and
+/// that the resulting event name fits within the 200-character limit.
 pub fn track_export(format: &str) {
-    track_event(&format!("export_{format}"));
+    debug_assert!(
+        format
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_'),
+        "event format must be lowercase alphanumeric or underscore, got: {format:?}"
+    );
+    let name = format!("export_{format}");
+    debug_assert!(
+        name.len() <= 200,
+        "event name exceeds 200-character limit: {name:?}"
+    );
+    track_event(&name);
 }
