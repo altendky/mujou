@@ -862,6 +862,12 @@ fn optimal_matching(
     let n = odd.len();
 
     // Compute all-pairs graph distances between odd vertices.
+    //
+    // This runs n Dijkstra calls on the full graph — O(n × (V+E) log V).
+    // The matrix is used in both the DP path (n ≤ DP_THRESHOLD) and the
+    // heuristic path (greedy_graph_distance_matching + matching_graph_cost),
+    // so it cannot be skipped.  For large n a sparse representation
+    // (e.g., K-nearest neighbors) could reduce the cost — see issue #137.
     let dist_matrix = all_pairs_graph_distances(graph, odd);
 
     if n <= DP_THRESHOLD {
