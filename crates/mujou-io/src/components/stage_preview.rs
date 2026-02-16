@@ -79,9 +79,8 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     // Reactive theme signal provided by the app root.
     let is_dark: Signal<bool> = use_context();
 
-    // Diagnostic overlay toggle — provided by the app root when available,
-    // defaults to `false` (hidden) when the context is absent.
-    let show_diagnostics = use_context::<Signal<bool>>();
+    // Diagnostic overlay toggle provided by the app root.
+    let show_diagnostics: Signal<bool> = use_context();
 
     rsx! {
         // Raster stage <img> elements are always present in the DOM so
