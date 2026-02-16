@@ -335,6 +335,18 @@ fn generate_index_html(site_dir: &Path, manifest_dir: &Path) {
         "theme-detect.js must not contain '</script' — it is inlined in a <script> tag"
     );
 
+    // Shared analytics snippet — single source of truth for both the
+    // landing page (site/index.html, injected by the deploy workflow)
+    // and the Dioxus app template (generated here).
+    let analytics_html = fs::read_to_string(site_dir.join("analytics.html"))
+        .expect("failed to read site/analytics.html");
+    let analytics_html = analytics_html.trim_end();
+
+    println!(
+        "cargo:rerun-if-changed={}",
+        site_dir.join("analytics.html").display()
+    );
+
     let index_html = format!(
         r#"<!DOCTYPE html>
 <html>
@@ -347,8 +359,7 @@ fn generate_index_html(site_dir: &Path, manifest_dir: &Path) {
   </head>
   <body>
     <div id="main"></div>
-    <!-- privacy-first analytics — no cookies, GDPR compliant -->
-    <script async defer src="https://scripts.simpleanalyticscdn.com/latest.js"></script>
+{analytics_html}
   </body>
 </html>
 "#

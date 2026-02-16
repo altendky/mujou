@@ -53,6 +53,8 @@ jobs:
           mkdir -p deploy/app
           cp -r site/* deploy/
           sed -i "s|{{REPO_URL}}|${REPO_URL}|g" deploy/index.html
+          ANALYTICS=$(cat site/analytics.html)
+          sed -i "s|{{ANALYTICS}}|${ANALYTICS}|g" deploy/index.html
           cp -r target/dx/mujou/release/web/public/* deploy/app/
           cp deploy/app/index.html deploy/app/404.html
 
