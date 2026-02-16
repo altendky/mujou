@@ -3,7 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus_free_icons::Icon;
 use dioxus_free_icons::icons::ld_icons::{
-    LdClipboardCheck, LdClipboardCopy, LdClipboardPaste, LdDownload, LdInfo, LdScanLine,
+    LdClipboardCheck, LdClipboardCopy, LdClipboardPaste, LdDownload, LdInfo, LdLayers,
 };
 use mujou_io::{
     ExportPanel, FileUpload, Filmstrip, PipelineWorker, StageControls, StageId, StagePreview,
@@ -865,7 +865,7 @@ fn ConfigButtons(
                 aria_label: "Toggle diagnostic overlay",
                 "aria-pressed": if show_diagnostics() { "true" } else { "false" },
                 onclick: move |_| show_diagnostics.toggle(),
-                Icon { width: 20, height: 20, icon: LdScanLine }
+                Icon { width: 20, height: 20, icon: LdLayers }
             }
 
             if let Some(ref err) = error_msg() {
