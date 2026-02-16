@@ -347,6 +347,8 @@ fn generate_index_html(site_dir: &Path, manifest_dir: &Path) {
   </head>
   <body>
     <div id="main"></div>
+    <!-- privacy-first analytics — no cookies, GDPR compliant -->
+    <script async defer src="https://scripts.simpleanalyticscdn.com/latest.js"></script>
   </body>
 </html>
 "#

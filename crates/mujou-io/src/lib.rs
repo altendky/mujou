@@ -4,6 +4,7 @@
 //! web worker communication, and provides reusable UI components
 //! for the mujou web application.
 
+pub mod analytics;
 pub mod clipboard;
 pub mod components;
 pub mod download;
