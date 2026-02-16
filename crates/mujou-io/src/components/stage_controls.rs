@@ -491,6 +491,19 @@ pub fn StageControls(props: StageControlsProps) -> Element {
 }
 
 /// Render a labeled range slider with an optional description.
+/// Build the DOM id for an optional description element.
+///
+/// Returns an empty string when `description` is empty (i.e. no description
+/// element will be rendered), so callers can gate `aria-describedby` on the
+/// result being non-empty.
+fn description_element_id(control_id: &str, description: &str) -> String {
+    if description.is_empty() {
+        String::new()
+    } else {
+        format!("{control_id}_desc")
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::if_not_else)]
 fn render_slider(
     id: &str,
@@ -508,11 +521,7 @@ fn render_slider(
     let label = label.to_string();
     let description = description.to_string();
 
-    let desc_id = if description.is_empty() {
-        String::new()
-    } else {
-        format!("{id}_desc")
-    };
+    let desc_id = description_element_id(&id, &description);
 
     rsx! {
         div { class: "flex flex-col gap-1",
@@ -571,11 +580,7 @@ fn render_toggle(
     let id = id.to_string();
     let label = label.to_string();
     let description = description.to_string();
-    let desc_id = if description.is_empty() {
-        String::new()
-    } else {
-        format!("{id}_desc")
-    };
+    let desc_id = description_element_id(&id, &description);
 
     rsx! {
         div { class: "flex flex-col gap-1",
@@ -657,11 +662,7 @@ fn render_select(
     let id = id.to_string();
     let label = label.to_string();
     let description = description.to_string();
-    let desc_id = if description.is_empty() {
-        String::new()
-    } else {
-        format!("{id}_desc")
-    };
+    let desc_id = description_element_id(&id, &description);
     let options: Vec<(String, String)> = options
         .iter()
         .map(|(v, l)| ((*v).to_string(), (*l).to_string()))
