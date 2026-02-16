@@ -533,9 +533,6 @@ fn app() -> Element {
                 }
             }
 
-            // Info modal and ExportPanel are rendered after #app-root
-            // so the `inert` attribute on #app-root can trap focus.
-
             // Main content area
             main { id: "main-content", class: "flex-1 flex flex-col gap-2 lg:gap-4 p-3 lg:p-4 min-w-0 min-h-0 overflow-y-auto",
                 // Left column: Preview + Filmstrip + Controls
