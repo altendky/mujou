@@ -142,7 +142,7 @@ pub fn FileUpload(props: FileUploadProps) -> Element {
             }
 
             if let Some(ref err) = error() {
-                span { class: "text-[var(--text-error)] text-sm",
+                span { class: "text-[var(--text-error)] text-sm", role: "alert",
                     "{err}"
                 }
             }
