@@ -100,10 +100,12 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         config_json: config_json.as_deref(),
                     };
                     let polyline = res.final_polyline();
+                    let mask_shape = res.masked.as_ref().map(|mr| &mr.shape);
                     let svg = mujou_export::to_svg(
                         std::slice::from_ref(polyline),
                         res.dimensions,
                         &metadata,
+                        mask_shape,
                     );
                     let download_name = format!("{filename}_{timestamp}.svg");
                     if let Err(e) =

@@ -67,11 +67,12 @@ fn cherry_blossoms_pipeline_to_svg() {
         "expected non-empty polyline from cherry blossoms image"
     );
 
-    // Export to SVG.
+    // Export to SVG (no mask — circular_mask=false in this test config).
     let svg = mujou_export::to_svg(
         &[result.polyline],
         result.dimensions,
         &mujou_export::SvgMetadata::default(),
+        None,
     );
 
     // Basic structural assertions.
