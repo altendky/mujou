@@ -53,6 +53,10 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Joiner::Mst)]
     joiner: Joiner,
 
+    /// Parity-fixing strategy for MST joiner.
+    #[arg(long, value_enum, default_value_t = Parity::Greedy)]
+    parity_strategy: Parity,
+
     /// Disable circular mask.
     #[arg(long)]
     no_mask: bool,
@@ -102,6 +106,15 @@ enum Joiner {
     Retrace,
     /// MST-based segment-to-segment join with Eulerian path.
     Mst,
+}
+
+/// Parity-fixing strategy selection.
+#[derive(Clone, Copy, ValueEnum)]
+enum Parity {
+    /// Greedy nearest-neighbor pairing by Euclidean distance.
+    Greedy,
+    /// Optimal matching by graph distance (DP for small n, greedy fallback).
+    Optimal,
 }
 
 /// Downsample resampling filter selection.
@@ -157,6 +170,10 @@ fn config_from_cli(cli: &Cli) -> Result<mujou_pipeline::PipelineConfig, String> 
             Joiner::Straight => mujou_pipeline::PathJoinerKind::StraightLine,
             Joiner::Retrace => mujou_pipeline::PathJoinerKind::Retrace,
             Joiner::Mst => mujou_pipeline::PathJoinerKind::Mst,
+        },
+        parity_strategy: match cli.parity_strategy {
+            Parity::Greedy => mujou_pipeline::ParityStrategy::Greedy,
+            Parity::Optimal => mujou_pipeline::ParityStrategy::Optimal,
         },
         circular_mask: !cli.no_mask,
         mask_diameter: cli.mask_diameter,

@@ -12,12 +12,14 @@
 //!
 //! This is a pure function with no I/O -- it returns a `String`.
 
+use std::fmt::Write;
+
 use svg::Document;
 use svg::node::element::path::Data;
 use svg::node::element::{Description, Element, Path, Title};
 use svg::node::{Node, Text, Value};
 
-use mujou_pipeline::{Dimensions, Polyline};
+use mujou_pipeline::{Dimensions, MstEdgeInfo, Polyline};
 
 /// Metadata to embed in the SVG document.
 ///
@@ -86,6 +88,111 @@ pub fn build_path_data(polyline: &Polyline) -> String {
     }
     String::from(Value::from(data))
 }
+
+// ---------------------------------------------------------------------------
+// Shared helpers for diagnostic SVG functions (manual string formatting)
+// ---------------------------------------------------------------------------
+
+/// Escape the five XML special characters for safe embedding in element
+/// text content and attribute values.
+///
+/// Handles `&` (must be first), `<`, `>`, `"`, and `'`.
+fn xml_escape(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        match ch {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+/// Write the SVG preamble: XML declaration, opening `<svg>` tag, and
+/// optional `<title>`, `<desc>`, and `<metadata>` elements.
+///
+/// Used by the diagnostic SVG functions which still use manual string
+/// formatting (the primary [`to_svg`] uses the `svg` crate).
+fn write_svg_preamble(out: &mut String, dimensions: Dimensions, metadata: &SvgMetadata<'_>) {
+    // XML declaration
+    let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
+
+    // Opening <svg> tag with namespace, explicit dimensions, and viewBox
+    let _ = writeln!(
+        out,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
+        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
+    );
+
+    // Optional <title> element
+    if let Some(title) = metadata.title {
+        let _ = writeln!(out, "  <title>{}</title>", xml_escape(title));
+    }
+
+    // Optional <desc> element
+    if let Some(description) = metadata.description {
+        let _ = writeln!(out, "  <desc>{}</desc>", xml_escape(description));
+    }
+
+    // Optional <metadata> element with structured pipeline config
+    if let Some(config_json) = metadata.config_json {
+        let _ = writeln!(out, "  <metadata>");
+        let _ = writeln!(
+            out,
+            "    <mujou:pipeline xmlns:mujou=\"https://mujou.app/ns/1\">{}</mujou:pipeline>",
+            xml_escape(config_json),
+        );
+        let _ = writeln!(out, "  </metadata>");
+    }
+}
+
+/// Build the SVG `d` attribute string for a polyline (manual formatting).
+///
+/// Returns `None` if the polyline has fewer than 2 points (cannot form
+/// a visible line segment).  Coordinates are formatted to 1 decimal
+/// place (0.1 px precision).
+fn polyline_to_path_d(polyline: &Polyline) -> Option<String> {
+    let points = polyline.points();
+    if points.len() < 2 {
+        return None;
+    }
+    Some(
+        points
+            .iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let cmd = if i == 0 { "M" } else { "L" };
+                format!("{cmd} {:.1} {:.1}", p.x, p.y)
+            })
+            .collect::<Vec<_>>()
+            .join(" "),
+    )
+}
+
+/// Write polyline `<path>` elements at the given indentation level.
+///
+/// Each polyline with 2+ points becomes a `<path>` element.  When
+/// `attrs` is non-empty it is appended after the `d` attribute
+/// (e.g. `fill="none" stroke="black" stroke-width="1"`).
+fn write_polyline_paths(out: &mut String, polylines: &[Polyline], indent: &str, attrs: &str) {
+    for polyline in polylines {
+        if let Some(d) = polyline_to_path_d(polyline) {
+            if attrs.is_empty() {
+                let _ = writeln!(out, r#"{indent}<path d="{d}"/>"#);
+            } else {
+                let _ = writeln!(out, r#"{indent}<path d="{d}" {attrs}/>"#);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Primary SVG export (uses `svg` crate)
+// ---------------------------------------------------------------------------
 
 /// Serialize polylines into an SVG document string.
 ///
@@ -173,6 +280,283 @@ pub fn to_svg(
 
     // The svg crate omits the XML declaration, so we prepend it.
     format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n{doc}\n")
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostic SVG exports (manual string formatting)
+// ---------------------------------------------------------------------------
+
+/// Serialize polylines into a diagnostic SVG with MST edges highlighted.
+///
+/// Produces the same output as [`to_svg`] but additionally renders each
+/// MST connecting edge as a red `<line>` element, grouped under
+/// `<g id="mst-edges">`.  This makes it visually obvious which lines
+/// are new connections introduced by the MST joiner vs. original contour
+/// geometry.
+///
+/// Each MST edge line element includes a `data-weight` attribute with
+/// the edge weight and a `data-polys` attribute identifying the
+/// connected polyline indices.
+#[must_use]
+pub fn to_diagnostic_svg(
+    polylines: &[Polyline],
+    dimensions: Dimensions,
+    metadata: &SvgMetadata<'_>,
+    mst_edges: &[MstEdgeInfo],
+) -> String {
+    let mut out = String::new();
+
+    write_svg_preamble(&mut out, dimensions, metadata);
+
+    // Dark background for visibility
+    let _ = writeln!(
+        out,
+        "  <rect width=\"{}\" height=\"{}\" fill=\"#1a1a1a\"/>",
+        dimensions.width, dimensions.height,
+    );
+
+    // Contour paths in white
+    let _ = writeln!(
+        out,
+        r#"  <g id="contours" stroke="white" stroke-width="1" fill="none">"#
+    );
+    write_polyline_paths(&mut out, polylines, "    ", "");
+    let _ = writeln!(out, "  </g>");
+
+    // MST connecting edges in red
+    if !mst_edges.is_empty() {
+        let _ = writeln!(
+            out,
+            r"  <!-- MST connecting edges: {} total -->",
+            mst_edges.len(),
+        );
+        let _ = writeln!(
+            out,
+            r#"  <g id="mst-edges" stroke="red" stroke-width="1.5" opacity="0.9">"#,
+        );
+        for (i, edge) in mst_edges.iter().enumerate() {
+            let _ = writeln!(
+                out,
+                r#"    <line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" data-weight="{:.2}" data-polys="{},{}" data-index="{}"/>"#,
+                edge.point_a.0,
+                edge.point_a.1,
+                edge.point_b.0,
+                edge.point_b.1,
+                edge.weight,
+                edge.poly_a,
+                edge.poly_b,
+                i,
+            );
+        }
+        let _ = writeln!(out, "  </g>");
+    }
+
+    // Closing tag
+    let _ = writeln!(out, "</svg>");
+
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Segment diagnostic SVG
+// ---------------------------------------------------------------------------
+
+/// Distinct colors for the top-N highlighted segments.
+///
+/// Chosen for visibility against a dark background and mutual
+/// distinguishability. The palette cycles if `top_n` exceeds the
+/// array length.
+const SEGMENT_COLORS: &[&str] = &[
+    "#ff3333", // red
+    "#ff8800", // orange
+    "#ffdd00", // yellow
+    "#33cc33", // green
+    "#3399ff", // blue
+];
+
+/// A single segment identified for highlighting.
+struct RankedSegment {
+    /// Polyline index within the input slice.
+    poly_idx: usize,
+    /// Segment index within the polyline (from point `seg_idx` to `seg_idx + 1`).
+    seg_idx: usize,
+    /// Start point.
+    from: (f64, f64),
+    /// End point.
+    to: (f64, f64),
+    /// Euclidean length in pixels.
+    length: f64,
+}
+
+/// Generate a diagnostic SVG highlighting the longest segments.
+///
+/// Renders all polylines in white on a dark background, then overlays
+/// the `top_n` longest individual segments in distinct colors with a
+/// legend.  This makes it easy to visually identify unexpectedly long
+/// segments — whether they are MST connecting edges, retrace artifacts,
+/// contour segments, or algorithmic bugs.
+///
+/// Each highlighted segment `<line>` element includes `data-rank`,
+/// `data-length`, `data-from`, and `data-to` attributes for
+/// programmatic inspection.
+#[must_use]
+#[allow(clippy::too_many_lines)]
+pub fn to_segment_diagnostic_svg(
+    polylines: &[Polyline],
+    dimensions: Dimensions,
+    metadata: &SvgMetadata<'_>,
+    top_n: usize,
+) -> String {
+    let mut out = String::new();
+
+    write_svg_preamble(&mut out, dimensions, metadata);
+
+    // Dark background for visibility
+    let _ = writeln!(
+        out,
+        "  <rect width=\"{}\" height=\"{}\" fill=\"#1a1a1a\"/>",
+        dimensions.width, dimensions.height,
+    );
+
+    // Contour paths in white
+    let _ = writeln!(
+        out,
+        r#"  <g id="contours" stroke="white" stroke-width="1" fill="none">"#
+    );
+    write_polyline_paths(&mut out, polylines, "    ", "");
+    let _ = writeln!(out, "  </g>");
+
+    // Find the top N longest segments across all polylines.
+    let mut all_segments: Vec<RankedSegment> = Vec::new();
+    for (poly_idx, polyline) in polylines.iter().enumerate() {
+        let pts = polyline.points();
+        for seg_idx in 0..pts.len().saturating_sub(1) {
+            let from = pts[seg_idx];
+            let to = pts[seg_idx + 1];
+            let length = from.distance(to);
+            all_segments.push(RankedSegment {
+                poly_idx,
+                seg_idx,
+                from: (from.x, from.y),
+                to: (to.x, to.y),
+                length,
+            });
+        }
+    }
+
+    // Sort descending by length, take top N.
+    all_segments.sort_by(|a, b| {
+        b.length
+            .partial_cmp(&a.length)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    all_segments.truncate(top_n);
+
+    // Highlighted segments
+    if !all_segments.is_empty() {
+        let _ = writeln!(
+            out,
+            r"  <!-- Top {} longest segments -->",
+            all_segments.len(),
+        );
+        let _ = writeln!(
+            out,
+            r#"  <g id="top-segments" stroke-width="3" opacity="0.9" fill="none">"#,
+        );
+        for (rank, seg) in all_segments.iter().enumerate() {
+            let color = SEGMENT_COLORS[rank % SEGMENT_COLORS.len()];
+            let _ = writeln!(
+                out,
+                r#"    <line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" data-rank="{}" data-length="{:.2}" data-from="{:.1},{:.1}" data-to="{:.1},{:.1}"/>"#,
+                seg.from.0,
+                seg.from.1,
+                seg.to.0,
+                seg.to.1,
+                color,
+                rank + 1,
+                seg.length,
+                seg.from.0,
+                seg.from.1,
+                seg.to.0,
+                seg.to.1,
+            );
+        }
+        let _ = writeln!(out, "  </g>");
+
+        // Legend in the top-left corner.
+        //
+        // Compute an adaptive width based on the longest label text so
+        // the background rect always encloses the labels, even for
+        // images with large coordinate values.
+        let labels: Vec<String> = all_segments
+            .iter()
+            .enumerate()
+            .map(|(rank, seg)| {
+                format!(
+                    "#{}: {:.1}px  ({:.0},{:.0})->({:.0},{:.0})  poly={} seg={}",
+                    rank + 1,
+                    seg.length,
+                    seg.from.0,
+                    seg.from.1,
+                    seg.to.0,
+                    seg.to.1,
+                    seg.poly_idx,
+                    seg.seg_idx,
+                )
+            })
+            .collect();
+        let header_text = format!("Top {} longest segments", all_segments.len());
+        let max_label_chars = labels
+            .iter()
+            .map(String::len)
+            .chain(std::iter::once(header_text.len()))
+            .max()
+            .unwrap_or(0);
+        // Monospace font-size 12 ≈ 7.2px per character.  Add padding
+        // for the color swatch (18px) and left/right margins (16+8).
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
+        let legend_width = (max_label_chars as f64).mul_add(7.2, 42.0) as usize;
+
+        let _ = writeln!(
+            out,
+            r#"  <g id="legend" font-family="monospace" font-size="12">"#
+        );
+        let legend_height = 20 + all_segments.len() * 18;
+        let _ = writeln!(
+            out,
+            "    <rect x=\"8\" y=\"8\" width=\"{legend_width}\" height=\"{legend_height}\" rx=\"4\" fill=\"#000000\" opacity=\"0.7\"/>",
+        );
+        let _ = writeln!(
+            out,
+            r#"    <text x="16" y="24" fill="white" font-weight="bold">{header_text}</text>"#,
+        );
+        for (rank, label) in labels.iter().enumerate() {
+            let color = SEGMENT_COLORS[rank % SEGMENT_COLORS.len()];
+            let y = 42 + rank * 18;
+            // Color swatch
+            let _ = writeln!(
+                out,
+                r#"    <rect x="16" y="{}" width="12" height="12" fill="{}"/>"#,
+                y - 9,
+                color,
+            );
+            // Label
+            let _ = writeln!(
+                out,
+                r#"    <text x="34" y="{y}" fill="white">{label}</text>"#,
+            );
+        }
+        let _ = writeln!(out, "  </g>");
+    }
+
+    // Closing tag
+    let _ = writeln!(out, "</svg>");
+
+    out
 }
 
 #[cfg(test)]
@@ -494,6 +878,23 @@ mod tests {
         let path_pos = svg.find("<path").unwrap();
         assert!(desc_pos < metadata_pos, "desc should come before metadata");
         assert!(metadata_pos < path_pos, "metadata should come before paths");
+    }
+
+    // --- XML escaping (used by diagnostic SVG helpers) ---
+
+    #[test]
+    fn xml_escape_handles_all_special_chars() {
+        assert_eq!(xml_escape("&<>\"'"), "&amp;&lt;&gt;&quot;&apos;");
+    }
+
+    #[test]
+    fn xml_escape_passes_through_plain_text() {
+        assert_eq!(xml_escape("hello world 123"), "hello world 123");
+    }
+
+    #[test]
+    fn xml_escape_empty_string() {
+        assert_eq!(xml_escape(""), "");
     }
 
     // --- End-to-end: process() -> to_svg() ---
