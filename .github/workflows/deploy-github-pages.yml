@@ -46,6 +46,14 @@ jobs:
       - name: Build WASM app
         run: dx bundle --release --package mujou --platform web --base-path app
 
+      - name: Generate OG image
+        run: |
+          cargo run --release --bin mujou-fade -- \
+            -o target/og-image.png \
+            --line-width 0.3% \
+            --fade-center 40,40 \
+            --fade-angle 15
+
       - name: Assemble deploy directory
         env:
           REPO_URL: ${{ github.server_url }}/${{ github.repository }}
@@ -55,6 +63,7 @@ jobs:
           ./scripts/render-template.py deploy/index.html deploy/index.html \
             "REPO_URL=${REPO_URL}" \
             "ANALYTICS=@site/analytics.html"
+          cp target/og-image.png deploy/og-image.png
           cp -r target/dx/mujou/release/web/public/* deploy/app/
           cp deploy/app/index.html deploy/app/404.html
 
