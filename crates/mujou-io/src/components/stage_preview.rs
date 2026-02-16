@@ -262,6 +262,10 @@ pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline], w: u32, h: u32) 
 
 /// Number of longest segments to highlight in the diagnostic overlay.
 const TOP_N_SEGMENTS: usize = 5;
+const _: () = assert!(
+    TOP_N_SEGMENTS <= SEGMENT_COLORS.len(),
+    "Need at least as many colors as TOP_N_SEGMENTS"
+);
 
 /// Render MST connecting edges as red SVG `<line>` elements.
 fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
