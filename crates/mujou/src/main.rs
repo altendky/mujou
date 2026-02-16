@@ -519,7 +519,10 @@ fn app() -> Element {
                         class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
                         title: "Export",
                         aria_label: "Export",
-                        onclick: move |_| show_export.toggle(),
+                        onclick: move |_| {
+                            show_info.set(false);
+                            show_export.toggle();
+                        },
                         Icon { width: 20, height: 20, icon: LdDownload }
                     }
                     button {
@@ -527,7 +530,10 @@ fn app() -> Element {
                         class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
                         title: "About this app",
                         aria_label: "About this app",
-                        onclick: move |_| show_info.toggle(),
+                        onclick: move |_| {
+                            show_export.set(false);
+                            show_info.toggle();
+                        },
                         Icon { width: 20, height: 20, icon: LdInfo }
                     }
                 }
