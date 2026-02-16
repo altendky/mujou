@@ -124,26 +124,40 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
 
     rsx! {
         div {
-            class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]",
+            class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-[var(--backdrop)]",
+            // Escape key dismisses the modal.
+            onkeydown: move |e: KeyboardEvent| {
+                if e.key() == Key::Escape {
+                    show.set(false);
+                }
+            },
             // Backdrop — click outside the card to dismiss.
             onclick: move |_| show.set(false),
             // Card — stop propagation so clicking inside doesn't dismiss.
             div {
+                id: "export-dialog",
+                role: "dialog",
+                "aria-modal": "true",
+                "aria-labelledby": "export-dialog-title",
                 class: "relative z-10 w-full max-w-sm mx-4 p-6 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]",
                 onclick: move |e| e.stop_propagation(),
-                h2 { class: "text-lg font-semibold mb-4 text-[var(--text-heading)]",
+                h2 {
+                    id: "export-dialog-title",
+                    class: "text-lg font-semibold mb-4 text-[var(--text-heading)]",
                     "Export"
                 }
 
                 if let Some(ref err) = export_error() {
-                    p { class: "text-[var(--text-error)] text-sm mb-3", "{err}" }
+                    p { class: "text-[var(--text-error)] text-sm mb-3", role: "alert", "{err}" }
                 }
 
                 // Format checkboxes
                 div { class: "space-y-3 mb-5",
                     label {
                         class: if has_result { label_enabled } else { label_disabled },
+                        r#for: "export-svg-checkbox",
                         input {
+                            id: "export-svg-checkbox",
                             r#type: "checkbox",
                             checked: svg_selected(),
                             disabled: !has_result,
@@ -203,6 +217,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                             target: "_blank",
                             rel: "noopener noreferrer",
                             class: "underline text-[var(--btn-primary)] hover:opacity-80",
+                            aria_label: "app.grounded.so (opens in new tab)",
                             "app.grounded.so"
                         }
                     }

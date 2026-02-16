@@ -123,6 +123,7 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
             let polylines = result.polylines_for_stage(selected);
             let view_box = compute_view_box(&polylines, w, h);
             let path_data = build_multi_path_data(&polylines);
+            let stage_label = selected.label();
 
             rsx! {
                 svg {
@@ -130,6 +131,8 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
                     view_box: "{view_box}",
                     class: "w-full h-full bg-[var(--preview-bg)] rounded",
                     "preserveAspectRatio": "xMidYMid meet",
+                    role: "img",
+                    "aria-label": "{stage_label} stage preview",
 
                     for (i, d) in path_data.iter().enumerate() {
                         path {
@@ -155,6 +158,8 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
                     view_box: "{view_box}",
                     class: "w-full h-full bg-[var(--preview-bg)] rounded",
                     "preserveAspectRatio": "xMidYMid meet",
+                    role: "img",
+                    "aria-label": "Join stage preview",
 
                     if !d.is_empty() {
                         path {

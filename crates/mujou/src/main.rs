@@ -161,6 +161,61 @@ fn app() -> Element {
     // Controls visibility of the export popup.
     let mut show_export = use_signal(|| false);
 
+    // --- Accessibility: focus management and inert background ---
+
+    // Track whether each modal was previously open so we can restore
+    // focus to the trigger button on close (but not on initial mount).
+    let mut info_was_open = use_signal(|| false);
+    let mut export_was_open = use_signal(|| false);
+
+    // Set `inert` on #app-root when any modal is open.  This prevents
+    // keyboard focus from reaching background content while a dialog
+    // is active, providing a native focus trap without JS listeners.
+    use_effect(move || {
+        let any_modal = show_info() || show_export();
+        if let Some(el) = web_sys::window()
+            .and_then(|w| w.document())
+            .and_then(|d| d.get_element_by_id("app-root"))
+        {
+            if any_modal {
+                let _ = el.set_attribute("inert", "");
+            } else {
+                let _ = el.remove_attribute("inert");
+            }
+        }
+    });
+
+    // Focus management for the info modal: focus the close button on
+    // open and restore focus to the trigger button on close.
+    use_effect(move || {
+        let open = show_info();
+        if open {
+            info_was_open.set(true);
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(0).await;
+                focus_element("info-close-btn");
+            });
+        } else if *info_was_open.peek() {
+            info_was_open.set(false);
+            focus_element("info-trigger");
+        }
+    });
+
+    // Focus management for the export modal.
+    use_effect(move || {
+        let open = show_export();
+        if open {
+            export_was_open.set(true);
+            spawn(async move {
+                gloo_timers::future::TimeoutFuture::new(0).await;
+                focus_element("export-svg-checkbox");
+            });
+        } else if *export_was_open.peek() {
+            export_was_open.set(false);
+            focus_element("export-trigger");
+        }
+    });
+
     // --- File upload handler ---
     let on_upload = move |(bytes, name): (Vec<u8>, String)| {
         // Strip extension for the export filename.
@@ -431,17 +486,13 @@ fn app() -> Element {
             href: "https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400&family=Noto+Sans+JP:wght@400&display=swap",
         }
 
-        div { class: "h-screen bg-(--bg) text-(--text) flex flex-col overflow-hidden",
-            // Dismiss popups on Escape key (export takes priority).
-            onkeydown: move |e: KeyboardEvent| {
-                if e.key() == Key::Escape {
-                    if show_export() {
-                        show_export.set(false);
-                    } else if show_info() {
-                        show_info.set(false);
-                    }
-                }
-            },
+        div { id: "app-root", class: "h-screen bg-(--bg) text-(--text) flex flex-col overflow-hidden",
+            // Skip to main content (visually hidden, revealed on focus for keyboard users)
+            a {
+                href: "#main-content",
+                class: "sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:bg-[var(--btn-primary)] focus:text-white focus:px-4 focus:py-2 focus:rounded focus:outline-none",
+                "Skip to main content"
+            }
             // Theme toggle (fixed-positioned via shared theme.css;
             // content injected by shared theme-toggle.js)
             button {
@@ -464,6 +515,7 @@ fn app() -> Element {
                         on_upload: on_upload,
                     }
                     button {
+                        id: "export-trigger",
                         class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
                         title: "Export",
                         aria_label: "Export",
@@ -471,6 +523,7 @@ fn app() -> Element {
                         Icon { width: 20, height: 20, icon: LdDownload }
                     }
                     button {
+                        id: "info-trigger",
                         class: "inline-flex items-center justify-center w-[var(--btn-height)] h-[var(--btn-height)] bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] rounded cursor-pointer text-white transition-colors",
                         title: "About this app",
                         aria_label: "About this app",
@@ -480,64 +533,11 @@ fn app() -> Element {
                 }
             }
 
-            // Info modal — full-screen overlay with centered card.
-            // Follows the same fixed-inset pattern as the drag-and-drop
-            // overlay in upload.rs. Clicking the backdrop dismisses it.
-            if show_info() {
-                div {
-                    class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-[var(--backdrop)]",
-                    // Backdrop — click outside the card to dismiss.
-                    onclick: move |_| show_info.set(false),
-                    // Card — stop propagation so clicking inside doesn't dismiss.
-                    div {
-                        class: "relative z-10 w-full max-w-md mx-4 p-6 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]",
-                        onclick: move |e| e.stop_propagation(),
-                        h2 { class: "text-lg font-semibold mb-3 text-[var(--text-heading)]",
-                            "About mujou"
-                        }
-                        p { class: "mb-3",
-                            "Image to vector path converter for sand tables and CNC devices."
-                        }
-                        p { class: "text-sm text-[var(--text-secondary)] mb-4",
-                            "Upload an image \u{2192} adjust parameters \u{2192} export SVG or G-code for your sand table or CNC device."
-                        }
-                        button {
-                            class: "text-sm px-4 py-1.5 rounded bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] text-white cursor-pointer transition-colors",
-                            onclick: move |_| show_info.set(false),
-                            "Close"
-                        }
-                    }
-                }
-            }
-
-            // Export popup — triggered by the download button in the header.
-            ExportPanel {
-                result: result(),
-                filename: filename(),
-                config_description: {
-                    let cfg = committed_config();
-                    format!(
-                        "blur={}, canny={}/{}, simplify={}, tracer={:?}, joiner={:?}, mask={}, res={}",
-                        cfg.blur_sigma,
-                        cfg.canny_low,
-                        cfg.canny_high,
-                        cfg.simplify_tolerance,
-                        cfg.contour_tracer,
-                        cfg.path_joiner,
-                        if cfg.circular_mask {
-                            format!("{:.0}%", cfg.mask_diameter * 100.0)
-                        } else {
-                            "off".to_owned()
-                        },
-                        cfg.working_resolution,
-                    )
-                },
-                config_json: serde_json::to_string(&committed_config()).ok(),
-                show: show_export,
-            }
+            // Info modal and ExportPanel are rendered after #app-root
+            // so the `inert` attribute on #app-root can trap focus.
 
             // Main content area
-            div { class: "flex-1 flex flex-col gap-2 lg:gap-4 p-3 lg:p-4 min-w-0 min-h-0 overflow-y-auto",
+            main { id: "main-content", class: "flex-1 flex flex-col gap-2 lg:gap-4 p-3 lg:p-4 min-w-0 min-h-0 overflow-y-auto",
                 // Left column: Preview + Filmstrip + Controls
                 div { class: "flex-1 flex flex-col gap-2 lg:gap-3 min-w-0 min-h-0",
 
@@ -562,7 +562,10 @@ fn app() -> Element {
                             // and re-processing)
                             if processing() {
                                 div { class: "absolute inset-0 z-[60] flex flex-col items-center pointer-events-none",
-                                    div { class: "my-auto pointer-events-auto bg-[var(--surface)] rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
+                                    div {
+                                        class: "my-auto pointer-events-auto bg-[var(--surface)] rounded-lg px-4 py-3 shadow flex flex-col items-center gap-2 min-w-48",
+                                        role: "status",
+                                        aria_live: "polite",
                                         // Total elapsed time
                                         div { class: "flex justify-between w-full text-sm text-(--text-secondary)",
                                             span {
@@ -582,7 +585,7 @@ fn app() -> Element {
                                                     class: "flex justify-between py-0.5",
                                                     span {
                                                         class: match entry.status {
-                                                            StageStatus::Running => "text-(--text) font-medium animate-pulse",
+                                                            StageStatus::Running => "text-(--text) font-medium animate-pulse motion-reduce:animate-none",
                                                             StageStatus::Completed => "text-(--text-secondary)",
                                                             StageStatus::Pending => "text-(--text-placeholder)",
                                                         },
@@ -590,7 +593,7 @@ fn app() -> Element {
                                                     }
                                                     span {
                                                         class: match entry.status {
-                                                            StageStatus::Running => "text-(--text) tabular-nums animate-pulse",
+                                                            StageStatus::Running => "text-(--text) tabular-nums animate-pulse motion-reduce:animate-none",
                                                             StageStatus::Completed => "text-(--text-secondary) tabular-nums",
                                                             StageStatus::Pending => "",
                                                         },
@@ -673,7 +676,7 @@ fn app() -> Element {
 
                     // Error display
                     if let Some(ref err) = error() {
-                        div { class: "bg-(--error-bg) border border-(--error-border) rounded p-3",
+                        div { class: "bg-(--error-bg) border border-(--error-border) rounded p-3", role: "alert",
                             p { class: "text-(--text-error) text-sm", "{err}" }
                         }
                     }
@@ -682,6 +685,74 @@ fn app() -> Element {
             }
 
 
+        }
+
+        // Info modal — rendered outside #app-root so the `inert` attribute
+        // on #app-root traps focus within the modal while it is open.
+        if show_info() {
+            div {
+                class: "fixed inset-0 z-[60] flex items-start justify-center pt-[15vh] bg-[var(--backdrop)]",
+                // Escape key dismisses the modal.
+                onkeydown: move |e: KeyboardEvent| {
+                    if e.key() == Key::Escape {
+                        show_info.set(false);
+                    }
+                },
+                // Backdrop — click outside the card to dismiss.
+                onclick: move |_| show_info.set(false),
+                // Card — stop propagation so clicking inside doesn't dismiss.
+                div {
+                    id: "info-dialog",
+                    role: "dialog",
+                    "aria-modal": "true",
+                    "aria-labelledby": "info-dialog-title",
+                    class: "relative z-10 w-full max-w-md mx-4 p-6 rounded-lg shadow-lg bg-[var(--surface)] border border-[var(--border)] text-[var(--text)]",
+                    onclick: move |e| e.stop_propagation(),
+                    h2 {
+                        id: "info-dialog-title",
+                        class: "text-lg font-semibold mb-3 text-[var(--text-heading)]",
+                        "About mujou"
+                    }
+                    p { class: "mb-3",
+                        "Image to vector path converter for sand tables and CNC devices."
+                    }
+                    p { class: "text-sm text-[var(--text-secondary)] mb-4",
+                        "Upload an image \u{2192} adjust parameters \u{2192} export SVG or G-code for your sand table or CNC device."
+                    }
+                    button {
+                        id: "info-close-btn",
+                        class: "text-sm px-4 py-1.5 rounded bg-[var(--btn-primary)] hover:bg-[var(--btn-primary-hover)] text-white cursor-pointer transition-colors",
+                        onclick: move |_| show_info.set(false),
+                        "Close"
+                    }
+                }
+            }
+        }
+
+        // Export popup — rendered outside #app-root for focus management.
+        ExportPanel {
+            result: result(),
+            filename: filename(),
+            config_description: {
+                let cfg = committed_config();
+                format!(
+                    "blur={}, canny={}/{}, simplify={}, tracer={:?}, joiner={:?}, mask={}, res={}",
+                    cfg.blur_sigma,
+                    cfg.canny_low,
+                    cfg.canny_high,
+                    cfg.simplify_tolerance,
+                    cfg.contour_tracer,
+                    cfg.path_joiner,
+                    if cfg.circular_mask {
+                        format!("{:.0}%", cfg.mask_diameter * 100.0)
+                    } else {
+                        "off".to_owned()
+                    },
+                    cfg.working_resolution,
+                )
+            },
+            config_json: serde_json::to_string(&committed_config()).ok(),
+            show: show_export,
         }
     }
 }
@@ -777,12 +848,13 @@ fn ConfigButtons(
                 class: if show_descriptions() { "ring-2 ring-[var(--border-accent)] ring-offset-1 ring-offset-[var(--surface)]" },
                 title: "Toggle parameter descriptions",
                 aria_label: "Toggle parameter descriptions",
+                "aria-pressed": if show_descriptions() { "true" } else { "false" },
                 onclick: move |_| show_descriptions.toggle(),
                 Icon { width: 20, height: 20, icon: LdInfo }
             }
 
             if let Some(ref err) = error_msg() {
-                p { class: "text-[var(--text-error)] text-xs break-words",
+                p { class: "text-[var(--text-error)] text-xs break-words", role: "alert",
                     "{err}"
                 }
             }
@@ -805,4 +877,19 @@ fn is_dark_from_dom() -> bool {
         .and_then(|d| d.document_element())
         .and_then(|el| el.get_attribute("data-theme"))
         .is_some_and(|t| t == "dark")
+}
+
+/// Move keyboard focus to an element by its DOM `id`.
+///
+/// Used for dialog focus management: focusing the first interactive
+/// element when a dialog opens and restoring focus to the trigger
+/// when it closes.
+fn focus_element(id: &str) {
+    if let Some(el) = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.get_element_by_id(id))
+        && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
+    {
+        let _ = html.focus();
+    }
 }

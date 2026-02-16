@@ -32,6 +32,8 @@ pub fn Preview(props: PreviewProps) -> Element {
             view_box: "{view_box}",
             class: "w-full h-full bg-[var(--preview-bg)] rounded",
             "preserveAspectRatio": "xMidYMid meet",
+            role: "img",
+            "aria-label": "Traced path preview",
 
             if !d.is_empty() {
                 path {

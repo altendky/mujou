@@ -227,65 +227,71 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     )}
 
                     // ── Edge channel toggles ─────────────────────────
-                    {render_channel_heading(
-                        "Edge Channels",
-                        desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined."),
-                    )}
-                    {render_channel_toggle(
-                        "ch_luminance",
-                        "Luminance",
-                        channels.luminance,
-                        channels.count() <= 1 && channels.luminance,
-                        move |v: bool| {
-                            let mut c = config_lum.clone();
-                            c.edge_channels.luminance = v;
-                            if c.edge_channels.any_enabled() { on_change.call(c); }
-                        },
-                    )}
-                    {render_channel_toggle(
-                        "ch_red",
-                        "Red",
-                        channels.red,
-                        channels.count() <= 1 && channels.red,
-                        move |v: bool| {
-                            let mut c = config_red.clone();
-                            c.edge_channels.red = v;
-                            if c.edge_channels.any_enabled() { on_change.call(c); }
-                        },
-                    )}
-                    {render_channel_toggle(
-                        "ch_green",
-                        "Green",
-                        channels.green,
-                        channels.count() <= 1 && channels.green,
-                        move |v: bool| {
-                            let mut c = config_green.clone();
-                            c.edge_channels.green = v;
-                            if c.edge_channels.any_enabled() { on_change.call(c); }
-                        },
-                    )}
-                    {render_channel_toggle(
-                        "ch_blue",
-                        "Blue",
-                        channels.blue,
-                        channels.count() <= 1 && channels.blue,
-                        move |v: bool| {
-                            let mut c = config_blue.clone();
-                            c.edge_channels.blue = v;
-                            if c.edge_channels.any_enabled() { on_change.call(c); }
-                        },
-                    )}
-                    {render_channel_toggle(
-                        "ch_saturation",
-                        "Saturation",
-                        channels.saturation,
-                        channels.count() <= 1 && channels.saturation,
-                        move |v: bool| {
-                            let mut c = config_sat.clone();
-                            c.edge_channels.saturation = v;
-                            if c.edge_channels.any_enabled() { on_change.call(c); }
-                        },
-                    )}
+                    fieldset { class: "space-y-2 pt-2 border-t border-[var(--border)]",
+                        legend { class: "text-sm text-[var(--text-heading)] font-medium",
+                            "Edge Channels"
+                        }
+                        if !desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined.").is_empty() {
+                            p { class: "text-xs text-[var(--text-secondary)]",
+                                {desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined.")}
+                            }
+                        }
+                        {render_channel_toggle(
+                            "ch_luminance",
+                            "Luminance",
+                            channels.luminance,
+                            channels.count() <= 1 && channels.luminance,
+                            move |v: bool| {
+                                let mut c = config_lum.clone();
+                                c.edge_channels.luminance = v;
+                                if c.edge_channels.any_enabled() { on_change.call(c); }
+                            },
+                        )}
+                        {render_channel_toggle(
+                            "ch_red",
+                            "Red",
+                            channels.red,
+                            channels.count() <= 1 && channels.red,
+                            move |v: bool| {
+                                let mut c = config_red.clone();
+                                c.edge_channels.red = v;
+                                if c.edge_channels.any_enabled() { on_change.call(c); }
+                            },
+                        )}
+                        {render_channel_toggle(
+                            "ch_green",
+                            "Green",
+                            channels.green,
+                            channels.count() <= 1 && channels.green,
+                            move |v: bool| {
+                                let mut c = config_green.clone();
+                                c.edge_channels.green = v;
+                                if c.edge_channels.any_enabled() { on_change.call(c); }
+                            },
+                        )}
+                        {render_channel_toggle(
+                            "ch_blue",
+                            "Blue",
+                            channels.blue,
+                            channels.count() <= 1 && channels.blue,
+                            move |v: bool| {
+                                let mut c = config_blue.clone();
+                                c.edge_channels.blue = v;
+                                if c.edge_channels.any_enabled() { on_change.call(c); }
+                            },
+                        )}
+                        {render_channel_toggle(
+                            "ch_saturation",
+                            "Saturation",
+                            channels.saturation,
+                            channels.count() <= 1 && channels.saturation,
+                            move |v: bool| {
+                                let mut c = config_sat.clone();
+                                c.edge_channels.saturation = v;
+                                if c.edge_channels.any_enabled() { on_change.call(c); }
+                            },
+                        )}
+                    }
                 }
             }
         }
@@ -472,7 +478,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
 }
 
 /// Render a labeled range slider with an optional description.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::if_not_else)]
 fn render_slider(
     id: &str,
     label: &str,
@@ -489,6 +495,12 @@ fn render_slider(
     let label = label.to_string();
     let description = description.to_string();
 
+    let desc_id = if description.is_empty() {
+        String::new()
+    } else {
+        format!("{id}_desc")
+    };
+
     rsx! {
         div { class: "flex flex-col gap-1",
             div { class: "flex justify-between text-sm",
@@ -501,7 +513,11 @@ fn render_slider(
                 }
             }
             if !description.is_empty() {
-                p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
+                p {
+                    id: "{desc_id}",
+                    class: "text-xs text-[var(--text-secondary)]",
+                    "{description}"
+                }
             }
             input {
                 r#type: "range",
@@ -510,6 +526,8 @@ fn render_slider(
                 max: "{max}",
                 step: "{step}",
                 value: "{value}",
+                "aria-valuetext": "{display}",
+                "aria-describedby": if !desc_id.is_empty() { "{desc_id}" },
                 class: "w-full accent-[var(--btn-primary)]",
                 oninput: move |e| {
                     match e.value().parse::<f64>() {
@@ -529,6 +547,7 @@ fn render_slider(
 
 /// Render a labeled toggle (checkbox styled as switch) with an optional
 /// description.
+#[allow(clippy::if_not_else)]
 fn render_toggle(
     id: &str,
     label: &str,
@@ -539,6 +558,11 @@ fn render_toggle(
     let id = id.to_string();
     let label = label.to_string();
     let description = description.to_string();
+    let desc_id = if description.is_empty() {
+        String::new()
+    } else {
+        format!("{id}_desc")
+    };
 
     rsx! {
         div { class: "flex flex-col gap-1",
@@ -551,6 +575,7 @@ fn render_toggle(
                     r#type: "checkbox",
                     id: "{id}",
                     checked: checked,
+                    "aria-describedby": if !desc_id.is_empty() { "{desc_id}" },
                     class: "w-5 h-5 accent-[var(--btn-primary)]",
                     onchange: move |e| {
                         on_change(e.checked());
@@ -558,24 +583,11 @@ fn render_toggle(
                 }
             }
             if !description.is_empty() {
-                p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
-            }
-        }
-    }
-}
-
-/// Render a section heading for the edge channel toggles.
-fn render_channel_heading(label: &str, description: &str) -> Element {
-    let label = label.to_string();
-    let description = description.to_string();
-
-    rsx! {
-        div { class: "flex flex-col gap-1 pt-2 border-t border-[var(--border)]",
-            span { class: "text-sm text-[var(--text-heading)] font-medium",
-                "{label}"
-            }
-            if !description.is_empty() {
-                p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
+                p {
+                    id: "{desc_id}",
+                    class: "text-xs text-[var(--text-secondary)]",
+                    "{description}"
+                }
             }
         }
     }
@@ -616,6 +628,7 @@ fn render_channel_toggle(
 }
 
 /// Render a labeled select dropdown with an optional description.
+#[allow(clippy::if_not_else)]
 fn render_select(
     id: &str,
     label: &str,
@@ -627,6 +640,11 @@ fn render_select(
     let id = id.to_string();
     let label = label.to_string();
     let description = description.to_string();
+    let desc_id = if description.is_empty() {
+        String::new()
+    } else {
+        format!("{id}_desc")
+    };
     let options: Vec<(String, String)> = options
         .iter()
         .map(|(v, l)| ((*v).to_string(), (*l).to_string()))
@@ -640,10 +658,15 @@ fn render_select(
                 "{label}"
             }
             if !description.is_empty() {
-                p { class: "text-xs text-[var(--text-secondary)]", "{description}" }
+                p {
+                    id: "{desc_id}",
+                    class: "text-xs text-[var(--text-secondary)]",
+                    "{description}"
+                }
             }
             select {
                 id: "{id}",
+                "aria-describedby": if !desc_id.is_empty() { "{desc_id}" },
                 class: "px-2 py-1 rounded border border-[var(--border)] bg-[var(--surface)]
                         text-[var(--text)] text-sm",
                 value: "{selected}",

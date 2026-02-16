@@ -337,7 +337,7 @@ fn generate_index_html(site_dir: &Path, manifest_dir: &Path) {
 
     let index_html = format!(
         r#"<!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
     <title>{{app_title}}</title>
     <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />

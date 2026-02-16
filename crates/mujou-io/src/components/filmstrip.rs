@@ -53,6 +53,8 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
 
     rsx! {
         div {
+            role: "group",
+            aria_label: "Pipeline stages",
             class: "flex flex-nowrap overflow-x-auto gap-2 py-2 scrollbar-thin flex-shrink-0",
 
             for stage in StageId::ALL {
@@ -114,7 +116,7 @@ fn render_tile(
 fn render_placeholder() -> Element {
     rsx! {
         div {
-            class: "w-full h-full animate-pulse bg-[var(--border)]",
+            class: "w-full h-full animate-pulse motion-reduce:animate-none bg-[var(--border)]",
             role: "status",
             aria_label: "Loading thumbnail",
         }
@@ -151,6 +153,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
                     view_box: "{view_box}",
                     class: "w-full h-full",
                     "preserveAspectRatio": "xMidYMid meet",
+                    "aria-hidden": "true",
 
                     for polyline in polylines.iter() {
                         {render_thumbnail_path(polyline)}
@@ -172,6 +175,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
                     view_box: "{view_box}",
                     class: "w-full h-full",
                     "preserveAspectRatio": "xMidYMid meet",
+                    "aria-hidden": "true",
 
                     if !d.is_empty() {
                         path {
