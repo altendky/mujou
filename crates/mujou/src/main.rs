@@ -537,7 +537,7 @@ fn app() -> Element {
             }
 
             // Main content area
-            div { class: "flex-1 flex flex-col gap-2 lg:gap-4 p-3 lg:p-4 min-w-0 min-h-0",
+            div { class: "flex-1 flex flex-col gap-2 lg:gap-4 p-3 lg:p-4 min-w-0 min-h-0 overflow-y-auto",
                 // Left column: Preview + Filmstrip + Controls
                 div { class: "flex-1 flex flex-col gap-2 lg:gap-3 min-w-0 min-h-0",
 
@@ -546,7 +546,7 @@ fn app() -> Element {
                         // image is loaded, even during first-time processing.
 
                         // Stage preview with processing overlay
-                        div { class: "relative flex-1 min-h-0",
+                        div { class: "relative flex-1 min-h-24",
                             // Preview content (stays visible during re-processing,
                             // shows placeholder when no result yet)
                             div {
