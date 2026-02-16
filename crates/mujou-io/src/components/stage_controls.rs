@@ -231,9 +231,14 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         legend { class: "text-sm text-[var(--text-heading)] font-medium",
                             "Edge Channels"
                         }
-                        if !desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined.").is_empty() {
-                            p { class: "text-xs text-[var(--text-secondary)]",
-                                {desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined.")}
+                        {
+                            let ch_desc = desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined.");
+                            rsx! {
+                                if !ch_desc.is_empty() {
+                                    p { class: "text-xs text-[var(--text-secondary)]",
+                                        "{ch_desc}"
+                                    }
+                                }
                             }
                         }
                         {render_channel_toggle(
