@@ -10,9 +10,10 @@
 //!    algorithm) until a single connected component remains.
 //!
 //! 2. **Phase 2 — Fix parity:** An Eulerian path requires exactly 0 or 2
-//!    odd-degree vertices. Greedily pair remaining odd-degree vertices and
-//!    duplicate the shortest path between each pair (duplication represents
-//!    free retracing through already-drawn grooves).
+//!    odd-degree vertices. Pair remaining odd-degree vertices and duplicate
+//!    the shortest path between each pair (duplication represents free
+//!    retracing through already-drawn grooves). The pairing strategy is
+//!    configurable via [`ParityStrategy`].
 //!
 //! 3. **Phase 3 — Hierholzer:** Find an Eulerian path (or circuit) that
 //!    traverses every edge exactly once.
@@ -30,6 +31,51 @@ use rstar::primitives::GeomWithData;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{Point, Polyline, polyline_bounding_box};
+
+// ---------------------------------------------------------------------------
+// Parity-fixing strategy
+// ---------------------------------------------------------------------------
+
+/// Algorithm for fixing odd-degree vertex parity during MST joining.
+///
+/// An Eulerian path requires exactly 0 or 2 odd-degree vertices.  When
+/// the MST-based graph has more, odd vertices must be paired and the
+/// shortest path between each pair duplicated (representing free
+/// retracing through already-drawn grooves).
+///
+/// The choice of which vertices to pair affects total retrace distance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ParityStrategy {
+    /// Greedy nearest-neighbor pairing using Euclidean distance.
+    ///
+    /// Fast heuristic: repeatedly pair the closest two odd-degree
+    /// vertices (by Euclidean distance), then duplicate the shortest
+    /// graph path between each pair.  Does not account for graph
+    /// topology when choosing pairs.
+    #[default]
+    Greedy,
+
+    /// Optimal or improved matching using graph distances.
+    ///
+    /// For small numbers of odd-degree vertices (≤ 20), computes the
+    /// minimum-weight perfect matching via dynamic programming over
+    /// bitmasks using actual graph distances (Dijkstra).  For larger
+    /// counts, falls back to greedy pairing by graph distance instead
+    /// of Euclidean distance.
+    ///
+    /// Produces equal or lower retrace distance than [`Greedy`](Self::Greedy)
+    /// at the cost of additional computation during the parity-fix phase.
+    Optimal,
+}
+
+impl std::fmt::Display for ParityStrategy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Greedy => f.write_str("Greedy"),
+            Self::Optimal => f.write_str("Optimal"),
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Type conversions at the module boundary
@@ -82,6 +128,30 @@ struct MstEdge {
     seg_a: usize,
     /// Segment index within polyline B where the connection point lies.
     seg_b: usize,
+}
+
+/// Diagnostic information about a single MST connecting edge.
+///
+/// Each MST edge represents a new straight-line connection between two
+/// previously disconnected polyline components.  These are the only
+/// visible artifacts the MST joiner introduces — all other traversal
+/// follows existing contour geometry or retrace paths.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MstEdgeInfo {
+    /// Index of the first polyline in the joiner's input contour list.
+    pub poly_a: usize,
+    /// Index of the second polyline in the joiner's input contour list.
+    pub poly_b: usize,
+    /// Connection point on polyline A (image coordinates, `(x, y)`).
+    pub point_a: (f64, f64),
+    /// Connection point on polyline B (image coordinates, `(x, y)`).
+    pub point_b: (f64, f64),
+    /// Segment index within polyline A where the connection point lies.
+    pub seg_a: usize,
+    /// Segment index within polyline B where the connection point lies.
+    pub seg_b: usize,
+    /// Euclidean distance between the two connection points (pixels).
+    pub weight: f64,
 }
 
 /// Quality metrics collected during MST-based path joining.
@@ -140,6 +210,14 @@ pub struct JoinQualityMetrics {
 
     /// Number of edges in the Eulerian graph after parity fixing.
     pub graph_edge_count_after_fix: usize,
+
+    /// Per-MST-edge diagnostic details.
+    ///
+    /// One entry per MST connecting edge, in the order Kruskal's
+    /// algorithm accepted them (ascending weight).  Use this to
+    /// identify which connections produce the longest visible
+    /// artifacts and evaluate alternative routing strategies.
+    pub mst_edge_details: Vec<MstEdgeInfo>,
 }
 
 /// Euclidean distance between two `geo::Coord` points.
@@ -605,7 +683,7 @@ fn build_graph(
                         get_or_insert(prev, &mut graph, &mut coord_to_node, &mut node_coords);
                     let n_sp = get_or_insert(*sp, &mut graph, &mut coord_to_node, &mut node_coords);
                     let dist = (prev.x - sp.x).hypot(prev.y - sp.y);
-                    if dist > 1e-12 {
+                    if n_prev != n_sp && dist > 1e-12 {
                         graph.add_edge(n_prev, n_sp, dist);
                     }
                     prev = *sp;
@@ -614,7 +692,7 @@ fn build_graph(
                 let n_end =
                     get_or_insert(seg_end, &mut graph, &mut coord_to_node, &mut node_coords);
                 let dist = (prev.x - seg_end.x).hypot(prev.y - seg_end.y);
-                if dist > 1e-12 {
+                if n_prev != n_end && dist > 1e-12 {
                     graph.add_edge(n_prev, n_end, dist);
                 }
             } else {
@@ -622,7 +700,7 @@ fn build_graph(
                 let na = get_or_insert(seg_start, &mut graph, &mut coord_to_node, &mut node_coords);
                 let nb = get_or_insert(seg_end, &mut graph, &mut coord_to_node, &mut node_coords);
                 let dist = (seg_start.x - seg_end.x).hypot(seg_start.y - seg_end.y);
-                if dist > 1e-12 {
+                if na != nb && dist > 1e-12 {
                     graph.add_edge(na, nb, dist);
                 }
             }
@@ -646,14 +724,12 @@ fn build_graph(
 
         let na = get_or_insert(snapped_a, &mut graph, &mut coord_to_node, &mut node_coords);
         let nb = get_or_insert(snapped_b, &mut graph, &mut coord_to_node, &mut node_coords);
-        let dist = (snapped_a.x - snapped_b.x).hypot(snapped_a.y - snapped_b.y);
-        if dist > 1e-12 {
-            graph.add_edge(na, nb, dist);
-        } else {
-            // Zero-length MST edge: the points coincide. Still add an edge
-            // so the graph stays connected.
-            graph.add_edge(na, nb, 0.0);
+        if na != nb {
+            let dist = (snapped_a.x - snapped_b.x).hypot(snapped_a.y - snapped_b.y);
+            graph.add_edge(na, nb, dist.max(0.0));
         }
+        // When na == nb the two endpoints snapped to the same graph
+        // node — no edge is needed (the node is already connected).
     }
 
     (graph, node_coords)
@@ -674,13 +750,13 @@ fn odd_degree_vertices(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
 /// Fix parity by duplicating shortest paths between paired odd-degree
 /// vertices.
 ///
-/// Greedily pairs each odd-degree vertex with its nearest unmatched odd
-/// peer and duplicates the shortest path between them. Duplicated edges
-/// represent retracing (visually free).
+/// Pairs odd-degree vertices and duplicates the shortest path between
+/// each pair. Duplicated edges represent retracing (visually free).
 ///
-/// Uses Euclidean distance as a fast heuristic for pairing (avoids
-/// running Dijkstra for every pair), then Dijkstra only for path
-/// reconstruction of the selected pairs.
+/// The `strategy` parameter controls how pairs are chosen:
+/// - [`ParityStrategy::Greedy`]: pair by nearest Euclidean distance (fast).
+/// - [`ParityStrategy::Optimal`]: use graph distances and, for small
+///   vertex counts, minimum-weight perfect matching via DP.
 ///
 /// Returns `(total_retrace_distance, odd_count_before, odd_count_after)`.
 ///
@@ -691,8 +767,9 @@ fn odd_degree_vertices(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
 fn fix_parity(
     graph: &mut UnGraph<(), f64>,
     node_coords: &[geo::Coord<f64>],
+    strategy: ParityStrategy,
 ) -> Result<(f64, usize, usize), String> {
-    let mut odd = odd_degree_vertices(graph);
+    let odd = odd_degree_vertices(graph);
     let odd_before = odd.len();
 
     if odd_before <= 2 {
@@ -700,19 +777,36 @@ fn fix_parity(
         return Ok((0.0, odd_before, odd_before));
     }
 
-    let mut total_retrace = 0.0;
+    let pairs = match strategy {
+        ParityStrategy::Greedy => greedy_euclidean_matching(&odd, node_coords),
+        ParityStrategy::Optimal => optimal_matching(graph, &odd, node_coords)?,
+    };
 
-    // Greedy matching using Euclidean distance as heuristic: pair each
-    // odd vertex with the nearest unmatched odd peer.
-    while odd.len() > 2 {
+    let total_retrace = apply_matching(graph, &pairs)?;
+
+    let odd_after = odd_degree_vertices(graph).len();
+    Ok((total_retrace, odd_before, odd_after))
+}
+
+/// Greedy matching by Euclidean distance (original algorithm).
+///
+/// Repeatedly pairs the closest two odd-degree vertices by Euclidean
+/// distance until at most 2 remain.
+fn greedy_euclidean_matching(
+    odd: &[NodeIndex],
+    node_coords: &[geo::Coord<f64>],
+) -> Vec<(NodeIndex, NodeIndex)> {
+    let mut remaining: Vec<NodeIndex> = odd.to_vec();
+    let mut pairs = Vec::new();
+
+    while remaining.len() > 2 {
         let mut best_i = 0;
         let mut best_j = 1;
         let mut best_dist = f64::INFINITY;
 
-        // Find the closest pair by Euclidean distance (O(n^2) but n is small).
-        for (i, &ni) in odd.iter().enumerate() {
+        for (i, &ni) in remaining.iter().enumerate() {
             let ci = node_coords[ni.index()];
-            for (j, &nj) in odd.iter().enumerate().skip(i + 1) {
+            for (j, &nj) in remaining.iter().enumerate().skip(i + 1) {
                 let cj = node_coords[nj.index()];
                 let d = (ci.x - cj.x).hypot(ci.y - cj.y);
                 if d < best_dist {
@@ -723,14 +817,309 @@ fn fix_parity(
             }
         }
 
-        // Reconstruct the shortest path between the chosen pair and
-        // duplicate each edge along it.
-        let start = odd[best_i];
-        let end = odd[best_j];
+        pairs.push((remaining[best_i], remaining[best_j]));
+
+        // Remove the matched pair (remove higher index first).
+        if best_i > best_j {
+            remaining.swap_remove(best_i);
+            remaining.swap_remove(best_j);
+        } else {
+            remaining.swap_remove(best_j);
+            remaining.swap_remove(best_i);
+        }
+    }
+
+    pairs
+}
+
+/// Maximum number of odd vertices for which full DP bitmask matching is
+/// used.  Beyond this threshold, greedy-by-graph-distance is used.
+///
+/// 20 vertices produce 2^18 DP states (after removing 2 endpoints) ×
+/// O(18) transitions ≈ 4.7M operations — well within budget.
+const DP_THRESHOLD: usize = 20;
+
+/// Optimal or improved matching using graph distances.
+///
+/// For n ≤ [`DP_THRESHOLD`]: computes all-pairs graph distances between
+/// odd vertices via Dijkstra, then finds the minimum-weight perfect
+/// matching via DP over bitmasks that leaves exactly 2 vertices unpaired
+/// (as Euler path endpoints).
+///
+/// For n > [`DP_THRESHOLD`]: computes both Euclidean-greedy and
+/// graph-distance-greedy matchings, evaluates each by total graph
+/// distance, and returns the better one.  This guarantees the result
+/// is never worse than the plain Euclidean greedy.
+///
+/// # Errors
+///
+/// Returns an error if Dijkstra shortest-path computation fails.
+fn optimal_matching(
+    graph: &UnGraph<(), f64>,
+    odd: &[NodeIndex],
+    node_coords: &[geo::Coord<f64>],
+) -> Result<Vec<(NodeIndex, NodeIndex)>, String> {
+    let n = odd.len();
+
+    // Compute all-pairs graph distances between odd vertices.
+    //
+    // This runs n Dijkstra calls on the full graph — O(n × (V+E) log V).
+    // The matrix is used in both the DP path (n ≤ DP_THRESHOLD) and the
+    // heuristic path (greedy_graph_distance_matching + matching_graph_cost),
+    // so it cannot be skipped.  For large n a sparse representation
+    // (e.g., K-nearest neighbors) could reduce the cost — see issue #137.
+    let dist_matrix = all_pairs_graph_distances(graph, odd);
+
+    if n <= DP_THRESHOLD {
+        dp_bitmask_matching(odd, &dist_matrix)
+    } else {
+        // Compute both heuristic matchings and pick the one with lower
+        // total graph-distance cost.
+        let euclidean_pairs = greedy_euclidean_matching(odd, node_coords);
+        let graph_dist_pairs = greedy_graph_distance_matching(odd, &dist_matrix, node_coords);
+
+        let euclidean_cost = matching_graph_cost(&euclidean_pairs, odd, &dist_matrix);
+        let graph_dist_cost = matching_graph_cost(&graph_dist_pairs, odd, &dist_matrix);
+
+        Ok(if euclidean_cost <= graph_dist_cost {
+            euclidean_pairs
+        } else {
+            graph_dist_pairs
+        })
+    }
+}
+
+/// Evaluate the total graph-distance cost of a matching.
+///
+/// For each pair (a, b), looks up the graph distance from `dist_matrix`
+/// and sums them.  This gives the expected retrace distance if this
+/// matching were applied.
+fn matching_graph_cost(
+    pairs: &[(NodeIndex, NodeIndex)],
+    odd: &[NodeIndex],
+    dist_matrix: &[Vec<f64>],
+) -> f64 {
+    // Build a reverse map: NodeIndex → index in `odd`.
+    let index_of: std::collections::HashMap<NodeIndex, usize> =
+        odd.iter().enumerate().map(|(i, &n)| (n, i)).collect();
+
+    pairs
+        .iter()
+        .map(|&(a, b)| {
+            let ia = index_of[&a];
+            let ib = index_of[&b];
+            dist_matrix[ia][ib]
+        })
+        .sum()
+}
+
+/// Compute all-pairs shortest (graph) distances between the given
+/// vertices using Dijkstra from each source.
+///
+/// Returns an n×n matrix where `result[i][j]` is the graph distance
+/// from `vertices[i]` to `vertices[j]`.
+fn all_pairs_graph_distances(graph: &UnGraph<(), f64>, vertices: &[NodeIndex]) -> Vec<Vec<f64>> {
+    let n = vertices.len();
+    let mut dist = vec![vec![f64::INFINITY; n]; n];
+
+    for (i, &src) in vertices.iter().enumerate() {
+        let costs = dijkstra(graph as &UnGraph<(), f64>, src, None, |e| *e.weight());
+        for (j, &dst) in vertices.iter().enumerate() {
+            dist[i][j] = costs.get(&dst).copied().unwrap_or(f64::INFINITY);
+        }
+    }
+
+    dist
+}
+
+/// Minimum-weight matching via DP over bitmasks.
+///
+/// Finds the optimal pairing of n odd-degree vertices that minimizes
+/// total graph distance, leaving exactly 2 vertices unpaired as Euler
+/// path endpoints.
+///
+/// The DP state is a "to-match" bitmask: `dp[mask]` is the minimum
+/// cost to perfectly match all vertices whose bits are set in `mask`.
+/// For each even-popcount mask, the lowest set bit `i` is paired with
+/// each other set bit `j`, and the cost is built from the sub-problem
+/// `dp[mask ^ (1<<i) ^ (1<<j)]`.  This ensures that the same `i`
+/// (lowest set bit) is used in both the forward pass and backtracking,
+/// making `choice[mask]` consistent.
+///
+/// We compute `dp[mask]` for masks with even popcount (the vertices to
+/// pair), then the answer is: min over all 2-element subsets S of
+/// `dp[full_mask ^ S]`, where `full_mask = (1 << n) - 1`.
+///
+/// Time: O(2^n × n), Space: O(2^n).
+///
+/// # Errors
+///
+/// Returns an error if the optimal matching cannot reconstruct valid
+/// pairs (should not happen on a connected graph).
+fn dp_bitmask_matching(
+    odd: &[NodeIndex],
+    dist_matrix: &[Vec<f64>],
+) -> Result<Vec<(NodeIndex, NodeIndex)>, String> {
+    let n = odd.len();
+
+    // n must be even (sum of degrees is always even) and > 2.
+    debug_assert!(n >= 4 && n % 2 == 0);
+
+    // We want to leave exactly 2 vertices unpaired, so we match n-2
+    // vertices into (n-2)/2 pairs.  Iterate over all C(n,2) choices of
+    // which 2 to leave, and for each compute the minimum-weight perfect
+    // matching of the remaining n-2 vertices.
+    //
+    // To avoid recomputing the DP for each endpoint pair, we compute one
+    // DP table over all n vertices (matching ALL of them), then derive
+    // the "leave 2 out" answer by trying all C(n,2) endpoint choices.
+    //
+    // The simpler approach: compute the DP that matches all subsets of
+    // even size, then read off dp[full ^ (1<<a) ^ (1<<b)] for each (a,b).
+
+    let states = 1usize << n;
+    // dp[mask] = minimum cost to perfectly match all vertices in `mask`.
+    let mut dp = vec![f64::INFINITY; states];
+    // choice[mask] = the vertex that the lowest set bit of `mask` was
+    // paired with in the optimal matching for `mask`.
+    let mut choice = vec![0u8; states];
+    dp[0] = 0.0;
+
+    for mask in 1..states {
+        // Only even-popcount masks can be perfectly matched.
+        if mask.count_ones() % 2 != 0 {
+            continue;
+        }
+
+        // Pick the lowest set bit — this vertex must be paired with
+        // someone.  Fixing this choice avoids counting each pairing
+        // multiple times.
+        let i = mask.trailing_zeros() as usize;
+
+        // Try pairing i with each other set bit j in mask.
+        let mut rest = mask & !(1 << i);
+        while rest != 0 {
+            let j = rest.trailing_zeros() as usize;
+            let prev = mask ^ (1 << i) ^ (1 << j);
+            let cost = dp[prev] + dist_matrix[i][j];
+            if cost < dp[mask] {
+                dp[mask] = cost;
+                #[allow(clippy::cast_possible_truncation)]
+                {
+                    choice[mask] = j as u8;
+                }
+            }
+            rest &= rest - 1; // clear lowest set bit
+        }
+    }
+
+    // Find the best pair of endpoints to leave unpaired.
+    let full_mask = states - 1;
+    let mut best_cost = f64::INFINITY;
+    let mut best_a = 0usize;
+    let mut best_b = 1usize;
+
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let to_match = full_mask ^ (1 << a) ^ (1 << b);
+            if dp[to_match] < best_cost {
+                best_cost = dp[to_match];
+                best_a = a;
+                best_b = b;
+            }
+        }
+    }
+
+    if best_cost.is_infinite() {
+        return Err("dp_bitmask_matching: no valid matching found".to_owned());
+    }
+
+    // Backtrack to reconstruct the pairs.  `i = mask.trailing_zeros()`
+    // is the same lowest set bit used in the forward pass, so
+    // `choice[mask]` gives the correct partner.
+    let mut pairs = Vec::new();
+    let mut mask = full_mask ^ (1 << best_a) ^ (1 << best_b);
+    while mask != 0 {
+        let i = mask.trailing_zeros() as usize;
+        let j = choice[mask] as usize;
+        pairs.push((odd[i], odd[j]));
+        mask ^= (1 << i) | (1 << j);
+    }
+
+    Ok(pairs)
+}
+
+/// Greedy matching by graph distance (improved fallback for large n).
+///
+/// Like [`greedy_euclidean_matching`] but uses precomputed graph
+/// distances instead of Euclidean distance for pairing decisions.
+/// Falls back to Euclidean distance when graph distance is infinite
+/// (disconnected subgraphs, which should not occur in practice).
+fn greedy_graph_distance_matching(
+    odd: &[NodeIndex],
+    dist_matrix: &[Vec<f64>],
+    node_coords: &[geo::Coord<f64>],
+) -> Vec<(NodeIndex, NodeIndex)> {
+    let n = odd.len();
+    // Map from original odd-vertex index to remaining-list index.
+    let mut indices: Vec<usize> = (0..n).collect();
+    let mut pairs = Vec::new();
+
+    while indices.len() > 2 {
+        let mut best_ii = 0;
+        let mut best_jj = 1;
+        let mut best_dist = f64::INFINITY;
+
+        for (ii, &i) in indices.iter().enumerate() {
+            for (jj, &j) in indices.iter().enumerate().skip(ii + 1) {
+                let d = if dist_matrix[i][j].is_finite() {
+                    dist_matrix[i][j]
+                } else {
+                    // Fallback to Euclidean if graph distance is infinite.
+                    let ci = node_coords[odd[i].index()];
+                    let cj = node_coords[odd[j].index()];
+                    (ci.x - cj.x).hypot(ci.y - cj.y)
+                };
+                if d < best_dist {
+                    best_dist = d;
+                    best_ii = ii;
+                    best_jj = jj;
+                }
+            }
+        }
+
+        pairs.push((odd[indices[best_ii]], odd[indices[best_jj]]));
+
+        // Remove the matched pair (remove higher index first).
+        if best_ii > best_jj {
+            indices.swap_remove(best_ii);
+            indices.swap_remove(best_jj);
+        } else {
+            indices.swap_remove(best_jj);
+            indices.swap_remove(best_ii);
+        }
+    }
+
+    pairs
+}
+
+/// Apply a matching by duplicating shortest paths for each pair.
+///
+/// Returns the total retrace distance.
+///
+/// # Errors
+///
+/// Returns an error if shortest-path reconstruction fails for any pair.
+fn apply_matching(
+    graph: &mut UnGraph<(), f64>,
+    pairs: &[(NodeIndex, NodeIndex)],
+) -> Result<f64, String> {
+    let mut total_retrace = 0.0;
+
+    for &(start, end) in pairs {
         let path = shortest_path(graph, start, end)?;
         for window in path.windows(2) {
             let (a, b) = (window[0], window[1]);
-            // Find the weight of the existing edge.
             let weight = graph
                 .edges(a)
                 .find(|e| e.target() == b)
@@ -738,18 +1127,9 @@ fn fix_parity(
             graph.add_edge(a, b, weight);
             total_retrace += weight;
         }
-
-        // Remove the matched pair (remove higher index first).
-        if best_i > best_j {
-            odd.swap_remove(best_i);
-            odd.swap_remove(best_j);
-        } else {
-            odd.swap_remove(best_j);
-            odd.swap_remove(best_i);
-        }
     }
-    let odd_after = odd_degree_vertices(graph).len();
-    Ok((total_retrace, odd_before, odd_after))
+
+    Ok(total_retrace)
 }
 
 /// Reconstruct the shortest path from `start` to `end` using Dijkstra.
@@ -838,32 +1218,91 @@ fn shortest_path(
 ///
 /// Assumes the graph has been fixed to have 0 or 2 odd-degree vertices.
 /// Returns the node sequence of the path.
+#[allow(clippy::too_many_lines)]
 fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
     if graph.node_count() == 0 {
         return Vec::new();
     }
 
-    // Choose start vertex: prefer an odd-degree vertex if one exists.
-    let start = graph
+    // Identify odd-degree vertices.
+    let odd: Vec<NodeIndex> = graph
         .node_indices()
-        .find(|&n| graph.edges(n).count() % 2 != 0)
-        .or_else(|| graph.node_indices().find(|&n| graph.edges(n).count() > 0))
-        .unwrap_or_else(|| {
-            graph
-                .node_indices()
-                .next()
-                .unwrap_or_else(|| NodeIndex::new(0))
-        });
+        .filter(|&n| graph.edges(n).count() % 2 != 0)
+        .collect();
+
+    // Add virtual edges to convert an Euler PATH problem (2 odd-degree
+    // vertices) into an Euler CIRCUIT problem.  Also handles the
+    // defensive case of >2 odd vertices (which shouldn't happen after
+    // fix_parity but can occur due to floating-point graph construction
+    // issues).
+    //
+    // Strategy: pair up odd-degree vertices and add one virtual edge per
+    // pair.  Each virtual edge flips the parity of both endpoints, making
+    // them even.  After running Hierholzer on the resulting Euler circuit,
+    // we remove all virtual-edge transitions to recover the path.
+    // `work_graph` must be declared before the `if` so that `graph_ref`
+    // can borrow it across the rest of the function.  The alternative
+    // (always cloning) wastes time when no virtual edges are needed.
+    let mut work_graph;
+    #[allow(clippy::useless_let_if_seq)]
+    let virtual_edge_ids: Vec<petgraph::graph::EdgeIndex>;
+    #[allow(clippy::useless_let_if_seq)]
+    let graph_ref: &UnGraph<(), f64>;
+
+    if odd.len() >= 2 {
+        // After fix_parity there should be exactly 2 odd-degree
+        // vertices (the Euler path endpoints).  More than 2 indicates
+        // a bug in parity fixing or floating-point graph construction.
+        // The chunks(2) fallback below pairs vertices in arbitrary
+        // iteration order, which is acceptable for the expected n=2
+        // case but would produce suboptimal pairings for larger n.
+        debug_assert!(
+            odd.len() == 2,
+            "expected exactly 2 odd-degree vertices after fix_parity, got {}",
+            odd.len(),
+        );
+        work_graph = graph.clone();
+        virtual_edge_ids = odd
+            .chunks(2)
+            .filter(|chunk| chunk.len() == 2)
+            .map(|pair| work_graph.add_edge(pair[0], pair[1], 0.0))
+            .collect();
+        graph_ref = &work_graph;
+    } else {
+        virtual_edge_ids = Vec::new();
+        // No clone needed: borrow the original graph directly.
+        // SAFETY: we need `graph_ref` to live as long as we use it below.
+        // Since `work_graph` is only initialised in the `if` branch and
+        // `graph` outlives this function, the borrow is sound.
+        graph_ref = graph;
+    }
+
+    // Choose start vertex: prefer one of the original odd-degree vertices
+    // (now even due to the virtual edge) so that virtual edges are
+    // traversed first/last.
+    let start = if odd.is_empty() {
+        graph_ref
+            .node_indices()
+            .find(|&n| graph_ref.edges(n).count() > 0)
+            .unwrap_or_else(|| {
+                graph_ref
+                    .node_indices()
+                    .next()
+                    .unwrap_or_else(|| NodeIndex::new(0))
+            })
+    } else {
+        odd[0]
+    };
 
     let mut stack = vec![start];
     let mut path = Vec::new();
 
     // Track which edges have been used (by edge index).
-    let mut used_edges = vec![false; graph.edge_count()];
+    let mut used_edges = vec![false; graph_ref.edge_count()];
 
     while let Some(&current) = stack.last() {
         // Find an unused edge from current.
-        let next_edge = graph.edges(current).find_map(|e| {
+        let next_edge = graph_ref.edges(current).find_map(|e| {
             let eidx = e.id().index();
             if used_edges[eidx] {
                 None
@@ -881,6 +1320,102 @@ fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
     }
 
     path.reverse();
+
+    // Remove virtual-edge transitions from the circuit to recover the
+    // Euler path.  Each virtual edge appears as one consecutive pair in
+    // the circuit; removing it splits the circuit at that point.
+    //
+    // For a single virtual edge (the common case), we split the circuit
+    // into a path.  For multiple virtual edges, we iteratively remove
+    // each transition and concatenate the fragments.
+    if !virtual_edge_ids.is_empty() {
+        // Collect the set of virtual edge endpoint pairs for matching.
+        let virtual_endpoints: Vec<(NodeIndex, NodeIndex)> = virtual_edge_ids
+            .iter()
+            .filter_map(|&eid| graph_ref.edge_endpoints(eid))
+            .collect();
+
+        // Find ALL positions in the path that correspond to virtual
+        // edge transitions.  Scan once, mark positions.
+        let mut virtual_positions: Vec<usize> = Vec::new();
+        for (i, w) in path.windows(2).enumerate() {
+            let (s, t) = (w[0], w[1]);
+            if virtual_endpoints
+                .iter()
+                .any(|&(src, dst)| (s == src && t == dst) || (s == dst && t == src))
+            {
+                virtual_positions.push(i);
+            }
+        }
+
+        if virtual_positions.len() == 1 {
+            // Single virtual edge — split the circuit into a path.
+            let pos = virtual_positions[0];
+            let mut result = Vec::with_capacity(path.len() - 1);
+            result.extend_from_slice(&path[pos + 1..]);
+            result.extend_from_slice(&path[1..=pos]);
+            return result;
+        } else if virtual_positions.len() > 1 {
+            // Multiple virtual edges — extract path fragments between
+            // virtual-edge positions and concatenate them.  The circuit
+            // is: [... real ... | virtual | ... real ... | virtual | ...]
+            // We want all the "real" fragments joined together.
+            //
+            // NOTE: this branch should not be reached after fix_parity
+            // (which ensures exactly 2 odd vertices → 1 virtual edge).
+            // If it IS reached, the concatenated fragments may be
+            // discontinuous because the end of one fragment is not
+            // guaranteed to connect to the start of the next — they
+            // are separated by the removed virtual edges.
+            //
+            // Sort positions so we can iterate in order.
+            virtual_positions.sort_unstable();
+
+            let mut fragments: Vec<&[NodeIndex]> = Vec::new();
+
+            // Fragment after the last virtual edge to the end, wrapping
+            // to the beginning up to the first virtual edge.
+            let last_pos = *virtual_positions.last().unwrap_or(&0);
+            let first_pos = virtual_positions[0];
+
+            // Wrap-around fragment: [last_virtual+1 .. end] + [1 .. first_virtual+1]
+            // This is the fragment that spans the circuit's wrap point.
+            let tail = &path[last_pos + 1..];
+            let head = &path[1..=first_pos];
+
+            // Interior fragments: between consecutive virtual edges.
+            for w in virtual_positions.windows(2) {
+                let frag = &path[w[0] + 1..=w[1]];
+                if frag.len() > 1 {
+                    fragments.push(frag);
+                }
+            }
+
+            // Build the result: wrap-around fragment first, then interiors.
+            let mut result = Vec::with_capacity(path.len() - virtual_positions.len());
+            result.extend_from_slice(tail);
+            result.extend_from_slice(head);
+            for frag in fragments {
+                result.extend_from_slice(frag);
+            }
+
+            // Verify adjacency: every consecutive pair in the result
+            // should be connected by an edge in the original graph.
+            // If not, the path has discontinuities ("teleportation").
+            let has_discontinuity = result.windows(2).any(|w| {
+                graph.find_edge(w[0], w[1]).is_none() && graph.find_edge(w[1], w[0]).is_none()
+            });
+            debug_assert!(
+                !has_discontinuity,
+                "multi-virtual-edge removal produced a discontinuous path \
+                 ({} virtual edges at positions {virtual_positions:?})",
+                virtual_positions.len(),
+            );
+
+            return result;
+        }
+    }
+
     path
 }
 
@@ -933,6 +1468,7 @@ pub fn join_mst(
     contours: &[Polyline],
     k_nearest: usize,
     working_resolution: u32,
+    parity_strategy: ParityStrategy,
 ) -> (Polyline, JoinQualityMetrics) {
     // Filter out empty contours.
     let polylines: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
@@ -961,6 +1497,7 @@ pub fn join_mst(
                 graph_node_count: 0,
                 graph_edge_count_before_fix: 0,
                 graph_edge_count_after_fix: 0,
+                mst_edge_details: Vec::new(),
             },
         );
     }
@@ -974,13 +1511,28 @@ pub fn join_mst(
     let total_mst_edge_weight: f64 = mst_weights.iter().sum();
     let max_mst_edge_weight: f64 = mst_weights.iter().copied().reduce(f64::max).unwrap_or(0.0);
 
+    // Per-edge diagnostic details.
+    let mst_edge_details: Vec<MstEdgeInfo> = mst_edges
+        .iter()
+        .zip(&mst_weights)
+        .map(|(e, &w)| MstEdgeInfo {
+            poly_a: e.poly_a,
+            poly_b: e.poly_b,
+            point_a: (e.point_a.x, e.point_a.y),
+            point_b: (e.point_b.x, e.point_b.y),
+            seg_a: e.seg_a,
+            seg_b: e.seg_b,
+            weight: w,
+        })
+        .collect();
+
     // Phase 2+3: Build graph, fix parity, find Eulerian path.
     let (mut graph, node_coords) = build_graph(&polylines, &mst_edges);
     let graph_node_count = graph.node_count();
     let graph_edge_count_before_fix = graph.edge_count();
 
     let (total_retrace_distance, odd_vertices_before_fix, odd_vertices_after_fix) =
-        fix_parity(&mut graph, &node_coords)
+        fix_parity(&mut graph, &node_coords, parity_strategy)
             .expect("fix_parity: shortest-path reconstruction failed on MST-connected graph");
     let graph_edge_count_after_fix = graph.edge_count();
 
@@ -1009,6 +1561,7 @@ pub fn join_mst(
         graph_node_count,
         graph_edge_count_before_fix,
         graph_edge_count_after_fix,
+        mst_edge_details,
     };
 
     (polyline, metrics)
@@ -1029,6 +1582,7 @@ impl JoinQualityMetrics {
             graph_node_count: 0,
             graph_edge_count_before_fix: 0,
             graph_edge_count_after_fix: 0,
+            mst_edge_details: Vec::new(),
         }
     }
 }
@@ -1049,11 +1603,12 @@ mod tests {
 
     const TEST_K: usize = PipelineConfig::DEFAULT_MST_NEIGHBOURS;
     const TEST_RESOLUTION: u32 = PipelineConfig::DEFAULT_WORKING_RESOLUTION;
+    const TEST_PARITY: ParityStrategy = ParityStrategy::Greedy;
     use crate::types::Point;
 
     #[test]
     fn mst_join_empty() {
-        let (result, metrics) = join_mst(&[], TEST_K, TEST_RESOLUTION);
+        let (result, metrics) = join_mst(&[], TEST_K, TEST_RESOLUTION, TEST_PARITY);
         assert!(result.is_empty());
         assert_eq!(metrics.mst_edge_count, 0);
     }
@@ -1065,7 +1620,12 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let (result, metrics) = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
+        let (result, metrics) = join_mst(
+            std::slice::from_ref(&contour),
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+        );
         assert_eq!(result, contour);
         assert_eq!(metrics.mst_edge_count, 0);
         assert!(metrics.total_path_length > 0.0);
@@ -1074,7 +1634,12 @@ mod tests {
     #[test]
     fn mst_join_single_point_contour() {
         let contour = Polyline::new(vec![Point::new(5.0, 5.0)]);
-        let (result, _metrics) = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(
+            std::slice::from_ref(&contour),
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+        );
         assert_eq!(result.len(), 1);
     }
 
@@ -1082,7 +1647,7 @@ mod tests {
     fn mst_join_two_contours_produces_single_path() {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let (result, metrics) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION);
+        let (result, metrics) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         // Must be non-empty and cover all original points.
         assert!(
@@ -1099,7 +1664,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let empty = Polyline::new(Vec::new());
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let (result, _metrics) = join_mst(&[c1, empty, c2], TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&[c1, empty, c2], TEST_K, TEST_RESOLUTION, TEST_PARITY);
         assert!(result.len() >= 4);
     }
 
@@ -1122,6 +1687,7 @@ mod tests {
             &[c1.clone(), c2.clone(), c3.clone()],
             TEST_K,
             TEST_RESOLUTION,
+            TEST_PARITY,
         );
         let output_set: std::collections::HashSet<(u64, u64)> = result
             .points()
@@ -1149,7 +1715,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(25.0, 0.0)]);
 
-        let (result, _metrics) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION, TEST_PARITY);
         assert!(!result.is_empty());
         // All points should be finite.
         for p in result.points() {
@@ -1164,7 +1730,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(6.0, 0.0), Point::new(7.0, 0.0)]);
 
-        let (result, _metrics) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION, TEST_PARITY);
         // Output should contain all 6 original points plus MST connections
         // and any retrace edges.
         assert!(
@@ -1190,7 +1756,7 @@ mod tests {
             .collect();
 
         let total_points: usize = contours.iter().map(Polyline::len).sum();
-        let (result, _metrics) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         assert!(
             result.len() >= total_points,
@@ -1298,7 +1864,8 @@ mod tests {
             geo::Coord { x: 0.0, y: -1.0 }, // l4
         ];
 
-        let (retrace, odd_before, odd_after) = fix_parity(&mut g, &node_coords).unwrap();
+        let (retrace, odd_before, odd_after) =
+            fix_parity(&mut g, &node_coords, ParityStrategy::Greedy).unwrap();
         assert!(retrace >= 0.0, "retrace distance should be non-negative");
         assert_eq!(
             odd_before, 4,
@@ -1320,7 +1887,7 @@ mod tests {
         // Polyline B: short vertical segment above the midpoint of A.
         let b = Polyline::new(vec![Point::new(50.0, 5.0), Point::new(50.0, 10.0)]);
 
-        let (result, _metrics) = join_mst(&[a, b], TEST_K, TEST_RESOLUTION);
+        let (result, _metrics) = join_mst(&[a, b], TEST_K, TEST_RESOLUTION, TEST_PARITY);
         let pts = result.points();
         assert!(
             pts.len() >= 4,
@@ -1369,6 +1936,7 @@ mod tests {
             &[close_a.clone(), close_b.clone(), far.clone()],
             1,
             TEST_RESOLUTION,
+            TEST_PARITY,
         );
         let pts = result.points();
 
@@ -1415,7 +1983,7 @@ mod tests {
             })
             .collect();
 
-        let (_result, metrics) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+        let (_result, metrics) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
         assert_eq!(
             metrics.mst_edge_count,
             contours.len() - 1,
@@ -1432,7 +2000,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(30.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(40.0, 0.0), Point::new(50.0, 0.0)]);
 
-        let (_result, m) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         assert!(m.total_mst_edge_weight >= 0.0);
         assert!(m.max_mst_edge_weight >= 0.0);
@@ -1445,7 +2013,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(30.0, 0.0)]);
 
-        let (_result, m) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         assert!(
             m.total_path_length > 0.0,
@@ -1460,7 +2028,7 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(30.0, 0.0), Point::new(35.0, 0.0)]);
 
-        let (_result, m) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         assert!(
             m.max_mst_edge_weight <= m.total_mst_edge_weight,
@@ -1483,7 +2051,7 @@ mod tests {
             })
             .collect();
 
-        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         assert!(
             m.odd_vertices_after_fix <= 2,
@@ -1503,7 +2071,7 @@ mod tests {
             })
             .collect();
 
-        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         assert!(
             m.graph_edge_count_after_fix >= m.graph_edge_count_before_fix,
@@ -1528,7 +2096,7 @@ mod tests {
             })
             .collect();
 
-        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         if m.graph_edge_count_after_fix > m.graph_edge_count_before_fix {
             assert!(
@@ -1541,7 +2109,7 @@ mod tests {
 
     #[test]
     fn metrics_empty_returns_zero_metrics() {
-        let (_result, m) = join_mst(&[], TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(&[], TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         assert_eq!(m.mst_edge_count, 0);
         assert!(m.total_mst_edge_weight.abs() < f64::EPSILON);
@@ -1559,7 +2127,12 @@ mod tests {
             Point::new(10.0, 10.0),
         ]);
 
-        let (_result, m) = join_mst(std::slice::from_ref(&contour), TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(
+            std::slice::from_ref(&contour),
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+        );
 
         assert_eq!(m.mst_edge_count, 0);
         assert!(m.total_mst_edge_weight.abs() < f64::EPSILON);
@@ -1578,7 +2151,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
 
-        let (_result, m) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION);
+        let (_result, m) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION, TEST_PARITY);
 
         assert!(
             m.total_path_length >= m.total_mst_edge_weight,
@@ -1586,5 +2159,171 @@ mod tests {
             m.total_path_length,
             m.total_mst_edge_weight,
         );
+    }
+
+    // --- ParityStrategy tests ---
+
+    #[test]
+    fn parity_strategy_default_is_greedy() {
+        assert_eq!(ParityStrategy::default(), ParityStrategy::Greedy);
+    }
+
+    #[test]
+    fn parity_strategy_display() {
+        assert_eq!(ParityStrategy::Greedy.to_string(), "Greedy");
+        assert_eq!(ParityStrategy::Optimal.to_string(), "Optimal");
+    }
+
+    #[test]
+    fn parity_strategy_serde_round_trip() {
+        for strategy in [ParityStrategy::Greedy, ParityStrategy::Optimal] {
+            let json = serde_json::to_string(&strategy).unwrap();
+            let deserialized: ParityStrategy = serde_json::from_str(&json).unwrap();
+            assert_eq!(strategy, deserialized);
+        }
+    }
+
+    #[test]
+    fn optimal_parity_produces_valid_path() {
+        // Same two-contour test as mst_join_two_contours_produces_single_path
+        // but with Optimal parity strategy.
+        let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
+        let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
+        let (result, metrics) =
+            join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION, ParityStrategy::Optimal);
+
+        assert!(
+            result.len() >= 4,
+            "expected >= 4 points, got {}",
+            result.len()
+        );
+        assert_eq!(metrics.mst_edge_count, 1);
+        assert!(metrics.odd_vertices_after_fix <= 2);
+    }
+
+    #[test]
+    fn optimal_parity_many_contours() {
+        // Stress test with multiple contours using Optimal strategy.
+        let contours: Vec<Polyline> = (0..10)
+            .map(|i| {
+                let x = f64::from(i) * 10.0;
+                Polyline::new(vec![Point::new(x, 0.0), Point::new(x + 3.0, 0.0)])
+            })
+            .collect();
+        let (result, metrics) =
+            join_mst(&contours, TEST_K, TEST_RESOLUTION, ParityStrategy::Optimal);
+
+        assert!(!result.is_empty());
+        assert_eq!(metrics.mst_edge_count, 9);
+        assert!(metrics.odd_vertices_after_fix <= 2);
+        assert!(metrics.total_path_length > 0.0);
+    }
+
+    #[test]
+    fn optimal_retrace_leq_greedy_retrace() {
+        // For a configuration with many contours, optimal matching should
+        // produce retrace distance less than or equal to greedy.
+        let contours: Vec<Polyline> = (0..8)
+            .map(|i| {
+                let x = f64::from(i) * 10.0;
+                let y = if i % 2 == 0 { 0.0 } else { 5.0 };
+                Polyline::new(vec![Point::new(x, y), Point::new(x + 3.0, y)])
+            })
+            .collect();
+
+        let (_result_greedy, m_greedy) =
+            join_mst(&contours, TEST_K, TEST_RESOLUTION, ParityStrategy::Greedy);
+        let (_result_optimal, m_optimal) =
+            join_mst(&contours, TEST_K, TEST_RESOLUTION, ParityStrategy::Optimal);
+
+        // Optimal should not be worse than greedy for retrace distance.
+        assert!(
+            m_optimal.total_retrace_distance <= m_greedy.total_retrace_distance + 1e-6,
+            "optimal retrace ({}) should be <= greedy retrace ({})",
+            m_optimal.total_retrace_distance,
+            m_greedy.total_retrace_distance,
+        );
+    }
+
+    #[test]
+    fn dp_bitmask_matching_four_vertices() {
+        // Direct test of the DP matching on a simple 4-vertex graph.
+        //   0---1---2---3  (linear graph, unit edges)
+        // Odd vertices: 0, 3 (degree 1).
+        // With 4 odd vertices we'd pair (0,1)(2,3) or (0,2)(1,3) or (0,3)(1,2).
+        // Actually with a linear graph 0-1-2-3, degrees are [1,2,2,1], only
+        // vertices 0,3 are odd → only 2 odd vertices → no matching needed.
+        // Let's build a star graph instead: center 0 connected to 1,2,3.
+        // Degrees: [3,1,1,1] → odd vertices: 0,1,2,3 (all 4).
+        let mut graph = UnGraph::<(), f64>::new_undirected();
+        let n0 = graph.add_node(());
+        let n1 = graph.add_node(());
+        let n2 = graph.add_node(());
+        let n3 = graph.add_node(());
+        graph.add_edge(n0, n1, 1.0);
+        graph.add_edge(n0, n2, 1.0);
+        graph.add_edge(n0, n3, 1.0);
+
+        let odd = vec![n0, n1, n2, n3];
+        let dist = all_pairs_graph_distances(&graph, &odd);
+        let pairs = dp_bitmask_matching(&odd, &dist).unwrap();
+
+        // Should produce exactly 1 pair (leaving 2 as endpoints).
+        assert_eq!(pairs.len(), 1);
+
+        // The paired vertices should be from the odd list.
+        let (a, b) = pairs[0];
+        assert!(odd.contains(&a));
+        assert!(odd.contains(&b));
+    }
+
+    #[test]
+    fn greedy_graph_distance_matching_produces_valid_pairs() {
+        // Same star graph as above.
+        let mut graph = UnGraph::<(), f64>::new_undirected();
+        let n0 = graph.add_node(());
+        let n1 = graph.add_node(());
+        let n2 = graph.add_node(());
+        let n3 = graph.add_node(());
+        graph.add_edge(n0, n1, 1.0);
+        graph.add_edge(n0, n2, 2.0);
+        graph.add_edge(n0, n3, 3.0);
+
+        let node_coords = vec![
+            geo::Coord { x: 0.0, y: 0.0 },
+            geo::Coord { x: 1.0, y: 0.0 },
+            geo::Coord { x: 0.0, y: 2.0 },
+            geo::Coord { x: 0.0, y: 3.0 },
+        ];
+
+        let odd = vec![n0, n1, n2, n3];
+        let dist = all_pairs_graph_distances(&graph, &odd);
+        let pairs = greedy_graph_distance_matching(&odd, &dist, &node_coords);
+
+        // Should produce 1 pair, leaving 2 as endpoints.
+        assert_eq!(pairs.len(), 1);
+        let (a, b) = pairs[0];
+        assert!(odd.contains(&a));
+        assert!(odd.contains(&b));
+    }
+
+    #[test]
+    fn all_pairs_graph_distances_symmetric() {
+        let mut graph = UnGraph::<(), f64>::new_undirected();
+        let n0 = graph.add_node(());
+        let n1 = graph.add_node(());
+        let n2 = graph.add_node(());
+        graph.add_edge(n0, n1, 3.0);
+        graph.add_edge(n1, n2, 5.0);
+
+        let vertices = vec![n0, n1, n2];
+        let dist = all_pairs_graph_distances(&graph, &vertices);
+
+        // dist[0][2] should be 3 + 5 = 8.
+        assert!((dist[0][2] - 8.0).abs() < 1e-10);
+        // Symmetric.
+        assert!((dist[0][2] - dist[2][0]).abs() < 1e-10);
+        // Self-distance is 0.
+        assert!((dist[1][1]).abs() < 1e-10);
     }
 }

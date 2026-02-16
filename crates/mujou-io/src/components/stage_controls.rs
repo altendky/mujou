@@ -7,8 +7,8 @@
 
 use dioxus::prelude::*;
 use mujou_pipeline::{
-    BorderPathMode, ContourTracerKind, DownsampleFilter, PathJoinerKind, PipelineConfig,
-    max_gradient_magnitude,
+    BorderPathMode, ContourTracerKind, DownsampleFilter, ParityStrategy, PathJoinerKind,
+    PipelineConfig, max_gradient_magnitude,
 };
 
 use crate::stage::StageId;
@@ -341,6 +341,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
         StageId::Join => {
             let config_select = config.clone();
             let config_slider = config.clone();
+            let config_parity = config.clone();
             let is_mst = matches!(config.path_joiner, PathJoinerKind::Mst);
             rsx! {
                 div { class: "space-y-2",
@@ -380,6 +381,24 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                                 let mut c = config_slider.clone();
                                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
                                 { c.mst_neighbours = v as usize; }
+                                on_change.call(c);
+                            },
+                        )}
+                        {render_select(
+                            "parity_strategy",
+                            "Parity Strategy",
+                            desc("Algorithm for pairing odd-degree vertices during MST joining."),
+                            &[("Greedy", "Greedy"), ("Optimal", "Optimal")],
+                            match config_parity.parity_strategy {
+                                ParityStrategy::Greedy => "Greedy",
+                                ParityStrategy::Optimal => "Optimal",
+                            },
+                            move |v: String| {
+                                let mut c = config_parity.clone();
+                                c.parity_strategy = match v.as_str() {
+                                    "Optimal" => ParityStrategy::Optimal,
+                                    _ => ParityStrategy::Greedy,
+                                };
                                 on_change.call(c);
                             },
                         )}

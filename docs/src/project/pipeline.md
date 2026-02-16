@@ -153,9 +153,11 @@ MST-based segment-to-segment join algorithm. Finds globally optimal connections 
 Algorithm phases:
 
 1. **MST via Kruskal:** Insert all polyline segments into an R\*-tree spatial index (`rstar`). Sample points along each polyline at adaptive spacing and query the R-tree for K nearest cross-component segments to generate candidate edges with exact segment-to-segment distance (`geo::Euclidean`). Sort candidates by distance and merge via `petgraph::UnionFind` (Kruskal's algorithm). When a connection point falls in the interior of a segment, that segment is split at the connection point.
-2. **Fix parity:** Count odd-degree vertices. Greedily pair each odd vertex with its nearest unmatched odd vertex and duplicate the shortest path between them (Dijkstra). Duplicated edges represent retracing through already-drawn grooves (visually free).
+2. **Fix parity:** Count odd-degree vertices. Pair odd vertices and duplicate the shortest path between each pair (Dijkstra). Duplicated edges represent retracing through already-drawn grooves (visually free). The pairing algorithm is controlled by `parity_strategy`: `Greedy` (default) pairs by nearest Euclidean distance; `Optimal` uses minimum-weight perfect matching via DP over bitmasks for small vertex counts (n <= 20) or a best-of-two heuristic for larger counts.
 3. **Hierholzer:** Find an Eulerian path through the augmented graph (original edges + MST connecting edges + duplicated retrace edges).
 4. **Emit:** Convert the vertex sequence to a `Polyline`.
+
+**User parameter:** `parity_strategy` (enum `ParityStrategy`, default: `Greedy`)
 
 **Tradeoffs:** Globally optimal connections (MST) instead of greedy ordering. Segment-to-segment distances find truly closest points between polylines (not just sampled vertices). Interior joins are supported. Produces significantly fewer visible artifacts and shorter new connecting segments than both `StraightLine` and `Retrace`.
 
