@@ -24,6 +24,7 @@ use crate::stage::StageId;
 use crate::worker::WorkerResult;
 use mujou_export::build_path_data;
 use mujou_pipeline::MstEdgeInfo;
+use mujou_pipeline::segment_analysis::{SEGMENT_COLORS, find_top_segments};
 
 /// Props for the [`StagePreview`] component.
 #[derive(Props, Clone)]
@@ -170,7 +171,7 @@ fn render_vector_preview(
 
             // Pre-compute diagnostic overlays when active.
             let top_segments = if show_diagnostics {
-                find_top_segments(polyline, TOP_N_SEGMENTS)
+                find_top_segments(std::slice::from_ref(polyline), TOP_N_SEGMENTS)
             } else {
                 Vec::new()
             };
@@ -263,64 +264,6 @@ pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline], w: u32, h: u32) 
 /// Number of longest segments to highlight in the diagnostic overlay.
 const TOP_N_SEGMENTS: usize = 5;
 
-/// Color palette for the top-N longest segments, matching the export
-/// diagnostic SVG palette in `mujou-export/src/svg.rs`.
-const SEGMENT_COLORS: &[&str] = &["#ff3333", "#ff8800", "#ffdd00", "#33cc33", "#3399ff"];
-
-/// A segment between two consecutive points in the joined polyline,
-/// identified for diagnostic highlighting.
-struct DiagnosticSegment {
-    /// Start point X coordinate.
-    x1: f64,
-    /// Start point Y coordinate.
-    y1: f64,
-    /// End point X coordinate.
-    x2: f64,
-    /// End point Y coordinate.
-    y2: f64,
-    /// 0-based rank (0 = longest).
-    rank: usize,
-}
-
-/// Find the top N longest segments in a polyline.
-///
-/// Returns segments sorted by length descending, each annotated with
-/// its rank (0 = longest). This is the same analysis performed by
-/// `to_segment_diagnostic_svg()` in mujou-export.
-fn find_top_segments(polyline: &mujou_pipeline::Polyline, top_n: usize) -> Vec<DiagnosticSegment> {
-    let points = polyline.points();
-    if points.len() < 2 {
-        return Vec::new();
-    }
-
-    // Collect all segments with their lengths.
-    let mut segments: Vec<(f64, f64, f64, f64, f64)> = points
-        .windows(2)
-        .map(|w| {
-            let (a, b) = (w[0], w[1]);
-            let len = (b.x - a.x).hypot(b.y - a.y);
-            (a.x, a.y, b.x, b.y, len)
-        })
-        .collect();
-
-    // Sort by length descending.
-    segments.sort_by(|a, b| b.4.partial_cmp(&a.4).unwrap_or(std::cmp::Ordering::Equal));
-
-    // Take top N and assign ranks.
-    segments
-        .into_iter()
-        .take(top_n)
-        .enumerate()
-        .map(|(rank, (x1, y1, x2, y2, _length))| DiagnosticSegment {
-            x1,
-            y1,
-            x2,
-            y2,
-            rank,
-        })
-        .collect()
-}
-
 /// Render MST connecting edges as red SVG `<line>` elements.
 fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
     if edges.is_empty() {
@@ -347,23 +290,23 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
 }
 
 /// Render the top-N longest segments as color-coded SVG `<line>` elements.
-fn render_top_segments(segments: &[DiagnosticSegment]) -> Element {
+fn render_top_segments(segments: &[mujou_pipeline::RankedSegment]) -> Element {
     if segments.is_empty() {
         return rsx! {};
     }
     rsx! {
         g {
             "data-layer": "top-segments",
-            for seg in segments.iter() {
+            for (rank, seg) in segments.iter().enumerate() {
                 {
-                    let color = SEGMENT_COLORS.get(seg.rank).copied().unwrap_or("#ffffff");
+                    let color = SEGMENT_COLORS.get(rank).copied().unwrap_or("#ffffff");
                     rsx! {
                         line {
-                            key: "seg-{seg.rank}",
-                            x1: "{seg.x1}",
-                            y1: "{seg.y1}",
-                            x2: "{seg.x2}",
-                            y2: "{seg.y2}",
+                            key: "seg-{rank}",
+                            x1: "{seg.from.0}",
+                            y1: "{seg.from.1}",
+                            x2: "{seg.to.0}",
+                            y2: "{seg.to.1}",
                             stroke: "{color}",
                             stroke_width: "3",
                             opacity: "0.9",

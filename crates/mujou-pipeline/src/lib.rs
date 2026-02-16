@@ -20,6 +20,7 @@ pub mod mask;
 pub mod mst_join;
 pub mod optimize;
 pub mod pipeline;
+pub mod segment_analysis;
 pub mod simplify;
 pub mod types;
 
@@ -31,6 +32,7 @@ pub use join::{JoinOutput, PathJoiner, PathJoinerKind};
 pub use mask::{BorderPathMode, ClippedPolyline, MaskResult, MaskShape};
 pub use mst_join::{JoinQualityMetrics, MstEdgeInfo, ParityStrategy};
 pub use pipeline::{Pipeline, PipelineCache};
+pub use segment_analysis::{RankedSegment, SEGMENT_COLORS, find_top_segments};
 pub use types::{
     Dimensions, EdgeChannels, GrayImage, PipelineConfig, PipelineError, Point, Polyline,
     ProcessResult, RgbaImage, StagedResult,
