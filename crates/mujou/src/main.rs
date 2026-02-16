@@ -537,7 +537,7 @@ fn app() -> Element {
             }
 
             // Main content area
-            div { class: "flex-1 flex flex-col gap-2 lg:gap-4 p-3 lg:p-4 min-w-0 min-h-0 overflow-y-auto",
+            main { class: "flex-1 flex flex-col gap-2 lg:gap-4 p-3 lg:p-4 min-w-0 min-h-0 overflow-y-auto",
                 // Left column: Preview + Filmstrip + Controls
                 div { class: "flex-1 flex flex-col gap-2 lg:gap-3 min-w-0 min-h-0",
 

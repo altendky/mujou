@@ -3,7 +3,7 @@ name = "mujou"
 default_platform = "web"
 
 [web.app]
-title = "mujou"
+title = "mujou — images to sand table paths"
 
 [web.watcher]
 watch_path = ["crates", "site"]
