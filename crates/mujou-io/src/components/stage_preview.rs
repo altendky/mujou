@@ -278,8 +278,6 @@ struct DiagnosticSegment {
     x2: f64,
     /// End point Y coordinate.
     y2: f64,
-    /// Euclidean length of the segment.
-    length: f64,
     /// 0-based rank (0 = longest).
     rank: usize,
 }
@@ -313,12 +311,11 @@ fn find_top_segments(polyline: &mujou_pipeline::Polyline, top_n: usize) -> Vec<D
         .into_iter()
         .take(top_n)
         .enumerate()
-        .map(|(rank, (x1, y1, x2, y2, length))| DiagnosticSegment {
+        .map(|(rank, (x1, y1, x2, y2, _length))| DiagnosticSegment {
             x1,
             y1,
             x2,
             y2,
-            length,
             rank,
         })
         .collect()
@@ -349,8 +346,7 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
     }
 }
 
-/// Render the top-N longest segments as color-coded SVG `<line>` elements
-/// with length labels at each segment's midpoint.
+/// Render the top-N longest segments as color-coded SVG `<line>` elements.
 fn render_top_segments(segments: &[DiagnosticSegment]) -> Element {
     if segments.is_empty() {
         return rsx! {};
@@ -361,31 +357,16 @@ fn render_top_segments(segments: &[DiagnosticSegment]) -> Element {
             for seg in segments.iter() {
                 {
                     let color = SEGMENT_COLORS.get(seg.rank).copied().unwrap_or("#ffffff");
-                    let label = format!("#{} ({:.1}px)", seg.rank + 1, seg.length);
-                    let mid_x = f64::midpoint(seg.x1, seg.x2);
-                    let mid_y = f64::midpoint(seg.y1, seg.y2) - 4.0;
                     rsx! {
-                        g {
+                        line {
                             key: "seg-{seg.rank}",
-                            line {
-                                x1: "{seg.x1}",
-                                y1: "{seg.y1}",
-                                x2: "{seg.x2}",
-                                y2: "{seg.y2}",
-                                stroke: "{color}",
-                                stroke_width: "3",
-                                opacity: "0.9",
-                            }
-                            // Length label at the midpoint of the segment.
-                            text {
-                                x: "{mid_x}",
-                                y: "{mid_y}",
-                                fill: "{color}",
-                                font_size: "10",
-                                font_family: "monospace",
-                                text_anchor: "middle",
-                                "{label}"
-                            }
+                            x1: "{seg.x1}",
+                            y1: "{seg.y1}",
+                            x2: "{seg.x2}",
+                            y2: "{seg.y2}",
+                            stroke: "{color}",
+                            stroke_width: "3",
+                            opacity: "0.9",
                         }
                     }
                 }
