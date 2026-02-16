@@ -59,9 +59,9 @@ if [ "$SKIP_BUILD" = false ]; then
 
 	# Static landing page
 	cp -r "$ROOT/site/"* "$PREVIEW_DIR/"
-	# Use a temp file for portability (BSD sed on macOS requires different -i syntax)
-	sed "s|{{REPO_URL}}|${REPO_URL}|g" "$PREVIEW_DIR/index.html" >"$PREVIEW_DIR/index.html.tmp"
-	mv "$PREVIEW_DIR/index.html.tmp" "$PREVIEW_DIR/index.html"
+	"$ROOT/scripts/render-template.py" "$PREVIEW_DIR/index.html" "$PREVIEW_DIR/index.html" \
+		"REPO_URL=${REPO_URL}" \
+		"ANALYTICS=@$ROOT/site/analytics.html"
 
 	# Dioxus WASM app
 	cp -r "$ROOT/target/dx/mujou/release/web/public/"* "$PREVIEW_DIR/app/"
