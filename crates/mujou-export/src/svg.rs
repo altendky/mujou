@@ -483,7 +483,44 @@ pub fn to_segment_diagnostic_svg(
         }
         let _ = writeln!(out, "  </g>");
 
-        // Legend in the top-left corner
+        // Legend in the top-left corner.
+        //
+        // Compute an adaptive width based on the longest label text so
+        // the background rect always encloses the labels, even for
+        // images with large coordinate values.
+        let labels: Vec<String> = all_segments
+            .iter()
+            .enumerate()
+            .map(|(rank, seg)| {
+                format!(
+                    "#{}: {:.1}px  ({:.0},{:.0})->({:.0},{:.0})  poly={} seg={}",
+                    rank + 1,
+                    seg.length,
+                    seg.from.0,
+                    seg.from.1,
+                    seg.to.0,
+                    seg.to.1,
+                    seg.poly_idx,
+                    seg.seg_idx,
+                )
+            })
+            .collect();
+        let header_text = format!("Top {} longest segments", all_segments.len());
+        let max_label_chars = labels
+            .iter()
+            .map(String::len)
+            .chain(std::iter::once(header_text.len()))
+            .max()
+            .unwrap_or(0);
+        // Monospace font-size 12 ≈ 7.2px per character.  Add padding
+        // for the color swatch (18px) and left/right margins (16+8).
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            clippy::cast_precision_loss
+        )]
+        let legend_width = (max_label_chars as f64).mul_add(7.2, 42.0) as usize;
+
         let _ = writeln!(
             out,
             r#"  <g id="legend" font-family="monospace" font-size="12">"#
@@ -491,14 +528,13 @@ pub fn to_segment_diagnostic_svg(
         let legend_height = 20 + all_segments.len() * 18;
         let _ = writeln!(
             out,
-            "    <rect x=\"8\" y=\"8\" width=\"340\" height=\"{legend_height}\" rx=\"4\" fill=\"#000000\" opacity=\"0.7\"/>",
+            "    <rect x=\"8\" y=\"8\" width=\"{legend_width}\" height=\"{legend_height}\" rx=\"4\" fill=\"#000000\" opacity=\"0.7\"/>",
         );
         let _ = writeln!(
             out,
-            r#"    <text x="16" y="24" fill="white" font-weight="bold">Top {} longest segments</text>"#,
-            all_segments.len(),
+            r#"    <text x="16" y="24" fill="white" font-weight="bold">{header_text}</text>"#,
         );
-        for (rank, seg) in all_segments.iter().enumerate() {
+        for (rank, label) in labels.iter().enumerate() {
             let color = SEGMENT_COLORS[rank % SEGMENT_COLORS.len()];
             let y = 42 + rank * 18;
             // Color swatch
@@ -511,16 +547,7 @@ pub fn to_segment_diagnostic_svg(
             // Label
             let _ = writeln!(
                 out,
-                r#"    <text x="34" y="{}" fill="white">#{}: {:.1}px  ({:.0},{:.0})->({:.0},{:.0})  poly={} seg={}</text>"#,
-                y,
-                rank + 1,
-                seg.length,
-                seg.from.0,
-                seg.from.1,
-                seg.to.0,
-                seg.to.1,
-                seg.poly_idx,
-                seg.seg_idx,
+                r#"    <text x="34" y="{y}" fill="white">{label}</text>"#,
             );
         }
         let _ = writeln!(out, "  </g>");
