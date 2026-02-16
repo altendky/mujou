@@ -355,6 +355,17 @@ fn generate_index_html(site_dir: &Path, manifest_dir: &Path) {
     <meta content="text/html;charset=utf-8" http-equiv="Content-Type" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta charset="UTF-8" />
+    <meta name="description" content="mujou — images to sand table paths" />
+    <meta property="og:title" content="mujou — images to sand table paths" />
+    <meta property="og:description" content="mujou — images to sand table paths" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://mujou.art/app/" />
+    <meta property="og:image" content="https://mujou.art/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="mujou — images to sand table paths" />
+    <meta name="twitter:description" content="mujou — images to sand table paths" />
+    <meta name="twitter:image" content="https://mujou.art/og-image.png" />
+    <link rel="canonical" href="https://mujou.art/app/" />
     <script>{detect_js}</script>
   </head>
   <body>

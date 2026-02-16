@@ -1,0 +1,25 @@
+[package]
+name = "mujou-fade"
+version = "0.1.0"
+publish = false
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Generate a horizontal fade comparison image from original to processed pipeline output"
+keywords = ["visualization", "comparison"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "mujou-fade"
+path = "src/main.rs"
+
+[dependencies]
+mujou-pipeline.workspace = true
+image.workspace = true
+tiny-skia.workspace = true
+clap.workspace = true
+
+[lints]
+workspace = true
