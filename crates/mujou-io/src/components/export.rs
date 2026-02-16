@@ -2,6 +2,7 @@
 
 use std::rc::Rc;
 
+use crate::analytics;
 use crate::download;
 use crate::worker::WorkerResult;
 use dioxus::prelude::*;
@@ -111,6 +112,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         export_error.set(Some(format!("Download failed: {e}")));
                         return;
                     }
+                    analytics::track_export("svg");
                 }
                 export_error.set(None);
             }

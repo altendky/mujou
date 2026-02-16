@@ -52,7 +52,9 @@ jobs:
         run: |
           mkdir -p deploy/app
           cp -r site/* deploy/
-          sed -i "s|{{REPO_URL}}|${REPO_URL}|g" deploy/index.html
+          ./scripts/render-template.py deploy/index.html deploy/index.html \
+            "REPO_URL=${REPO_URL}" \
+            "ANALYTICS=@site/analytics.html"
           cp -r target/dx/mujou/release/web/public/* deploy/app/
           cp deploy/app/index.html deploy/app/404.html
 
