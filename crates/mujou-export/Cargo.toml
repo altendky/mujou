@@ -12,6 +12,7 @@ categories = ["graphics"]
 
 [dependencies]
 mujou-pipeline.workspace = true
+svg.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

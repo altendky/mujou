@@ -15,9 +15,9 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use super::preview::build_path_data;
 use crate::stage::StageId;
 use crate::worker::WorkerResult;
+use mujou_export::build_path_data;
 
 /// Props for the [`StagePreview`] component.
 #[derive(Props, Clone)]

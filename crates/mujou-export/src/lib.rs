@@ -5,4 +5,4 @@
 
 pub mod svg;
 
-pub use svg::{SvgMetadata, to_diagnostic_svg, to_segment_diagnostic_svg, to_svg};
+pub use svg::{SvgMetadata, build_path_data, to_diagnostic_svg, to_segment_diagnostic_svg, to_svg};
