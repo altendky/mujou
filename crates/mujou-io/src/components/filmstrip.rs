@@ -53,7 +53,7 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
 
     rsx! {
         div {
-            class: "flex flex-nowrap overflow-x-auto gap-2 py-2 scrollbar-thin",
+            class: "flex flex-nowrap overflow-x-auto gap-2 py-2 scrollbar-thin flex-shrink-0",
 
             for stage in StageId::ALL {
                 {render_tile(props.result.as_deref(), stage, props.selected == stage, &props.on_select, is_dark())}
@@ -143,7 +143,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             let polylines = result.polylines_for_stage(stage);
             let w = result.dimensions.width;
             let h = result.dimensions.height;
-            let view_box = format!("0 0 {w} {h}");
+            let view_box = super::compute_view_box(&polylines, w, h);
 
             rsx! {
                 svg {
@@ -163,7 +163,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             let polyline = &result.joined;
             let w = result.dimensions.width;
             let h = result.dimensions.height;
-            let view_box = format!("0 0 {w} {h}");
+            let view_box = super::compute_view_box(std::slice::from_ref(polyline), w, h);
             let d = build_path_data(polyline);
 
             rsx! {
