@@ -241,23 +241,30 @@ pub fn to_svg(
     metadata: &SvgMetadata<'_>,
     mask_shape: Option<&MaskShape>,
 ) -> String {
-    let mut doc = if let Some(MaskShape::Circle { center, radius }) = mask_shape {
-        let size = 2.0 * radius;
-        let min_x = center.x - radius;
-        let min_y = center.y - radius;
-        Document::new()
-            .set("width", size)
-            .set("height", size)
-            .set("viewBox", format!("{min_x} {min_y} {size} {size}"))
-            .set("preserveAspectRatio", "xMidYMid meet")
-    } else {
-        let w = dimensions.width;
-        let h = dimensions.height;
-        Document::new()
-            .set("width", w)
-            .set("height", h)
-            .set("viewBox", (0, 0, w, h))
-    };
+    // Exhaustive match on MaskShape ensures new variants get a compile
+    // error here, matching the convention in mask.rs.
+    let mut doc = mask_shape.map_or_else(
+        || {
+            let w = dimensions.width;
+            let h = dimensions.height;
+            Document::new()
+                .set("width", w)
+                .set("height", h)
+                .set("viewBox", (0, 0, w, h))
+        },
+        |shape| match shape {
+            MaskShape::Circle { center, radius } => {
+                let size = 2.0 * radius;
+                let min_x = center.x - radius;
+                let min_y = center.y - radius;
+                Document::new()
+                    .set("width", size)
+                    .set("height", size)
+                    .set("viewBox", format!("{min_x} {min_y} {size} {size}"))
+                    .set("preserveAspectRatio", "xMidYMid meet")
+            }
+        },
+    );
 
     // Optional <title> element
     if let Some(title) = metadata.title {
