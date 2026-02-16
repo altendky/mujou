@@ -893,5 +893,9 @@ fn focus_element(id: &str) {
         && let Ok(html) = el.dyn_into::<web_sys::HtmlElement>()
     {
         let _ = html.focus();
+    } else {
+        web_sys::console::warn_1(
+            &format!("focus_element: #{id} not found or not an HtmlElement").into(),
+        );
     }
 }
