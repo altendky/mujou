@@ -233,6 +233,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         }
                         {
                             let ch_desc = desc("Select which image channels contribute to edge detection. Edges from all enabled channels are combined.");
+                            let ch_desc_id = if ch_desc.is_empty() { "" } else { "edge-ch-desc" };
                             rsx! {
                                 if !ch_desc.is_empty() {
                                     p {
@@ -241,68 +242,68 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                                         "{ch_desc}"
                                     }
                                 }
+                                {render_channel_toggle(
+                                    "ch_luminance",
+                                    "Luminance",
+                                    channels.luminance,
+                                    channels.count() <= 1 && channels.luminance,
+                                    move |v: bool| {
+                                        let mut c = config_lum.clone();
+                                        c.edge_channels.luminance = v;
+                                        if c.edge_channels.any_enabled() { on_change.call(c); }
+                                    },
+                                    ch_desc_id,
+                                )}
+                                {render_channel_toggle(
+                                    "ch_red",
+                                    "Red",
+                                    channels.red,
+                                    channels.count() <= 1 && channels.red,
+                                    move |v: bool| {
+                                        let mut c = config_red.clone();
+                                        c.edge_channels.red = v;
+                                        if c.edge_channels.any_enabled() { on_change.call(c); }
+                                    },
+                                    ch_desc_id,
+                                )}
+                                {render_channel_toggle(
+                                    "ch_green",
+                                    "Green",
+                                    channels.green,
+                                    channels.count() <= 1 && channels.green,
+                                    move |v: bool| {
+                                        let mut c = config_green.clone();
+                                        c.edge_channels.green = v;
+                                        if c.edge_channels.any_enabled() { on_change.call(c); }
+                                    },
+                                    ch_desc_id,
+                                )}
+                                {render_channel_toggle(
+                                    "ch_blue",
+                                    "Blue",
+                                    channels.blue,
+                                    channels.count() <= 1 && channels.blue,
+                                    move |v: bool| {
+                                        let mut c = config_blue.clone();
+                                        c.edge_channels.blue = v;
+                                        if c.edge_channels.any_enabled() { on_change.call(c); }
+                                    },
+                                    ch_desc_id,
+                                )}
+                                {render_channel_toggle(
+                                    "ch_saturation",
+                                    "Saturation",
+                                    channels.saturation,
+                                    channels.count() <= 1 && channels.saturation,
+                                    move |v: bool| {
+                                        let mut c = config_sat.clone();
+                                        c.edge_channels.saturation = v;
+                                        if c.edge_channels.any_enabled() { on_change.call(c); }
+                                    },
+                                    ch_desc_id,
+                                )}
                             }
                         }
-                        {render_channel_toggle(
-                            "ch_luminance",
-                            "Luminance",
-                            channels.luminance,
-                            channels.count() <= 1 && channels.luminance,
-                            move |v: bool| {
-                                let mut c = config_lum.clone();
-                                c.edge_channels.luminance = v;
-                                if c.edge_channels.any_enabled() { on_change.call(c); }
-                            },
-                            "edge-ch-desc",
-                        )}
-                        {render_channel_toggle(
-                            "ch_red",
-                            "Red",
-                            channels.red,
-                            channels.count() <= 1 && channels.red,
-                            move |v: bool| {
-                                let mut c = config_red.clone();
-                                c.edge_channels.red = v;
-                                if c.edge_channels.any_enabled() { on_change.call(c); }
-                            },
-                            "edge-ch-desc",
-                        )}
-                        {render_channel_toggle(
-                            "ch_green",
-                            "Green",
-                            channels.green,
-                            channels.count() <= 1 && channels.green,
-                            move |v: bool| {
-                                let mut c = config_green.clone();
-                                c.edge_channels.green = v;
-                                if c.edge_channels.any_enabled() { on_change.call(c); }
-                            },
-                            "edge-ch-desc",
-                        )}
-                        {render_channel_toggle(
-                            "ch_blue",
-                            "Blue",
-                            channels.blue,
-                            channels.count() <= 1 && channels.blue,
-                            move |v: bool| {
-                                let mut c = config_blue.clone();
-                                c.edge_channels.blue = v;
-                                if c.edge_channels.any_enabled() { on_change.call(c); }
-                            },
-                            "edge-ch-desc",
-                        )}
-                        {render_channel_toggle(
-                            "ch_saturation",
-                            "Saturation",
-                            channels.saturation,
-                            channels.count() <= 1 && channels.saturation,
-                            move |v: bool| {
-                                let mut c = config_sat.clone();
-                                c.edge_channels.saturation = v;
-                                if c.edge_channels.any_enabled() { on_change.call(c); }
-                            },
-                            "edge-ch-desc",
-                        )}
                     }
                 }
             }
