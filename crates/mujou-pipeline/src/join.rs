@@ -13,7 +13,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::mst_join::{self, JoinQualityMetrics};
 use crate::optimize;
-use crate::types::{PipelineConfig, Point, Polyline, polyline_bounding_box};
+use crate::types::{
+    Dimensions, PipelineConfig, Point, Polyline, StartPointStrategy, polyline_bounding_box,
+};
 
 /// Selects which path joining strategy to use.
 ///
@@ -90,7 +92,7 @@ pub struct JoinOutput {
 /// of joining them.
 pub trait PathJoiner {
     /// Order and join the given contours into a single continuous path.
-    fn join(&self, contours: &[Polyline], config: &PipelineConfig) -> JoinOutput;
+    fn join(&self, contours: &[Polyline], config: &PipelineConfig, dims: Dimensions) -> JoinOutput;
 }
 
 impl fmt::Display for PathJoinerKind {
@@ -104,14 +106,14 @@ impl fmt::Display for PathJoinerKind {
 }
 
 impl PathJoiner for PathJoinerKind {
-    fn join(&self, contours: &[Polyline], config: &PipelineConfig) -> JoinOutput {
+    fn join(&self, contours: &[Polyline], config: &PipelineConfig, dims: Dimensions) -> JoinOutput {
         match *self {
             Self::StraightLine => JoinOutput {
-                path: join_straight_line(contours),
+                path: join_straight_line(contours, config.start_point, dims),
                 quality_metrics: None,
             },
             Self::Retrace => JoinOutput {
-                path: join_retrace(contours),
+                path: join_retrace(contours, config.start_point, dims),
                 quality_metrics: None,
             },
             Self::Mst => {
@@ -120,6 +122,8 @@ impl PathJoiner for PathJoinerKind {
                     config.mst_neighbours,
                     config.working_resolution,
                     config.parity_strategy,
+                    config.start_point,
+                    dims,
                 );
                 JoinOutput {
                     path,
@@ -130,14 +134,68 @@ impl PathJoiner for PathJoinerKind {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Start-point selection helper
+// ---------------------------------------------------------------------------
+
+/// Compute the image center from dimensions.
+pub(crate) fn image_center(dims: Dimensions) -> Point {
+    Point::new(f64::from(dims.width) / 2.0, f64::from(dims.height) / 2.0)
+}
+
+/// Choose the best starting contour index from `candidates` (non-empty
+/// contours) based on [`StartPointStrategy`] and image `dimensions`.
+///
+/// For [`Outside`](StartPointStrategy::Outside), selects the candidate
+/// whose endpoint (first or last) is **farthest** from the image center.
+/// For [`Inside`](StartPointStrategy::Inside), selects the candidate
+/// whose endpoint is **nearest** to the image center.
+///
+/// Returns the index into `candidates`.  Panics if `candidates` is empty.
+pub(crate) fn choose_start_contour(
+    candidates: &[&Polyline],
+    strategy: StartPointStrategy,
+    dims: Dimensions,
+) -> usize {
+    debug_assert!(!candidates.is_empty(), "candidates must be non-empty");
+    let center = image_center(dims);
+
+    let mut best_idx = 0;
+    let mut best_dist = match strategy {
+        StartPointStrategy::Outside => f64::NEG_INFINITY,
+        StartPointStrategy::Inside => f64::INFINITY,
+    };
+
+    for (i, contour) in candidates.iter().enumerate() {
+        // Consider both endpoints of each contour.
+        for pt in contour.first().iter().chain(contour.last().iter()) {
+            let dist = center.distance_squared(**pt);
+            let is_better = match strategy {
+                StartPointStrategy::Outside => dist > best_dist,
+                StartPointStrategy::Inside => dist < best_dist,
+            };
+            if is_better {
+                best_dist = dist;
+                best_idx = i;
+            }
+        }
+    }
+
+    best_idx
+}
+
 /// Nearest-neighbor ordering followed by straight-line concatenation.
 ///
 /// Delegates ordering to [`optimize::optimize_path_order()`], then
 /// concatenates contours end-to-start. The connecting segments are
 /// implicit -- the last point of contour N and the first point of
 /// contour N+1 form the straight-line jump.
-fn join_straight_line(contours: &[Polyline]) -> Polyline {
-    let ordered = optimize::optimize_path_order(contours);
+fn join_straight_line(
+    contours: &[Polyline],
+    strategy: StartPointStrategy,
+    dims: Dimensions,
+) -> Polyline {
+    let ordered = optimize::optimize_path_order(contours, strategy, dims);
 
     let total_points: usize = ordered.iter().map(Polyline::len).sum();
     let mut points = Vec::with_capacity(total_points);
@@ -432,7 +490,7 @@ const GRID_CELLS_PER_AXIS: f64 = 50.0;
 ///    entry is interior.
 /// 4. Return the output path.
 #[allow(clippy::too_many_lines)]
-fn join_retrace(contours: &[Polyline]) -> Polyline {
+fn join_retrace(contours: &[Polyline], strategy: StartPointStrategy, dims: Dimensions) -> Polyline {
     // Filter out empty contours.
     let candidates: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
 
@@ -481,9 +539,10 @@ fn join_retrace(contours: &[Polyline]) -> Polyline {
     // Per-candidate best-known (dist, entry_vertex_idx, history_idx).
     let mut cache: Vec<(f64, usize, usize)> = vec![(f64::INFINITY, 0, 0); n];
 
-    // Start with candidate 0.
-    used[0] = true;
-    emit_and_index(&mut output, &mut grid, candidates[0].points());
+    // Start with the candidate chosen by the start-point strategy.
+    let start_idx = choose_start_contour(&candidates, strategy, dims);
+    used[start_idx] = true;
+    emit_and_index(&mut output, &mut grid, candidates[start_idx].points());
 
     // Seed caches: query ALL candidates against initial grid.
     for (j, sample_pts) in samples.iter().enumerate() {
@@ -592,6 +651,11 @@ mod tests {
     use super::*;
     use crate::types::Point;
 
+    const TEST_DIMS: Dimensions = Dimensions {
+        width: 200,
+        height: 200,
+    };
+
     fn default_config() -> PipelineConfig {
         PipelineConfig::default()
     }
@@ -603,7 +667,7 @@ mod tests {
 
     #[test]
     fn join_empty_contours() {
-        let output = PathJoinerKind::StraightLine.join(&[], &default_config());
+        let output = PathJoinerKind::StraightLine.join(&[], &default_config(), TEST_DIMS);
         assert!(output.path.is_empty());
         assert!(output.quality_metrics.is_none());
     }
@@ -615,15 +679,18 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let output =
-            PathJoinerKind::StraightLine.join(std::slice::from_ref(&contour), &default_config());
+        let output = PathJoinerKind::StraightLine.join(
+            std::slice::from_ref(&contour),
+            &default_config(),
+            TEST_DIMS,
+        );
         assert_eq!(output.path, contour);
         assert!(output.quality_metrics.is_none());
     }
 
     #[test]
     fn retrace_empty_contours() {
-        let output = PathJoinerKind::Retrace.join(&[], &default_config());
+        let output = PathJoinerKind::Retrace.join(&[], &default_config(), TEST_DIMS);
         assert!(output.path.is_empty());
         assert!(output.quality_metrics.is_none());
     }
@@ -635,8 +702,11 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let output =
-            PathJoinerKind::Retrace.join(std::slice::from_ref(&contour), &default_config());
+        let output = PathJoinerKind::Retrace.join(
+            std::slice::from_ref(&contour),
+            &default_config(),
+            TEST_DIMS,
+        );
         // Single contour: no joining needed, output equals input.
         assert_eq!(output.path, contour);
         assert!(output.quality_metrics.is_none());
@@ -650,7 +720,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(50.0, 0.0), Point::new(11.0, 0.0)]);
 
-        let output = PathJoinerKind::Retrace.join(&[c1, c2], &default_config());
+        let output = PathJoinerKind::Retrace.join(&[c1, c2], &default_config(), TEST_DIMS);
         let pts = output.path.points();
 
         // c2 should be emitted reversed: (11,0) then (50,0).
@@ -672,7 +742,7 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(100.0, 0.0), Point::new(101.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(2.0, 0.0), Point::new(3.0, 0.0)]);
 
-        let output = PathJoinerKind::Retrace.join(&[c0, c1, c2], &default_config());
+        let output = PathJoinerKind::Retrace.join(&[c0, c1, c2], &default_config(), TEST_DIMS);
         let pts = output.path.points();
 
         // c0 emitted first, then c2 (nearby), then c1 (far).
@@ -704,7 +774,7 @@ mod tests {
             .collect();
 
         let total_contour_points: usize = contours.iter().map(Polyline::len).sum();
-        let output = PathJoinerKind::Retrace.join(&contours, &default_config());
+        let output = PathJoinerKind::Retrace.join(&contours, &default_config(), TEST_DIMS);
 
         assert!(
             output.path.len() >= total_contour_points,
@@ -733,7 +803,8 @@ mod tests {
                 .collect(),
         );
 
-        let output = PathJoinerKind::Retrace.join(&[c0.clone(), c1.clone()], &default_config());
+        let output =
+            PathJoinerKind::Retrace.join(&[c0.clone(), c1.clone()], &default_config(), TEST_DIMS);
         let output_pts = output.path.points();
 
         // All of c1's points must appear in the output.
@@ -760,5 +831,146 @@ mod tests {
             output.path.len(),
             c0.len() + c1.len(),
         );
+    }
+
+    // ─────────── Start-point strategy tests ────────────────────
+
+    #[test]
+    fn choose_start_contour_outside_picks_farthest() {
+        // Image center is (50, 50).  Inner contour near center,
+        // outer contour near corner — Outside should pick outer.
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let inner = Polyline::new(vec![Point::new(48.0, 50.0), Point::new(52.0, 50.0)]);
+        let outer = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
+
+        let candidates: Vec<&Polyline> = vec![&inner, &outer];
+        let idx = choose_start_contour(&candidates, StartPointStrategy::Outside, dims);
+        assert_eq!(
+            idx, 1,
+            "Outside should pick the contour farthest from center"
+        );
+    }
+
+    #[test]
+    fn choose_start_contour_inside_picks_nearest() {
+        // Same setup as above — Inside should pick inner.
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let inner = Polyline::new(vec![Point::new(48.0, 50.0), Point::new(52.0, 50.0)]);
+        let outer = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
+
+        let candidates: Vec<&Polyline> = vec![&inner, &outer];
+        let idx = choose_start_contour(&candidates, StartPointStrategy::Inside, dims);
+        assert_eq!(idx, 0, "Inside should pick the contour nearest to center");
+    }
+
+    #[test]
+    fn straight_line_outside_starts_at_outer_contour() {
+        // Outer contour at corner, inner contour near center.
+        // With Outside, path should start from the outer contour's points.
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let inner = Polyline::new(vec![Point::new(48.0, 50.0), Point::new(52.0, 50.0)]);
+        let outer = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
+
+        let config = PipelineConfig {
+            path_joiner: PathJoinerKind::StraightLine,
+            start_point: StartPointStrategy::Outside,
+            ..PipelineConfig::default()
+        };
+        let output = config.path_joiner.join(&[inner, outer], &config, dims);
+        let first = output.path.first().unwrap();
+        // The first point should be from the outer contour (near (0,0)).
+        assert!(
+            first.x < 10.0 && first.y < 10.0,
+            "Outside start should begin near corner, got ({}, {})",
+            first.x,
+            first.y,
+        );
+    }
+
+    #[test]
+    fn straight_line_inside_starts_at_inner_contour() {
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let inner = Polyline::new(vec![Point::new(48.0, 50.0), Point::new(52.0, 50.0)]);
+        let outer = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
+
+        let config = PipelineConfig {
+            path_joiner: PathJoinerKind::StraightLine,
+            start_point: StartPointStrategy::Inside,
+            ..PipelineConfig::default()
+        };
+        let output = config.path_joiner.join(&[inner, outer], &config, dims);
+        let first = output.path.first().unwrap();
+        // The first point should be from the inner contour (near center).
+        assert!(
+            first.x > 40.0 && first.x < 60.0,
+            "Inside start should begin near center, got ({}, {})",
+            first.x,
+            first.y,
+        );
+    }
+
+    #[test]
+    fn retrace_outside_starts_at_outer_contour() {
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let inner = Polyline::new(vec![Point::new(48.0, 50.0), Point::new(52.0, 50.0)]);
+        let outer = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
+
+        let config = PipelineConfig {
+            path_joiner: PathJoinerKind::Retrace,
+            start_point: StartPointStrategy::Outside,
+            ..PipelineConfig::default()
+        };
+        let output = config.path_joiner.join(&[inner, outer], &config, dims);
+        let first = output.path.first().unwrap();
+        assert!(
+            first.x < 10.0 && first.y < 10.0,
+            "Outside retrace should begin near corner, got ({}, {})",
+            first.x,
+            first.y,
+        );
+    }
+
+    #[test]
+    fn retrace_inside_starts_at_inner_contour() {
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let inner = Polyline::new(vec![Point::new(48.0, 50.0), Point::new(52.0, 50.0)]);
+        let outer = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
+
+        let config = PipelineConfig {
+            path_joiner: PathJoinerKind::Retrace,
+            start_point: StartPointStrategy::Inside,
+            ..PipelineConfig::default()
+        };
+        let output = config.path_joiner.join(&[inner, outer], &config, dims);
+        let first = output.path.first().unwrap();
+        assert!(
+            first.x > 40.0 && first.x < 60.0,
+            "Inside retrace should begin near center, got ({}, {})",
+            first.x,
+            first.y,
+        );
+    }
+
+    #[test]
+    fn start_point_strategy_default_is_outside() {
+        assert_eq!(StartPointStrategy::default(), StartPointStrategy::Outside);
     }
 }

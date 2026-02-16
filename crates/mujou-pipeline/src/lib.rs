@@ -33,7 +33,7 @@ pub use mst_join::{JoinQualityMetrics, MstEdgeInfo, ParityStrategy};
 pub use pipeline::{Pipeline, PipelineCache};
 pub use types::{
     Dimensions, EdgeChannels, GrayImage, PipelineConfig, PipelineError, Point, Polyline,
-    ProcessResult, RgbaImage, StagedResult,
+    ProcessResult, RgbaImage, StagedResult, StartPointStrategy,
 };
 
 /// Run the full image processing pipeline, preserving all intermediate

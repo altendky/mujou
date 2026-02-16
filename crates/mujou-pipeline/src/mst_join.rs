@@ -30,7 +30,8 @@ use rstar::RTree;
 use rstar::primitives::GeomWithData;
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Point, Polyline, polyline_bounding_box};
+use crate::join::image_center;
+use crate::types::{Dimensions, Point, Polyline, StartPointStrategy, polyline_bounding_box};
 
 // ---------------------------------------------------------------------------
 // Parity-fixing strategy
@@ -1219,7 +1220,12 @@ fn shortest_path(
 /// Assumes the graph has been fixed to have 0 or 2 odd-degree vertices.
 /// Returns the node sequence of the path.
 #[allow(clippy::too_many_lines)]
-fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
+fn hierholzer(
+    graph: &UnGraph<(), f64>,
+    node_coords: &[geo::Coord<f64>],
+    strategy: StartPointStrategy,
+    dims: Dimensions,
+) -> Vec<NodeIndex> {
     if graph.node_count() == 0 {
         return Vec::new();
     }
@@ -1279,19 +1285,53 @@ fn hierholzer(graph: &UnGraph<(), f64>) -> Vec<NodeIndex> {
 
     // Choose start vertex: prefer one of the original odd-degree vertices
     // (now even due to the virtual edge) so that virtual edges are
-    // traversed first/last.
-    let start = if odd.is_empty() {
-        graph_ref
-            .node_indices()
-            .find(|&n| graph_ref.edges(n).count() > 0)
-            .unwrap_or_else(|| {
-                graph_ref
-                    .node_indices()
-                    .next()
-                    .unwrap_or_else(|| NodeIndex::new(0))
-            })
-    } else {
-        odd[0]
+    // traversed first/last.  Among eligible vertices, pick the one
+    // best matching the start-point strategy (farthest from center for
+    // Outside, nearest for Inside).
+    let start = {
+        // Candidate set: odd-degree vertices if any, otherwise all
+        // vertices with at least one edge.
+        let eligible: Vec<NodeIndex> = if odd.is_empty() {
+            graph_ref
+                .node_indices()
+                .filter(|&n| graph_ref.edges(n).count() > 0)
+                .collect()
+        } else {
+            odd
+        };
+
+        if eligible.is_empty() {
+            graph_ref
+                .node_indices()
+                .next()
+                .unwrap_or_else(|| NodeIndex::new(0))
+        } else {
+            let center = image_center(dims);
+            let center_coord = geo::Coord {
+                x: center.x,
+                y: center.y,
+            };
+            let mut best = eligible[0];
+            let mut best_dist = match strategy {
+                StartPointStrategy::Outside => f64::NEG_INFINITY,
+                StartPointStrategy::Inside => f64::INFINITY,
+            };
+            for &node in &eligible {
+                let coord = node_coords[node.index()];
+                let dx = coord.x - center_coord.x;
+                let dy = coord.y - center_coord.y;
+                let dist = dx.mul_add(dx, dy * dy);
+                let is_better = match strategy {
+                    StartPointStrategy::Outside => dist > best_dist,
+                    StartPointStrategy::Inside => dist < best_dist,
+                };
+                if is_better {
+                    best_dist = dist;
+                    best = node;
+                }
+            }
+            best
+        }
     };
 
     let mut stack = vec![start];
@@ -1469,6 +1509,8 @@ pub fn join_mst(
     k_nearest: usize,
     working_resolution: u32,
     parity_strategy: ParityStrategy,
+    start_point: StartPointStrategy,
+    dims: Dimensions,
 ) -> (Polyline, JoinQualityMetrics) {
     // Filter out empty contours.
     let polylines: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
@@ -1536,7 +1578,7 @@ pub fn join_mst(
             .expect("fix_parity: shortest-path reconstruction failed on MST-connected graph");
     let graph_edge_count_after_fix = graph.edge_count();
 
-    let euler_path = hierholzer(&graph);
+    let euler_path = hierholzer(&graph, &node_coords, start_point, dims);
 
     // Phase 4: Emit.
     assert!(
@@ -1604,11 +1646,23 @@ mod tests {
     const TEST_K: usize = PipelineConfig::DEFAULT_MST_NEIGHBOURS;
     const TEST_RESOLUTION: u32 = PipelineConfig::DEFAULT_WORKING_RESOLUTION;
     const TEST_PARITY: ParityStrategy = ParityStrategy::Greedy;
+    const TEST_START: StartPointStrategy = StartPointStrategy::Outside;
+    const TEST_DIMS: Dimensions = Dimensions {
+        width: 100,
+        height: 100,
+    };
     use crate::types::Point;
 
     #[test]
     fn mst_join_empty() {
-        let (result, metrics) = join_mst(&[], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (result, metrics) = join_mst(
+            &[],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
         assert!(result.is_empty());
         assert_eq!(metrics.mst_edge_count, 0);
     }
@@ -1625,6 +1679,8 @@ mod tests {
             TEST_K,
             TEST_RESOLUTION,
             TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
         );
         assert_eq!(result, contour);
         assert_eq!(metrics.mst_edge_count, 0);
@@ -1639,6 +1695,8 @@ mod tests {
             TEST_K,
             TEST_RESOLUTION,
             TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
         );
         assert_eq!(result.len(), 1);
     }
@@ -1647,7 +1705,14 @@ mod tests {
     fn mst_join_two_contours_produces_single_path() {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let (result, metrics) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (result, metrics) = join_mst(
+            &[c1, c2],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         // Must be non-empty and cover all original points.
         assert!(
@@ -1664,7 +1729,14 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let empty = Polyline::new(Vec::new());
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let (result, _metrics) = join_mst(&[c1, empty, c2], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (result, _metrics) = join_mst(
+            &[c1, empty, c2],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
         assert!(result.len() >= 4);
     }
 
@@ -1688,6 +1760,8 @@ mod tests {
             TEST_K,
             TEST_RESOLUTION,
             TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
         );
         let output_set: std::collections::HashSet<(u64, u64)> = result
             .points()
@@ -1715,7 +1789,14 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(25.0, 0.0)]);
 
-        let (result, _metrics) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (result, _metrics) = join_mst(
+            &[c1, c2, c3],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
         assert!(!result.is_empty());
         // All points should be finite.
         for p in result.points() {
@@ -1730,7 +1811,14 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(6.0, 0.0), Point::new(7.0, 0.0)]);
 
-        let (result, _metrics) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (result, _metrics) = join_mst(
+            &[c1, c2, c3],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
         // Output should contain all 6 original points plus MST connections
         // and any retrace edges.
         assert!(
@@ -1756,7 +1844,14 @@ mod tests {
             .collect();
 
         let total_points: usize = contours.iter().map(Polyline::len).sum();
-        let (result, _metrics) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (result, _metrics) = join_mst(
+            &contours,
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(
             result.len() >= total_points,
@@ -1799,12 +1894,26 @@ mod tests {
         assert!((result.y - 0.0).abs() < 1e-10);
     }
 
+    /// Dummy node coordinates for small test graphs.  Vertices are
+    /// placed along a line so that the start-point strategy has
+    /// predictable behaviour.
+    fn dummy_coords(n: usize) -> Vec<geo::Coord<f64>> {
+        (0..n)
+            .map(|i| geo::Coord {
+                #[allow(clippy::cast_precision_loss)]
+                x: i as f64 * 10.0,
+                y: 0.0,
+            })
+            .collect()
+    }
+
     #[test]
     fn hierholzer_simple_circuit() {
         // Triangle graph: 3 vertices, 3 edges. All degree 2 → Euler circuit.
         let g = UnGraph::<(), f64>::from_edges([(0u32, 1, 1.0), (1, 2, 1.0), (2, 0, 1.0)]);
+        let coords = dummy_coords(g.node_count());
 
-        let path = hierholzer(&g);
+        let path = hierholzer(&g, &coords, TEST_START, TEST_DIMS);
         // Should visit all 3 edges → 4 nodes in path (start == end for circuit).
         assert_eq!(
             path.len(),
@@ -1822,8 +1931,9 @@ mod tests {
         // Path graph: A--B--C. Degree of A and C is 1 (odd), B is 2.
         // Euler path from A to C (or C to A).
         let g = UnGraph::<(), f64>::from_edges([(0u32, 1, 1.0), (1, 2, 1.0)]);
+        let coords = dummy_coords(g.node_count());
 
-        let path = hierholzer(&g);
+        let path = hierholzer(&g, &coords, TEST_START, TEST_DIMS);
         assert_eq!(path.len(), 3, "Euler path on A-B-C should visit 3 nodes");
     }
 
@@ -1887,7 +1997,14 @@ mod tests {
         // Polyline B: short vertical segment above the midpoint of A.
         let b = Polyline::new(vec![Point::new(50.0, 5.0), Point::new(50.0, 10.0)]);
 
-        let (result, _metrics) = join_mst(&[a, b], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (result, _metrics) = join_mst(
+            &[a, b],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
         let pts = result.points();
         assert!(
             pts.len() >= 4,
@@ -1937,6 +2054,8 @@ mod tests {
             1,
             TEST_RESOLUTION,
             TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
         );
         let pts = result.points();
 
@@ -1983,7 +2102,14 @@ mod tests {
             })
             .collect();
 
-        let (_result, metrics) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, metrics) = join_mst(
+            &contours,
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
         assert_eq!(
             metrics.mst_edge_count,
             contours.len() - 1,
@@ -2000,7 +2126,14 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(30.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(40.0, 0.0), Point::new(50.0, 0.0)]);
 
-        let (_result, m) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, m) = join_mst(
+            &[c1, c2, c3],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(m.total_mst_edge_weight >= 0.0);
         assert!(m.max_mst_edge_weight >= 0.0);
@@ -2013,7 +2146,14 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(20.0, 0.0), Point::new(30.0, 0.0)]);
 
-        let (_result, m) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, m) = join_mst(
+            &[c1, c2],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(
             m.total_path_length > 0.0,
@@ -2028,7 +2168,14 @@ mod tests {
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
         let c3 = Polyline::new(vec![Point::new(30.0, 0.0), Point::new(35.0, 0.0)]);
 
-        let (_result, m) = join_mst(&[c1, c2, c3], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, m) = join_mst(
+            &[c1, c2, c3],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(
             m.max_mst_edge_weight <= m.total_mst_edge_weight,
@@ -2051,7 +2198,14 @@ mod tests {
             })
             .collect();
 
-        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, m) = join_mst(
+            &contours,
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(
             m.odd_vertices_after_fix <= 2,
@@ -2071,7 +2225,14 @@ mod tests {
             })
             .collect();
 
-        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, m) = join_mst(
+            &contours,
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(
             m.graph_edge_count_after_fix >= m.graph_edge_count_before_fix,
@@ -2096,7 +2257,14 @@ mod tests {
             })
             .collect();
 
-        let (_result, m) = join_mst(&contours, TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, m) = join_mst(
+            &contours,
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         if m.graph_edge_count_after_fix > m.graph_edge_count_before_fix {
             assert!(
@@ -2109,7 +2277,14 @@ mod tests {
 
     #[test]
     fn metrics_empty_returns_zero_metrics() {
-        let (_result, m) = join_mst(&[], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, m) = join_mst(
+            &[],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert_eq!(m.mst_edge_count, 0);
         assert!(m.total_mst_edge_weight.abs() < f64::EPSILON);
@@ -2132,6 +2307,8 @@ mod tests {
             TEST_K,
             TEST_RESOLUTION,
             TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
         );
 
         assert_eq!(m.mst_edge_count, 0);
@@ -2151,7 +2328,14 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(10.0, 0.0), Point::new(15.0, 0.0)]);
 
-        let (_result, m) = join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION, TEST_PARITY);
+        let (_result, m) = join_mst(
+            &[c1, c2],
+            TEST_K,
+            TEST_RESOLUTION,
+            TEST_PARITY,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(
             m.total_path_length >= m.total_mst_edge_weight,
@@ -2189,8 +2373,14 @@ mod tests {
         // but with Optimal parity strategy.
         let c1 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 0.0)]);
         let c2 = Polyline::new(vec![Point::new(3.0, 0.0), Point::new(4.0, 0.0)]);
-        let (result, metrics) =
-            join_mst(&[c1, c2], TEST_K, TEST_RESOLUTION, ParityStrategy::Optimal);
+        let (result, metrics) = join_mst(
+            &[c1, c2],
+            TEST_K,
+            TEST_RESOLUTION,
+            ParityStrategy::Optimal,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(
             result.len() >= 4,
@@ -2210,8 +2400,14 @@ mod tests {
                 Polyline::new(vec![Point::new(x, 0.0), Point::new(x + 3.0, 0.0)])
             })
             .collect();
-        let (result, metrics) =
-            join_mst(&contours, TEST_K, TEST_RESOLUTION, ParityStrategy::Optimal);
+        let (result, metrics) = join_mst(
+            &contours,
+            TEST_K,
+            TEST_RESOLUTION,
+            ParityStrategy::Optimal,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         assert!(!result.is_empty());
         assert_eq!(metrics.mst_edge_count, 9);
@@ -2231,10 +2427,22 @@ mod tests {
             })
             .collect();
 
-        let (_result_greedy, m_greedy) =
-            join_mst(&contours, TEST_K, TEST_RESOLUTION, ParityStrategy::Greedy);
-        let (_result_optimal, m_optimal) =
-            join_mst(&contours, TEST_K, TEST_RESOLUTION, ParityStrategy::Optimal);
+        let (_result_greedy, m_greedy) = join_mst(
+            &contours,
+            TEST_K,
+            TEST_RESOLUTION,
+            ParityStrategy::Greedy,
+            TEST_START,
+            TEST_DIMS,
+        );
+        let (_result_optimal, m_optimal) = join_mst(
+            &contours,
+            TEST_K,
+            TEST_RESOLUTION,
+            ParityStrategy::Optimal,
+            TEST_START,
+            TEST_DIMS,
+        );
 
         // Optimal should not be worse than greedy for retrace distance.
         assert!(
