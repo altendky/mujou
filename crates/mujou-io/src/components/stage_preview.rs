@@ -207,6 +207,9 @@ fn render_vector_preview(
 
                     // Diagnostic: top-N longest segments (color-coded).
                     {render_top_segments(&top_segments)}
+
+                    // Diagnostic: green circle at path start point.
+                    {render_start_indicator(polyline, show_diagnostics)}
                 }
             }
         }
@@ -288,6 +291,33 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
                     opacity: "0.8",
                 }
             }
+        }
+    }
+}
+
+/// Render a green circle at the first point of the joined path.
+///
+/// This gives the user a clear visual indicator of where the machine
+/// will start drawing, which is especially useful for verifying that
+/// the [`StartPointStrategy`] (inside vs outside) is producing the
+/// desired result.
+fn render_start_indicator(polyline: &mujou_pipeline::Polyline, show: bool) -> Element {
+    if !show {
+        return rsx! {};
+    }
+    let Some(start) = polyline.first() else {
+        return rsx! {};
+    };
+    rsx! {
+        circle {
+            cx: "{start.x}",
+            cy: "{start.y}",
+            r: "4",
+            fill: "#00cc44",
+            stroke: "white",
+            stroke_width: "1",
+            opacity: "0.9",
+            "data-layer": "start-indicator",
         }
     }
 }
