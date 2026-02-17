@@ -34,6 +34,10 @@ pub struct StagePreviewProps {
     result: Option<Rc<WorkerResult>>,
     /// Which stage to display.
     selected: StageId,
+    /// Whether the dark theme is active.  Passed as a prop (rather than
+    /// read from context) so the `PartialEq` memoisation check captures
+    /// theme changes and triggers a re-render.
+    is_dark: bool,
 }
 
 impl PartialEq for StagePreviewProps {
@@ -43,7 +47,7 @@ impl PartialEq for StagePreviewProps {
             (None, None) => true,
             _ => false,
         };
-        results_eq && self.selected == other.selected
+        results_eq && self.selected == other.selected && self.is_dark == other.is_dark
     }
 }
 
@@ -75,9 +79,7 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     let selected = props.selected;
     let w = result.dimensions.width;
     let h = result.dimensions.height;
-
-    // Reactive theme signal provided by the app root.
-    let is_dark: Signal<bool> = use_context();
+    let is_dark = props.is_dark;
 
     // Diagnostic overlay toggle provided by the app root.
     let show_diagnostics: Signal<bool> = use_context();
@@ -89,7 +91,7 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         {render_raster_img(result.original_url.url(), "Original", selected == StageId::Original)}
         {render_raster_img(result.downsampled_url.url(), "Downsampled", selected == StageId::Downsampled)}
         {render_raster_img(result.blur_url.url(), "Blur", selected == StageId::Blur)}
-        {render_raster_edges(result, selected == StageId::Edges, is_dark())}
+        {render_raster_edges(result, selected == StageId::Edges, is_dark)}
 
         // Vector stages — conditionally rendered (SVG is instant).
         {render_vector_preview(result, selected, w, h, show_diagnostics())}

@@ -28,6 +28,10 @@ pub struct FilmstripProps {
     selected: StageId,
     /// Callback fired when a stage tile is clicked.
     on_select: EventHandler<StageId>,
+    /// Whether the dark theme is active.  Passed as a prop (rather than
+    /// read from context) so the `PartialEq` memoisation check captures
+    /// theme changes and triggers a re-render.
+    is_dark: bool,
 }
 
 impl PartialEq for FilmstripProps {
@@ -37,7 +41,7 @@ impl PartialEq for FilmstripProps {
             (None, None) => true,
             _ => false,
         };
-        results_eq && self.selected == other.selected
+        results_eq && self.selected == other.selected && self.is_dark == other.is_dark
     }
 }
 
@@ -49,7 +53,7 @@ impl PartialEq for FilmstripProps {
 /// background are shown for each stage.
 #[component]
 pub fn Filmstrip(props: FilmstripProps) -> Element {
-    let is_dark: Signal<bool> = use_context();
+    let is_dark = props.is_dark;
 
     rsx! {
         div {
@@ -58,7 +62,7 @@ pub fn Filmstrip(props: FilmstripProps) -> Element {
             class: "flex flex-nowrap overflow-x-auto gap-2 py-2 scrollbar-thin flex-shrink-0",
 
             for stage in StageId::ALL {
-                {render_tile(props.result.as_deref(), stage, props.selected == stage, &props.on_select, is_dark())}
+                {render_tile(props.result.as_deref(), stage, props.selected == stage, &props.on_select, is_dark)}
             }
         }
     }
