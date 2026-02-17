@@ -8,7 +8,7 @@
 use dioxus::prelude::*;
 use mujou_pipeline::{
     BorderPathMode, ContourTracerKind, DownsampleFilter, ParityStrategy, PathJoinerKind,
-    PipelineConfig, max_gradient_magnitude,
+    PipelineConfig, StartPointStrategy, max_gradient_magnitude,
 };
 
 use crate::stage::StageId;
@@ -359,6 +359,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
 
         StageId::Join => {
             let config_select = config.clone();
+            let config_start = config.clone();
             let config_slider = config.clone();
             let config_parity = config.clone();
             let is_mst = matches!(config.path_joiner, PathJoinerKind::Mst);
@@ -380,6 +381,25 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                                 "Retrace" => PathJoinerKind::Retrace,
                                 "StraightLine" => PathJoinerKind::StraightLine,
                                 _ => PathJoinerKind::Mst,
+                            };
+                            on_change.call(c);
+                        },
+                    )}
+
+                    {render_select(
+                        "start_point",
+                        "Start Point",
+                        desc("Where to begin the path. Outside starts near the edge (for perimeter-homing machines). Inside starts near the center (for polar sand tables)."),
+                        &[("Outside", "Outside"), ("Inside", "Inside")],
+                        match config_start.start_point {
+                            StartPointStrategy::Outside => "Outside",
+                            StartPointStrategy::Inside => "Inside",
+                        },
+                        move |v: String| {
+                            let mut c = config_start.clone();
+                            c.start_point = match v.as_str() {
+                                "Inside" => StartPointStrategy::Inside,
+                                _ => StartPointStrategy::Outside,
                             };
                             on_change.call(c);
                         },

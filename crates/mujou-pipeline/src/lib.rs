@@ -35,7 +35,7 @@ pub use pipeline::{Pipeline, PipelineCache};
 pub use segment_analysis::{RankedSegment, SEGMENT_COLORS, find_top_segments};
 pub use types::{
     Dimensions, EdgeChannels, GrayImage, PipelineConfig, PipelineError, Point, Polyline,
-    ProcessResult, RgbaImage, StagedResult,
+    ProcessResult, RgbaImage, StagedResult, StartPointStrategy,
 };
 
 /// Run the full image processing pipeline, preserving all intermediate

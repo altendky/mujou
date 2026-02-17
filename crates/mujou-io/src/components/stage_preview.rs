@@ -24,7 +24,7 @@ use crate::stage::StageId;
 use crate::worker::WorkerResult;
 use mujou_export::build_path_data;
 use mujou_pipeline::MstEdgeInfo;
-use mujou_pipeline::segment_analysis::{SEGMENT_COLORS, find_top_segments};
+use mujou_pipeline::segment_analysis::find_top_segments;
 
 /// Props for the [`StagePreview`] component.
 #[derive(Props, Clone)]
@@ -186,11 +186,7 @@ fn render_vector_preview(
                 svg {
                     xmlns: "http://www.w3.org/2000/svg",
                     view_box: "{view_box}",
-                    class: if show_diagnostics {
-                        "w-full h-full bg-[#1a1a1a] rounded"
-                    } else {
-                        "w-full h-full bg-[var(--preview-bg)] rounded"
-                    },
+                    class: "w-full h-full bg-[var(--preview-bg)] rounded",
                     "preserveAspectRatio": "xMidYMid meet",
                     role: "img",
                     "aria-label": "Join stage preview",
@@ -199,7 +195,7 @@ fn render_vector_preview(
                         path {
                             d: "{d}",
                             fill: "none",
-                            stroke: if show_diagnostics { "white" } else { "var(--preview-stroke)" },
+                            stroke: if show_diagnostics { "var(--diag-stroke)" } else { "var(--preview-stroke)" },
                             stroke_width: "1",
                         }
                     }
@@ -209,6 +205,9 @@ fn render_vector_preview(
 
                     // Diagnostic: top-N longest segments (color-coded).
                     {render_top_segments(&top_segments)}
+
+                    // Diagnostic: hollow green circle at path start point.
+                    {render_start_indicator(polyline, show_diagnostics, w, h)}
                 }
             }
         }
@@ -264,10 +263,6 @@ pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline], w: u32, h: u32) 
 
 /// Number of longest segments to highlight in the diagnostic overlay.
 const TOP_N_SEGMENTS: usize = 5;
-const _: () = assert!(
-    TOP_N_SEGMENTS <= SEGMENT_COLORS.len(),
-    "Need at least as many colors as TOP_N_SEGMENTS"
-);
 
 /// Render MST connecting edges as red SVG `<line>` elements.
 fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
@@ -284,7 +279,7 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
                     y1: "{edge.point_a.1}",
                     x2: "{edge.point_b.0}",
                     y2: "{edge.point_b.1}",
-                    stroke: "#ff0000",
+                    stroke: "var(--diag-mst)",
                     stroke_width: "2",
                     stroke_dasharray: "4,2",
                     opacity: "0.8",
@@ -293,6 +288,62 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
         }
     }
 }
+
+/// Render a hollow green circle at the first point of the joined path.
+///
+/// The radius and stroke width are proportional to the image diagonal
+/// so the indicator looks consistent across different image sizes.
+/// `vector-effect: non-scaling-stroke` keeps the stroke visually
+/// stable when the browser scales the SVG to fit the viewport.
+fn render_start_indicator(
+    polyline: &mujou_pipeline::Polyline,
+    show: bool,
+    w: u32,
+    h: u32,
+) -> Element {
+    if !show {
+        return rsx! {};
+    }
+    let Some(start) = polyline.first() else {
+        return rsx! {};
+    };
+
+    // Radius is proportional to the image diagonal so the circle is
+    // a consistent fraction of the drawing regardless of resolution.
+    // Stroke width uses `vector-effect: non-scaling-stroke` so it
+    // stays a constant 2 screen-pixels regardless of how the browser
+    // scales the SVG to fit the viewport.
+    let diag = f64::from(w).hypot(f64::from(h));
+    let r = diag * 0.012;
+
+    rsx! {
+        circle {
+            cx: "{start.x}",
+            cy: "{start.y}",
+            r: "{r}",
+            fill: "none",
+            stroke: "var(--diag-start)",
+            stroke_width: "2",
+            "vector-effect": "non-scaling-stroke",
+            opacity: "0.9",
+            "data-layer": "start-indicator",
+        }
+    }
+}
+
+/// CSS variable names for the top-N segment colors, corresponding to
+/// `--diag-seg-1` through `--diag-seg-5` in `theme.css`.
+const SEGMENT_CSS_VARS: &[&str] = &[
+    "var(--diag-seg-1)",
+    "var(--diag-seg-2)",
+    "var(--diag-seg-3)",
+    "var(--diag-seg-4)",
+    "var(--diag-seg-5)",
+];
+const _: () = assert!(
+    TOP_N_SEGMENTS <= SEGMENT_CSS_VARS.len(),
+    "Need at least as many CSS vars as TOP_N_SEGMENTS"
+);
 
 /// Render the top-N longest segments as color-coded SVG `<line>` elements.
 fn render_top_segments(segments: &[mujou_pipeline::RankedSegment]) -> Element {
@@ -304,7 +355,8 @@ fn render_top_segments(segments: &[mujou_pipeline::RankedSegment]) -> Element {
             "data-layer": "top-segments",
             for (rank, seg) in segments.iter().enumerate() {
                 {
-                    let color = SEGMENT_COLORS.get(rank).copied().unwrap_or("#ffffff");
+                    let color = SEGMENT_CSS_VARS.get(rank).copied()
+                        .unwrap_or("var(--diag-stroke)");
                     rsx! {
                         line {
                             key: "seg-{rank}",

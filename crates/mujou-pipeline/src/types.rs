@@ -1,5 +1,7 @@
 //! Shared types for the mujou image processing pipeline.
 
+use std::fmt;
+
 use serde::{Deserialize, Serialize};
 
 use crate::contour::ContourTracerKind;
@@ -222,6 +224,38 @@ impl Default for EdgeChannels {
     }
 }
 
+/// Controls where path tracing begins relative to the image center.
+///
+/// Sand tables, plotters, and other CNC devices start drawing from a
+/// home position. Choosing a start point that is already near home
+/// avoids a visible traversal line across the output.
+///
+/// The strategy biases the selection of the first contour (for
+/// `StraightLine` / `Retrace` joiners) or the Hierholzer start vertex
+/// (for the `Mst` joiner) based on distance from the image center.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum StartPointStrategy {
+    /// Start from the contour or vertex **farthest** from the image
+    /// center. Suitable for machines that home to the perimeter
+    /// (plotters, laser cutters, Cartesian sand tables).
+    #[default]
+    Outside,
+
+    /// Start from the contour or vertex **nearest** the image center.
+    /// Suitable for machines that home to the center (e.g., Sisyphus
+    /// polar sand tables where the ball rests at rho = 0).
+    Inside,
+}
+
+impl fmt::Display for StartPointStrategy {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Outside => f.write_str("Outside"),
+            Self::Inside => f.write_str("Inside"),
+        }
+    }
+}
+
 /// Configuration for the image processing pipeline.
 ///
 /// All parameters have sensible defaults matching the
@@ -340,6 +374,14 @@ pub struct PipelineConfig {
     /// for per-channel documentation.
     #[serde(default)]
     pub edge_channels: EdgeChannels,
+
+    /// Where to begin path tracing relative to the image center.
+    ///
+    /// `Outside` starts from the contour or vertex farthest from center
+    /// (suitable for machines homing to the perimeter). `Inside` starts
+    /// nearest center (suitable for polar tables homing to rho = 0).
+    #[serde(default)]
+    pub start_point: StartPointStrategy,
 }
 
 impl PipelineConfig {
@@ -378,6 +420,8 @@ impl PipelineConfig {
         blue: false,
         saturation: false,
     };
+    /// Default start point strategy (outside / perimeter).
+    pub const DEFAULT_START_POINT: StartPointStrategy = StartPointStrategy::Outside;
 
     /// Validate that all fields satisfy the documented invariants.
     ///
@@ -484,6 +528,7 @@ impl Default for PipelineConfig {
             mst_neighbours: Self::DEFAULT_MST_NEIGHBOURS,
             parity_strategy: Self::DEFAULT_PARITY_STRATEGY,
             edge_channels: Self::DEFAULT_EDGE_CHANNELS,
+            start_point: Self::DEFAULT_START_POINT,
         }
     }
 }
@@ -514,6 +559,7 @@ impl PipelineConfig {
             mst_neighbours,
             parity_strategy,
             edge_channels,
+            start_point,
         } = self;
 
         *blur_sigma == other.blur_sigma
@@ -531,6 +577,7 @@ impl PipelineConfig {
             && *mst_neighbours == other.mst_neighbours
             && *parity_strategy == other.parity_strategy
             && *edge_channels == other.edge_channels
+            && *start_point == other.start_point
     }
 
     /// Return the zero-based index of the earliest pipeline stage whose
@@ -570,6 +617,7 @@ impl PipelineConfig {
             mst_neighbours,
             parity_strategy,
             edge_channels,
+            start_point,
         } = self;
 
         // Stage 2 — downsample: working_resolution, downsample_filter
@@ -611,10 +659,11 @@ impl PipelineConfig {
             return 7;
         }
 
-        // Stage 8 — joining: path_joiner, mst_neighbours, parity_strategy
+        // Stage 8 — joining: path_joiner, mst_neighbours, parity_strategy, start_point
         if *path_joiner != other.path_joiner
             || *mst_neighbours != other.mst_neighbours
             || *parity_strategy != other.parity_strategy
+            || *start_point != other.start_point
         {
             return 8;
         }
@@ -998,6 +1047,7 @@ mod tests {
         assert!(!config.edge_channels.green);
         assert!(!config.edge_channels.blue);
         assert!(!config.edge_channels.saturation);
+        assert_eq!(config.start_point, StartPointStrategy::Outside);
     }
 
     #[test]
@@ -1083,6 +1133,10 @@ mod tests {
             !a.pipeline_eq(&b),
             "edge_channels change should be detected"
         );
+
+        let mut b = a.clone();
+        b.start_point = StartPointStrategy::Inside;
+        assert!(!a.pipeline_eq(&b), "start_point change should be detected");
     }
 
     #[test]
@@ -1243,6 +1297,7 @@ mod tests {
                 blue: false,
                 saturation: true,
             },
+            start_point: StartPointStrategy::Inside,
         };
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: PipelineConfig = serde_json::from_str(&json).unwrap();
@@ -1277,6 +1332,8 @@ mod tests {
             config.parity_strategy,
             crate::mst_join::ParityStrategy::Greedy,
         );
+        // Also verifies start_point defaults when absent.
+        assert_eq!(config.start_point, StartPointStrategy::Outside);
     }
 
     #[test]
@@ -1550,6 +1607,16 @@ mod tests {
         let a = PipelineConfig::default();
         let b = PipelineConfig {
             parity_strategy: crate::mst_join::ParityStrategy::Optimal,
+            ..PipelineConfig::default()
+        };
+        assert_eq!(a.earliest_changed_stage(&b), 8);
+    }
+
+    #[test]
+    fn earliest_changed_stage_start_point() {
+        let a = PipelineConfig::default();
+        let b = PipelineConfig {
+            start_point: StartPointStrategy::Inside,
             ..PipelineConfig::default()
         };
         assert_eq!(a.earliest_changed_stage(&b), 8);

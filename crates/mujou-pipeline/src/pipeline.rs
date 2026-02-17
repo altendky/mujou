@@ -452,7 +452,10 @@ impl Masked {
             // both the join input and the stored simplified set.
             self.simplified.clone()
         };
-        let output = self.config.path_joiner.join(&join_input, &self.config);
+        let output = self
+            .config
+            .path_joiner
+            .join(&join_input, &self.config, self.dimensions);
         Joined {
             config: self.config,
             original: self.original,

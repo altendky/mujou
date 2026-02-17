@@ -50,6 +50,16 @@
   --preview-bg: #fafafa;
   --preview-stroke: #1a1a1a;
   --backdrop: rgba(0, 0, 0, 0.2);
+
+  /* -- Diagnostic overlay -- */
+  --diag-stroke: #1a1a1a;
+  --diag-mst: #cc0000;
+  --diag-start: #009933;
+  --diag-seg-1: #cc2222;
+  --diag-seg-2: #cc6600;
+  --diag-seg-3: #b8a000;
+  --diag-seg-4: #228822;
+  --diag-seg-5: #2266cc;
 }
 
 [data-theme="dark"] {
@@ -78,6 +88,16 @@
   --preview-bg: #171717;
   --preview-stroke: #fafafa;
   --backdrop: rgba(255, 255, 255, 0.2);
+
+  /* -- Diagnostic overlay -- */
+  --diag-stroke: #fafafa;
+  --diag-mst: #ff0000;
+  --diag-start: #00cc44;
+  --diag-seg-1: #ff3333;
+  --diag-seg-2: #ff8800;
+  --diag-seg-3: #ffdd00;
+  --diag-seg-4: #33cc33;
+  --diag-seg-5: #3399ff;
 }
 
 @media (min-width: 1024px) {

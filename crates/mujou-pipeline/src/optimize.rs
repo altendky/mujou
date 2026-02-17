@@ -9,18 +9,24 @@
 //! This is step 7 in the pipeline, between path simplification and path
 //! joining.
 
-use crate::types::{Point, Polyline};
+use crate::join::choose_start_contour;
+use crate::types::{Dimensions, Point, Polyline, StartPointStrategy};
 
 /// Reorder and orient contours to minimize total travel distance.
 ///
-/// Starting from the first contour, greedily visits the nearest unvisited
-/// contour, reversing its direction if that shortens the gap from the
-/// previous contour's endpoint.
+/// Uses a nearest-neighbor greedy heuristic starting from the contour
+/// chosen by [`StartPointStrategy`] and image dimensions. Greedily
+/// visits the nearest unvisited contour, reversing its direction if
+/// that shortens the gap from the previous contour's endpoint.
 ///
 /// Returns the reordered (and possibly reversed) contours. Empty contours
 /// are filtered out. If all contours are empty, returns an empty vec.
 #[must_use = "returns the optimized contour ordering"]
-pub fn optimize_path_order(contours: &[Polyline]) -> Vec<Polyline> {
+pub fn optimize_path_order(
+    contours: &[Polyline],
+    strategy: StartPointStrategy,
+    dims: Dimensions,
+) -> Vec<Polyline> {
     // Filter out empty contours and collect into owned working set.
     let candidates: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
 
@@ -32,9 +38,18 @@ pub fn optimize_path_order(contours: &[Polyline]) -> Vec<Polyline> {
     let mut visited = vec![false; n];
     let mut result = Vec::with_capacity(n);
 
-    // Start with the first contour (no reordering of the start).
-    visited[0] = true;
-    result.push(candidates[0].clone());
+    // Start with the contour chosen by the start-point strategy.
+    // `reversed` is true when the winning endpoint is the contour's
+    // last point, meaning we must flip it so the path begins there.
+    let (start, reversed) = choose_start_contour(&candidates, strategy, dims);
+    visited[start] = true;
+    if reversed {
+        let mut pts = candidates[start].clone().into_points();
+        pts.reverse();
+        result.push(Polyline::new(pts));
+    } else {
+        result.push(candidates[start].clone());
+    }
 
     for _ in 1..n {
         let current_end = result
@@ -93,10 +108,17 @@ pub fn optimize_path_order(contours: &[Polyline]) -> Vec<Polyline> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Dimensions;
+
+    const TEST_STRATEGY: StartPointStrategy = StartPointStrategy::Outside;
+    const TEST_DIMS: Dimensions = Dimensions {
+        width: 200,
+        height: 200,
+    };
 
     #[test]
     fn empty_input_returns_empty() {
-        let result = optimize_path_order(&[]);
+        let result = optimize_path_order(&[], TEST_STRATEGY, TEST_DIMS);
         assert!(result.is_empty());
     }
 
@@ -107,7 +129,7 @@ mod tests {
             Point::new(1.0, 1.0),
             Point::new(2.0, 0.0),
         ]);
-        let result = optimize_path_order(std::slice::from_ref(&contour));
+        let result = optimize_path_order(std::slice::from_ref(&contour), TEST_STRATEGY, TEST_DIMS);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0], contour);
     }
@@ -119,7 +141,7 @@ mod tests {
             Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
             Polyline::new(vec![]),
         ];
-        let result = optimize_path_order(&contours);
+        let result = optimize_path_order(&contours, TEST_STRATEGY, TEST_DIMS);
         assert_eq!(result.len(), 1);
     }
 
@@ -131,7 +153,11 @@ mod tests {
         let c1 = Polyline::new(vec![Point::new(100.0, 100.0), Point::new(101.0, 100.0)]);
         let c2 = Polyline::new(vec![Point::new(1.0, 1.0), Point::new(2.0, 1.0)]);
 
-        let result = optimize_path_order(&[c0.clone(), c1.clone(), c2.clone()]);
+        let result = optimize_path_order(
+            &[c0.clone(), c1.clone(), c2.clone()],
+            TEST_STRATEGY,
+            TEST_DIMS,
+        );
         assert_eq!(result.len(), 3);
         assert_eq!(result[0], c0);
         assert_eq!(result[1], c2);
@@ -146,7 +172,7 @@ mod tests {
         let c0 = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(10.0, 0.0)]);
         let c1 = Polyline::new(vec![Point::new(100.0, 0.0), Point::new(11.0, 0.0)]);
 
-        let result = optimize_path_order(&[c0, c1]);
+        let result = optimize_path_order(&[c0, c1], TEST_STRATEGY, TEST_DIMS);
         assert_eq!(result.len(), 2);
         // C1 should be reversed: now starts at (11, 0), ends at (100, 0).
         assert_eq!(result[1].first(), Some(&Point::new(11.0, 0.0)));
@@ -162,7 +188,7 @@ mod tests {
             })
             .collect();
 
-        let result = optimize_path_order(&contours);
+        let result = optimize_path_order(&contours, TEST_STRATEGY, TEST_DIMS);
         assert_eq!(result.len(), 10);
     }
 
@@ -176,7 +202,7 @@ mod tests {
         let c3 = Polyline::new(vec![Point::new(52.0, 0.0), Point::new(53.0, 0.0)]);
 
         let original = [c0, c1, c2, c3];
-        let optimized = optimize_path_order(&original);
+        let optimized = optimize_path_order(&original, TEST_STRATEGY, TEST_DIMS);
 
         let travel_original = total_travel(&original);
         let travel_optimized = total_travel(&optimized);
