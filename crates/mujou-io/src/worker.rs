@@ -13,7 +13,9 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use mujou_pipeline::{Dimensions, MaskResult, PipelineConfig, PipelineError, Polyline};
+use mujou_pipeline::{
+    Dimensions, MaskResult, MstEdgeInfo, PipelineConfig, PipelineError, Polyline,
+};
 
 use crate::stage::StageId;
 use serde::{Deserialize, Serialize};
@@ -30,6 +32,8 @@ struct VectorResult {
     simplified: Vec<Polyline>,
     masked: Option<MaskResult>,
     joined: Polyline,
+    #[serde(default)]
+    mst_edge_details: Vec<MstEdgeInfo>,
     dimensions: Dimensions,
 }
 
@@ -57,6 +61,11 @@ pub struct WorkerResult {
     pub masked: Option<MaskResult>,
     /// Joined single polyline (always the final output).
     pub joined: Polyline,
+    /// Per-MST-edge diagnostic details from the join stage.
+    ///
+    /// Present only when the MST joiner is used. Enables diagnostic
+    /// overlays that visualize the connecting edges between contours.
+    pub mst_edge_details: Vec<MstEdgeInfo>,
     /// Image dimensions.
     pub dimensions: Dimensions,
 }
@@ -384,6 +393,7 @@ fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
         simplified: vector.simplified,
         masked: vector.masked,
         joined: vector.joined,
+        mst_edge_details: vector.mst_edge_details,
         dimensions: vector.dimensions,
     })
 }

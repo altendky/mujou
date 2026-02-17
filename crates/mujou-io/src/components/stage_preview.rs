@@ -10,6 +10,11 @@
 //!
 //! When no result is available yet (initial processing), a placeholder
 //! container is shown matching the preview area styling.
+//!
+//! When the diagnostic overlay is active (toggled via `show_diagnostics`
+//! context signal), the Join stage preview renders additional layers:
+//! - Top-N longest segments highlighted in distinct colors
+//! - MST connecting edges shown as red lines
 
 use std::rc::Rc;
 
@@ -18,6 +23,8 @@ use dioxus::prelude::*;
 use crate::stage::StageId;
 use crate::worker::WorkerResult;
 use mujou_export::build_path_data;
+use mujou_pipeline::MstEdgeInfo;
+use mujou_pipeline::segment_analysis::{SEGMENT_COLORS, find_top_segments};
 
 /// Props for the [`StagePreview`] component.
 #[derive(Props, Clone)]
@@ -72,6 +79,9 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     // Reactive theme signal provided by the app root.
     let is_dark: Signal<bool> = use_context();
 
+    // Diagnostic overlay toggle provided by the app root.
+    let show_diagnostics: Signal<bool> = use_context();
+
     rsx! {
         // Raster stage <img> elements are always present in the DOM so
         // the browser eagerly decodes their blob URLs. Non-selected
@@ -82,7 +92,7 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         {render_raster_edges(result, selected == StageId::Edges, is_dark())}
 
         // Vector stages — conditionally rendered (SVG is instant).
-        {render_vector_preview(result, selected, w, h)}
+        {render_vector_preview(result, selected, w, h, show_diagnostics())}
     }
 }
 
@@ -117,7 +127,13 @@ fn render_raster_edges(result: &WorkerResult, visible: bool, is_dark: bool) -> E
 
 /// Render the vector (SVG) preview for Contours, Simplified, Join, or
 /// Masked stages. Returns empty for raster stages.
-fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u32) -> Element {
+fn render_vector_preview(
+    result: &WorkerResult,
+    selected: StageId,
+    w: u32,
+    h: u32,
+    show_diagnostics: bool,
+) -> Element {
     match selected {
         StageId::Contours | StageId::Simplified | StageId::Masked => {
             let polylines = result.polylines_for_stage(selected);
@@ -152,11 +168,27 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
             let view_box = compute_view_box(std::slice::from_ref(polyline), w, h);
             let d = build_path_data(polyline);
 
+            // Pre-compute diagnostic overlays when active.
+            let top_segments = if show_diagnostics {
+                find_top_segments(std::slice::from_ref(polyline), TOP_N_SEGMENTS)
+            } else {
+                Vec::new()
+            };
+            let mst_edges = if show_diagnostics {
+                &result.mst_edge_details
+            } else {
+                &[][..]
+            };
+
             rsx! {
                 svg {
                     xmlns: "http://www.w3.org/2000/svg",
                     view_box: "{view_box}",
-                    class: "w-full h-full bg-[var(--preview-bg)] rounded",
+                    class: if show_diagnostics {
+                        "w-full h-full bg-[#1a1a1a] rounded"
+                    } else {
+                        "w-full h-full bg-[var(--preview-bg)] rounded"
+                    },
                     "preserveAspectRatio": "xMidYMid meet",
                     role: "img",
                     "aria-label": "Join stage preview",
@@ -165,10 +197,16 @@ fn render_vector_preview(result: &WorkerResult, selected: StageId, w: u32, h: u3
                         path {
                             d: "{d}",
                             fill: "none",
-                            stroke: "var(--preview-stroke)",
+                            stroke: if show_diagnostics { "white" } else { "var(--preview-stroke)" },
                             stroke_width: "1",
                         }
                     }
+
+                    // Diagnostic: MST connecting edges (red lines).
+                    {render_mst_edges(mst_edges)}
+
+                    // Diagnostic: top-N longest segments (color-coded).
+                    {render_top_segments(&top_segments)}
                 }
             }
         }
@@ -218,4 +256,67 @@ pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline], w: u32, h: u32) 
     max_y += pad;
 
     format!("{min_x} {min_y} {} {}", max_x - min_x, max_y - min_y)
+}
+
+// ───────────────────────── Diagnostic overlay ────────────────────────
+
+/// Number of longest segments to highlight in the diagnostic overlay.
+const TOP_N_SEGMENTS: usize = 5;
+const _: () = assert!(
+    TOP_N_SEGMENTS <= SEGMENT_COLORS.len(),
+    "Need at least as many colors as TOP_N_SEGMENTS"
+);
+
+/// Render MST connecting edges as red SVG `<line>` elements.
+fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
+    if edges.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        g {
+            "data-layer": "mst-edges",
+            for (i, edge) in edges.iter().enumerate() {
+                line {
+                    key: "mst-{i}",
+                    x1: "{edge.point_a.0}",
+                    y1: "{edge.point_a.1}",
+                    x2: "{edge.point_b.0}",
+                    y2: "{edge.point_b.1}",
+                    stroke: "#ff0000",
+                    stroke_width: "2",
+                    stroke_dasharray: "4,2",
+                    opacity: "0.8",
+                }
+            }
+        }
+    }
+}
+
+/// Render the top-N longest segments as color-coded SVG `<line>` elements.
+fn render_top_segments(segments: &[mujou_pipeline::RankedSegment]) -> Element {
+    if segments.is_empty() {
+        return rsx! {};
+    }
+    rsx! {
+        g {
+            "data-layer": "top-segments",
+            for (rank, seg) in segments.iter().enumerate() {
+                {
+                    let color = SEGMENT_COLORS.get(rank).copied().unwrap_or("#ffffff");
+                    rsx! {
+                        line {
+                            key: "seg-{rank}",
+                            x1: "{seg.from.0}",
+                            y1: "{seg.from.1}",
+                            x2: "{seg.to.0}",
+                            y2: "{seg.to.1}",
+                            stroke: "{color}",
+                            stroke_width: "3",
+                            opacity: "0.9",
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
