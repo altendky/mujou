@@ -16,6 +16,14 @@
 - [Output Formats](project/formats.md)
 - [UI Design](project/ui.md)
 
+# Ecosystem
+
+- [Overview](ecosystem/index.md)
+- [Manufacturers & Devices](ecosystem/manufacturers.md)
+- [File Formats by Device](ecosystem/formats.md)
+- [Community Resources](ecosystem/community.md)
+- [Existing Software](ecosystem/software.md)
+
 # Project Management
 
 - [Development](project/development.md)
