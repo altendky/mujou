@@ -22,6 +22,12 @@ use svg::node::{Node, Text, Value};
 use mujou_pipeline::segment_analysis::{SEGMENT_COLORS, find_top_segments};
 use mujou_pipeline::{Dimensions, MaskShape, MstEdgeInfo, Polyline};
 
+// TODO: review these constants for different table models / sizes.
+/// SVG document width and height in millimetres.
+const DOCUMENT_SIZE_MM: f64 = 200.0;
+/// Target circle diameter in millimetres within the document.
+const CIRCLE_DIAMETER_MM: f64 = 195.0;
+
 /// Metadata to embed in the SVG document.
 ///
 /// Both fields are optional.  When present, a `<title>` and/or `<desc>`
@@ -86,6 +92,30 @@ pub fn build_path_data(polyline: &Polyline) -> String {
     let mut data = Data::new().move_to((first.x, first.y));
     for p in &points[1..] {
         data = data.line_to((p.x, p.y));
+    }
+    String::from(Value::from(data))
+}
+
+/// Like [`build_path_data`] but applies a uniform scale-and-translate to
+/// every coordinate before emitting it.  Used by [`to_svg`] to convert
+/// pixel-space polylines into the mm-based `viewBox` coordinate system.
+fn build_path_data_transformed(
+    polyline: &Polyline,
+    scale: f64,
+    offset_x: f64,
+    offset_y: f64,
+) -> String {
+    let points = polyline.points();
+    if points.len() < 2 {
+        return String::new();
+    }
+
+    let tx = |p: &mujou_pipeline::Point| ((p.x - offset_x) * scale, (p.y - offset_y) * scale);
+
+    let first = tx(&points[0]);
+    let mut data = Data::new().move_to(first);
+    for p in &points[1..] {
+        data = data.line_to(tx(p));
     }
     String::from(Value::from(data))
 }
@@ -244,25 +274,41 @@ pub fn to_svg(
 ) -> String {
     // Exhaustive match on MaskShape ensures new variants get a compile
     // error here, matching the convention in mask.rs.
-    let mut doc = mask_shape.map_or_else(
+    //
+    // For the Circle mask the viewBox is `0 0 200 200` (mm-based) and
+    // all path coordinates are transformed from pixel space into mm
+    // space.  The returned transform tuple is (scale, offset_x, offset_y)
+    // such that  mm = (px - offset) * scale.
+    let (mut doc, transform) = mask_shape.map_or_else(
         || {
             let w = dimensions.width;
             let h = dimensions.height;
-            Document::new()
+            let doc = Document::new()
                 .set("width", w)
                 .set("height", h)
-                .set("viewBox", (0, 0, w, h))
+                .set("viewBox", (0, 0, w, h));
+            (doc, None)
         },
         |shape| match shape {
             MaskShape::Circle { center, radius } => {
-                let size = 2.0 * radius;
-                let min_x = center.x - radius;
-                let min_y = center.y - radius;
-                Document::new()
-                    .set("width", size)
-                    .set("height", size)
-                    .set("viewBox", format!("{min_x} {min_y} {size} {size}"))
-                    .set("preserveAspectRatio", "xMidYMid meet")
+                let diameter = 2.0 * radius;
+                // The viewBox is in mm: `0 0 DOCUMENT_SIZE_MM DOCUMENT_SIZE_MM`.
+                // Pixel coordinates are transformed so the circle diameter
+                // maps to CIRCLE_DIAMETER_MM, centred in the document.
+                let vb_size = diameter * DOCUMENT_SIZE_MM / CIRCLE_DIAMETER_MM;
+                let margin = (vb_size - diameter) / 2.0;
+                let offset_x = center.x - radius - margin;
+                let offset_y = center.y - radius - margin;
+                let scale = DOCUMENT_SIZE_MM / vb_size;
+                let doc = Document::new()
+                    .set("width", format!("{DOCUMENT_SIZE_MM}mm"))
+                    .set("height", format!("{DOCUMENT_SIZE_MM}mm"))
+                    .set(
+                        "viewBox",
+                        format!("0 0 {DOCUMENT_SIZE_MM} {DOCUMENT_SIZE_MM}"),
+                    )
+                    .set("preserveAspectRatio", "xMidYMid meet");
+                (doc, Some((scale, offset_x, offset_y)))
             }
         },
     );
@@ -287,9 +333,15 @@ pub fn to_svg(
         doc = doc.add(metadata_el);
     }
 
-    // One <path> per polyline (skip polylines with fewer than 2 points)
+    // One <path> per polyline (skip polylines with fewer than 2 points).
+    // When a transform is present (circle mask), coordinates are mapped
+    // from pixel space into the mm-based viewBox.
     for polyline in polylines {
-        let d = build_path_data(polyline);
+        let d = if let Some((scale, offset_x, offset_y)) = transform {
+            build_path_data_transformed(polyline, scale, offset_x, offset_y)
+        } else {
+            build_path_data(polyline)
+        };
         if d.is_empty() {
             continue;
         }
@@ -949,9 +1001,10 @@ mod tests {
 
     #[test]
     fn mask_shape_produces_square_viewbox() {
+        // radius chosen as multiple of 39/2 so diameter*40/39 is exact.
         let shape = MaskShape::Circle {
             center: Point::new(500.0, 333.5),
-            radius: 450.0,
+            radius: 390.0,
         };
         let polylines = vec![Polyline::new(vec![
             Point::new(100.0, 100.0),
@@ -959,17 +1012,25 @@ mod tests {
         ])];
         let svg = to_svg(&polylines, dims(1000, 667), &no_meta(), Some(&shape));
 
-        // Square dimensions: 2 * 450 = 900
-        assert!(svg.contains(r#"width="900""#), "width should be 900");
-        assert!(svg.contains(r#"height="900""#), "height should be 900");
-        // viewBox origin: (500-450, 333.5-450) = (50, -116.5)
+        // Document sized in mm with mm-based viewBox.
+        assert!(svg.contains(r#"width="200mm""#), "width should be 200mm");
+        assert!(svg.contains(r#"height="200mm""#), "height should be 200mm");
+        // diameter=780, vb_size=800, scale=200/800=0.25, offset=(100, -66.5)
+        // viewBox is now in mm, matching the document.
         assert!(
-            svg.contains("viewBox=\"50 -116.5 900 900\""),
-            "viewBox should be square centered on mask circle, got:\n{svg}",
+            svg.contains(r#"viewBox="0 0 200 200""#),
+            "viewBox should be mm-based, got:\n{svg}",
         );
         assert!(
             svg.contains(r#"preserveAspectRatio="xMidYMid meet""#),
             "should have explicit preserveAspectRatio",
+        );
+        // Path coordinates transformed to mm:
+        //   (100,100) → ((100-100)*0.25, (100-(-66.5))*0.25) = (0, 41.625)
+        //   (200,200) → ((200-100)*0.25, (200-(-66.5))*0.25) = (25, 66.625)
+        assert!(
+            svg.contains("M0,41.625 L25,66.625"),
+            "path coordinates should be in mm, got:\n{svg}",
         );
     }
 
@@ -984,31 +1045,30 @@ mod tests {
     }
 
     #[test]
-    fn mask_shape_square_image_viewbox_extends_beyond() {
-        // For a square 1000x1000 image with default mask_diameter=0.75:
-        // diagonal = 1414.21, radius = 1414.21 * 0.75 / 2 = 530.33
-        // The circle diameter (1060.66) exceeds the image (1000).
-        let radius = 530.33;
+    fn mask_shape_large_circle_still_uses_mm_viewbox() {
+        // Circle exceeds the image — the pixel-space viewBox *would* have
+        // a negative origin, but the mm-based viewBox is always 0 0 200 200.
+        // radius chosen as multiple of 39/2 so diameter*40/39 is exact.
         let shape = MaskShape::Circle {
             center: Point::new(500.0, 500.0),
-            radius,
+            radius: 585.0,
         };
         let svg = to_svg(&[], dims(1000, 1000), &no_meta(), Some(&shape));
 
-        // viewBox origin: (500-530.33, 500-530.33) = (-30.33, -30.33)
-        // viewBox size: 1060.66
+        // diameter=1170, vb_size=1200, scale=200/1200=1/6, offset=(-100,-100)
         assert!(
-            svg.contains("viewBox=\"-30.33"),
-            "viewBox should have negative origin"
+            svg.contains(r#"viewBox="0 0 200 200""#),
+            "viewBox should be mm-based, got:\n{svg}",
         );
         assert!(svg.contains(r#"preserveAspectRatio="xMidYMid meet""#));
     }
 
     #[test]
     fn mask_shape_viewbox_still_renders_paths() {
+        // radius chosen as multiple of 39/2 so diameter*40/39 is exact.
         let shape = MaskShape::Circle {
             center: Point::new(50.0, 50.0),
-            radius: 40.0,
+            radius: 39.0,
         };
         let polylines = vec![Polyline::new(vec![
             Point::new(30.0, 30.0),
@@ -1017,16 +1077,22 @@ mod tests {
         let svg = to_svg(&polylines, dims(100, 100), &no_meta(), Some(&shape));
 
         assert!(svg.contains("<path"));
-        assert!(svg.contains(r#"d="M30,30 L70,70""#));
-        // Square viewBox: side = 80, origin = (10, 10)
-        assert!(svg.contains("viewBox=\"10 10 80 80\""));
+        // diameter=78, vb_size=80, scale=200/80=2.5, offset=(10, 10)
+        // (30,30) → ((30-10)*2.5, (30-10)*2.5) = (50, 50)
+        // (70,70) → ((70-10)*2.5, (70-10)*2.5) = (150, 150)
+        assert!(
+            svg.contains(r#"d="M50,50 L150,150""#),
+            "path coordinates should be in mm, got:\n{svg}",
+        );
+        assert!(svg.contains(r#"viewBox="0 0 200 200""#));
     }
 
     #[test]
     fn mask_shape_with_metadata() {
+        // radius chosen as multiple of 39/2 so diameter*40/39 is exact.
         let shape = MaskShape::Circle {
             center: Point::new(100.0, 100.0),
-            radius: 80.0,
+            radius: 78.0,
         };
         let meta = SvgMetadata {
             title: Some("test"),
@@ -1038,6 +1104,7 @@ mod tests {
         assert!(svg.contains("<title>test</title>"));
         assert!(svg.contains("<desc>masked export</desc>"));
         assert!(svg.contains("<metadata>"));
-        assert!(svg.contains("viewBox=\"20 20 160 160\""));
+        // diameter=156, vb_size=160, scale=200/160=1.25, offset=(20, 20)
+        assert!(svg.contains(r#"viewBox="0 0 200 200""#));
     }
 }
