@@ -33,7 +33,7 @@ This is the most complex export step.
 4. **Theta**: `theta = atan2(x, y)`, with continuous accumulation
 
 The Sisyphus ecosystem uses `atan2(x, y)` -- **not** the standard math `atan2(y, x)`.
-This means theta=0 points **up** (along Y+), and the Cartesian-to-polar / polar-to-Cartesian conversions are:
+This means theta=0 points **up** (along +Y), and the Cartesian-to-polar / polar-to-Cartesian conversions are:
 
 - `theta = atan2(x, y)`
 - `x = rho * sin(theta)`, `y = rho * cos(theta)`
