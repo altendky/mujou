@@ -1474,6 +1474,36 @@ fn emit_polyline(path: &[NodeIndex], node_coords: &[geo::Coord<f64>]) -> Polylin
 }
 
 // ---------------------------------------------------------------------------
+// Path orientation
+// ---------------------------------------------------------------------------
+
+/// Orient the final polyline so the preferred endpoint leads.
+///
+/// For [`Outside`](StartPointStrategy::Outside) the endpoint
+/// **farthest** from the image center should be first; for
+/// [`Inside`](StartPointStrategy::Inside) the **nearest**.
+/// If the wrong end currently leads, the path is reversed.
+fn orient_path(polyline: Polyline, strategy: StartPointStrategy, dims: Dimensions) -> Polyline {
+    let (Some(first), Some(last)) = (polyline.first(), polyline.last()) else {
+        return polyline;
+    };
+    let center = image_center(dims);
+    let first_dist = center.distance_squared(*first);
+    let last_dist = center.distance_squared(*last);
+    let should_reverse = match strategy {
+        StartPointStrategy::Outside => last_dist > first_dist,
+        StartPointStrategy::Inside => last_dist < first_dist,
+    };
+    if should_reverse {
+        let mut pts = polyline.into_points();
+        pts.reverse();
+        Polyline::new(pts)
+    } else {
+        polyline
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 
@@ -1520,7 +1550,7 @@ pub fn join_mst(
     }
 
     if polylines.len() == 1 {
-        let path = polylines[0].clone();
+        let path = orient_path(polylines[0].clone(), start_point, dims);
         let total_path_length = path_polyline_length(&path);
         // Single contour: no MST or Euler graph is constructed, so all
         // graph-related metrics are zero.  Only `total_path_length`
@@ -1591,6 +1621,13 @@ pub fn join_mst(
 
     let total_path_length = compute_path_length(&euler_path, &node_coords);
     let polyline = emit_polyline(&euler_path, &node_coords);
+
+    // Orient the path so that the correct endpoint leads.  Hierholzer
+    // picks a start vertex among odd-degree nodes but virtual-edge
+    // removal can relocate the actual path endpoints.  Reversing an
+    // Euler path is always valid — every edge traversed forward exists
+    // in the undirected graph and can be traversed backward.
+    let polyline = orient_path(polyline, start_point, dims);
 
     let metrics = JoinQualityMetrics {
         mst_edge_count,
