@@ -3,7 +3,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use dioxus_free_icons::Icon;
 use dioxus_free_icons::icons::ld_icons::{
-    LdClipboardCheck, LdClipboardCopy, LdClipboardPaste, LdDownload, LdInfo,
+    LdClipboardCheck, LdClipboardCopy, LdClipboardPaste, LdDownload, LdInfo, LdLayers,
 };
 use mujou_io::{
     ExportPanel, FileUpload, Filmstrip, PipelineWorker, StageControls, StageId, StagePreview,
@@ -160,6 +160,8 @@ fn app() -> Element {
     let show_descriptions = use_signal(|| false);
     // Controls visibility of the export popup.
     let mut show_export = use_signal(|| false);
+    // Controls visibility of diagnostic overlays on the Join stage preview.
+    let show_diagnostics = use_context_provider(|| Signal::new(false));
 
     // --- Accessibility: focus management and inert background ---
 
@@ -653,6 +655,7 @@ fn app() -> Element {
                                 live_config: live_config,
                                 committed_config: committed_config,
                                 show_descriptions: show_descriptions,
+                                show_diagnostics: show_diagnostics,
                             }
 
                             // Controls (right, fills remaining space)
@@ -775,6 +778,7 @@ fn ConfigButtons(
     live_config: Signal<mujou_pipeline::PipelineConfig>,
     committed_config: Signal<mujou_pipeline::PipelineConfig>,
     show_descriptions: Signal<bool>,
+    show_diagnostics: Signal<bool>,
 ) -> Element {
     let mut copied = use_signal(|| false);
     let mut copy_generation = use_signal(|| 0u32);
@@ -853,6 +857,15 @@ fn ConfigButtons(
                 "aria-pressed": if show_descriptions() { "true" } else { "false" },
                 onclick: move |_| show_descriptions.toggle(),
                 Icon { width: 20, height: 20, icon: LdInfo }
+            }
+            button {
+                class: "{btn_class}",
+                class: if show_diagnostics() { "ring-2 ring-[var(--border-accent)] ring-offset-1 ring-offset-[var(--surface)]" },
+                title: "Toggle diagnostic overlay",
+                aria_label: "Toggle diagnostic overlay",
+                "aria-pressed": if show_diagnostics() { "true" } else { "false" },
+                onclick: move |_| show_diagnostics.toggle(),
+                Icon { width: 20, height: 20, icon: LdLayers }
             }
 
             if let Some(ref err) = error_msg() {

@@ -19,6 +19,7 @@ use svg::node::element::path::Data;
 use svg::node::element::{Description, Element, Path, Title};
 use svg::node::{Node, Text, Value};
 
+use mujou_pipeline::segment_analysis::{SEGMENT_COLORS, find_top_segments};
 use mujou_pipeline::{Dimensions, MaskShape, MstEdgeInfo, Polyline};
 
 /// Metadata to embed in the SVG document.
@@ -384,33 +385,6 @@ pub fn to_diagnostic_svg(
 // Segment diagnostic SVG
 // ---------------------------------------------------------------------------
 
-/// Distinct colors for the top-N highlighted segments.
-///
-/// Chosen for visibility against a dark background and mutual
-/// distinguishability. The palette cycles if `top_n` exceeds the
-/// array length.
-const SEGMENT_COLORS: &[&str] = &[
-    "#ff3333", // red
-    "#ff8800", // orange
-    "#ffdd00", // yellow
-    "#33cc33", // green
-    "#3399ff", // blue
-];
-
-/// A single segment identified for highlighting.
-struct RankedSegment {
-    /// Polyline index within the input slice.
-    poly_idx: usize,
-    /// Segment index within the polyline (from point `seg_idx` to `seg_idx + 1`).
-    seg_idx: usize,
-    /// Start point.
-    from: (f64, f64),
-    /// End point.
-    to: (f64, f64),
-    /// Euclidean length in pixels.
-    length: f64,
-}
-
 /// Generate a diagnostic SVG highlighting the longest segments.
 ///
 /// Renders all polylines in white on a dark background, then overlays
@@ -450,30 +424,7 @@ pub fn to_segment_diagnostic_svg(
     let _ = writeln!(out, "  </g>");
 
     // Find the top N longest segments across all polylines.
-    let mut all_segments: Vec<RankedSegment> = Vec::new();
-    for (poly_idx, polyline) in polylines.iter().enumerate() {
-        let pts = polyline.points();
-        for seg_idx in 0..pts.len().saturating_sub(1) {
-            let from = pts[seg_idx];
-            let to = pts[seg_idx + 1];
-            let length = from.distance(to);
-            all_segments.push(RankedSegment {
-                poly_idx,
-                seg_idx,
-                from: (from.x, from.y),
-                to: (to.x, to.y),
-                length,
-            });
-        }
-    }
-
-    // Sort descending by length, take top N.
-    all_segments.sort_by(|a, b| {
-        b.length
-            .partial_cmp(&a.length)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    all_segments.truncate(top_n);
+    let all_segments = find_top_segments(polylines, top_n);
 
     // Highlighted segments
     if !all_segments.is_empty() {

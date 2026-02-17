@@ -728,6 +728,11 @@ pub struct StagedResult {
     /// When masking is enabled, this is the join of the masked polylines.
     /// When disabled, this is the join of the simplified polylines.
     pub joined: Polyline,
+    /// Per-MST-edge diagnostic details from the join stage.
+    ///
+    /// Present only when the MST joiner is used. Enables diagnostic
+    /// overlays that visualize the connecting edges between contours.
+    pub mst_edge_details: Vec<crate::MstEdgeInfo>,
     /// Source image dimensions in pixels.
     pub dimensions: Dimensions,
 }
@@ -758,6 +763,8 @@ struct StagedResultProxy {
     simplified: Vec<Polyline>,
     masked: Option<MaskResult>,
     joined: Polyline,
+    #[serde(default)]
+    mst_edge_details: Vec<crate::MstEdgeInfo>,
     dimensions: Dimensions,
 }
 
@@ -788,6 +795,7 @@ impl Serialize for StagedResult {
             simplified: self.simplified.clone(),
             masked: self.masked.clone(),
             joined: self.joined.clone(),
+            mst_edge_details: self.mst_edge_details.clone(),
             dimensions: self.dimensions,
         };
         // Note: the proxy stores blurred as (w, h, Vec<u8>) — the raw
@@ -822,6 +830,7 @@ impl<'de> Deserialize<'de> for StagedResult {
             simplified: proxy.simplified,
             masked: proxy.masked,
             joined: proxy.joined,
+            mst_edge_details: proxy.mst_edge_details,
             dimensions: proxy.dimensions,
         })
     }
@@ -1359,6 +1368,7 @@ mod tests {
             ])],
             masked: None,
             joined: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
+            mst_edge_details: vec![],
             dimensions: Dimensions {
                 width: 2,
                 height: 2,
@@ -1386,6 +1396,7 @@ mod tests {
         assert_eq!(staged.simplified, deserialized.simplified);
         assert_eq!(staged.masked, deserialized.masked);
         assert_eq!(staged.joined, deserialized.joined);
+        assert_eq!(staged.mst_edge_details, deserialized.mst_edge_details);
         assert_eq!(staged.dimensions, deserialized.dimensions);
     }
 
@@ -1426,6 +1437,7 @@ mod tests {
             simplified: vec![],
             masked: None,
             joined: Polyline::new(vec![]),
+            mst_edge_details: vec![],
             dimensions: Dimensions {
                 width: 1,
                 height: 1,
