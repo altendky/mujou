@@ -560,6 +560,7 @@ fn app() -> Element {
                                 StagePreview {
                                     result: result(),
                                     selected: selected_stage(),
+                                    is_dark: is_dark(),
                                 }
                             }
 
@@ -646,6 +647,7 @@ fn app() -> Element {
                             result: result(),
                             selected: selected_stage(),
                             on_select: on_stage_select,
+                            is_dark: is_dark(),
                         }
 
                         // Per-stage controls with copy/paste config buttons
