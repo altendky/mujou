@@ -769,21 +769,47 @@ fn fix_parity(
     graph: &mut UnGraph<(), f64>,
     node_coords: &[geo::Coord<f64>],
     strategy: ParityStrategy,
+    close_circuit: bool,
 ) -> Result<(f64, usize, usize), String> {
     let odd = odd_degree_vertices(graph);
     let odd_before = odd.len();
 
-    if odd_before <= 2 {
-        // 0 or 2 odd-degree vertices: already Eulerian.
-        return Ok((0.0, odd_before, odd_before));
+    if odd_before == 0 {
+        // Already an Euler circuit — nothing to do.
+        return Ok((0.0, 0, 0));
     }
 
+    if odd_before == 2 && !close_circuit {
+        // Already an Euler path — leave the 2 odd vertices as endpoints.
+        return Ok((0.0, 2, 2));
+    }
+
+    if odd_before == 2 && close_circuit {
+        // Pair the 2 remaining odd vertices to close the circuit.
+        let total_retrace = apply_matching(graph, &[(odd[0], odd[1])])?;
+        let odd_after = odd_degree_vertices(graph).len();
+        return Ok((total_retrace, odd_before, odd_after));
+    }
+
+    // > 2 odd vertices: run the matching algorithm.
     let pairs = match strategy {
         ParityStrategy::Greedy => greedy_euclidean_matching(&odd, node_coords),
         ParityStrategy::Optimal => optimal_matching(graph, &odd, node_coords)?,
     };
 
-    let total_retrace = apply_matching(graph, &pairs)?;
+    let mut total_retrace = apply_matching(graph, &pairs)?;
+
+    // When close_circuit is requested, also pair the 2 remaining odd
+    // vertices so the graph becomes an Euler circuit (0 odd).  This
+    // adds one extra retrace along the shortest graph path but lets
+    // Hierholzer start at any vertex — giving full control over where
+    // the machine begins drawing.
+    if close_circuit {
+        let remaining = odd_degree_vertices(graph);
+        if remaining.len() == 2 {
+            total_retrace += apply_matching(graph, &[(remaining[0], remaining[1])])?;
+        }
+    }
 
     let odd_after = odd_degree_vertices(graph).len();
     Ok((total_retrace, odd_before, odd_after))
@@ -1604,7 +1630,7 @@ pub fn join_mst(
     let graph_edge_count_before_fix = graph.edge_count();
 
     let (total_retrace_distance, odd_vertices_before_fix, odd_vertices_after_fix) =
-        fix_parity(&mut graph, &node_coords, parity_strategy)
+        fix_parity(&mut graph, &node_coords, parity_strategy, true)
             .expect("fix_parity: shortest-path reconstruction failed on MST-connected graph");
     let graph_edge_count_after_fix = graph.edge_count();
 
@@ -2012,7 +2038,7 @@ mod tests {
         ];
 
         let (retrace, odd_before, odd_after) =
-            fix_parity(&mut g, &node_coords, ParityStrategy::Greedy).unwrap();
+            fix_parity(&mut g, &node_coords, ParityStrategy::Greedy, false).unwrap();
         assert!(retrace >= 0.0, "retrace distance should be non-negative");
         assert_eq!(
             odd_before, 4,
