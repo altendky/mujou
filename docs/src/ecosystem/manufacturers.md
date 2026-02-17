@@ -25,7 +25,7 @@ Sand field diameter (or dimensions for rectangular tables) determines the resolv
 
 | Model | Sand Diameter | Overall Size | Status |
 | --- | --- | --- | --- |
-| Oasis Mini | 9" / 234mm | 9" dia x 3" tall | Shipping (50,000+ units) |
+| Oasis Mini | 9" / 234mm | 9" dia x 3" tall | Shipping (50,000+ units as of Feb 2026) |
 | Oasis Side Table | 20" / 500mm | 20" dia x 21" tall | Pre-order, shipping March 2026 (as of Feb 2026) |
 | Oasis Coffee Table | 34" / 850mm | 34" dia x 16" tall | Pre-order, shipping March 2026 (as of Feb 2026) |
 
