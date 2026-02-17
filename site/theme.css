@@ -52,7 +52,6 @@
   --backdrop: rgba(0, 0, 0, 0.2);
 
   /* -- Diagnostic overlay -- */
-  --diag-bg: #e8e8e8;
   --diag-stroke: #1a1a1a;
   --diag-mst: #cc0000;
   --diag-start: #009933;
@@ -91,7 +90,6 @@
   --backdrop: rgba(255, 255, 255, 0.2);
 
   /* -- Diagnostic overlay -- */
-  --diag-bg: #1a1a1a;
   --diag-stroke: #fafafa;
   --diag-mst: #ff0000;
   --diag-start: #00cc44;

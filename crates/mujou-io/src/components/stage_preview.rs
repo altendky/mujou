@@ -184,11 +184,7 @@ fn render_vector_preview(
                 svg {
                     xmlns: "http://www.w3.org/2000/svg",
                     view_box: "{view_box}",
-                    class: if show_diagnostics {
-                        "w-full h-full bg-[var(--diag-bg)] rounded"
-                    } else {
-                        "w-full h-full bg-[var(--preview-bg)] rounded"
-                    },
+                    class: "w-full h-full bg-[var(--preview-bg)] rounded",
                     "preserveAspectRatio": "xMidYMid meet",
                     role: "img",
                     "aria-label": "Join stage preview",
