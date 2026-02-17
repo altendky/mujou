@@ -64,7 +64,7 @@ Dune Weaver does **not** accept SVG files. Only .thr is supported.
 
 The .thr format uses normalized rho (0.0--1.0) and continuous theta (radians), so it is inherently device-independent -- no physical dimensions appear in the file. However, there are implementation details worth noting:
 
-- **Subsampling before polar conversion**: [Sandify](https://github.com/jeffeb3/sandify) breaks long line segments into shorter sub-segments (max length 2.0 units) before converting from Cartesian to polar coordinates. This prevents angular artifacts where a long straight XY segment maps to an unexpected arc in theta-rho space. mujou should do the same.
+- **Subsampling before polar conversion**: [Sandify](https://github.com/jeffeb3/sandify) breaks long line segments into shorter sub-segments (max length 2.0 mm in machine coordinates) before converting from Cartesian to polar coordinates. This prevents angular artifacts where a long straight XY segment maps to an unexpected arc in theta-rho space. mujou should do the same.
 - **No rho clamping on consumption**: Dune Weaver passes rho values through to the motor controller without validation. If a .thr file contains rho > 1.0, it will attempt to drive the ball beyond the physical edge. Producers should ensure rho stays within [0.0, 1.0].
 - **`atan2(x, y)` convention**: The ecosystem uses `atan2(x, y)` (theta=0 points up / Y+), not the standard math `atan2(y, x)`. See [Output Formats](../project/formats.md#xy-to-polar-conversion) for details.
 
