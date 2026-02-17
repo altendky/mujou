@@ -22,6 +22,10 @@ No backend needed.
 - [Output Formats](formats.md) -- THR, G-code, SVG, DXF, PNG specifications
 - [UI Design](ui.md) -- Components, layout, interaction model
 
+### Ecosystem
+
+- [Overview](../ecosystem/index.md) -- Sand table manufacturers, devices, communities, and existing software
+
 ### Project Management
 
 - [Development](development.md) -- Local development, testing, coverage

@@ -3,6 +3,8 @@
 All exports derive from the internal `Vec<Polyline>` representation.
 Each serializer is a pure function in the `mujou-export` crate (core layer, no I/O).
 
+For a device-compatibility view of which tables accept which formats, see [File Formats by Device](../ecosystem/formats.md).
+
 ## Theta-Rho (.thr)
 
 For Sisyphus tables, Oasis Mini, and DIY polar sand tables.
