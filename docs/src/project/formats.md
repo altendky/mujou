@@ -28,8 +28,17 @@ For Sisyphus tables, Oasis Mini, and DIY polar sand tables.
 This is the most complex export step.
 
 1. **Center**: Image center = polar origin
-2. **Rho**: `rho = sqrt(x^2 + y^2) / max_radius`, normalized to [0.0, 1.0]
-3. **Theta**: `theta = atan2(y, x)`, with continuous accumulation
+2. **Axes**: Cartesian +X points right, +Y points up (invert image Y if your source is image coordinates)
+3. **Rho**: `rho = sqrt(x^2 + y^2) / max_radius`, normalized to [0.0, 1.0]
+4. **Theta**: `theta = atan2(x, y)`, with continuous accumulation
+
+The Sisyphus ecosystem uses `atan2(x, y)` -- **not** the standard math `atan2(y, x)`.
+This means theta=0 points **up** (along +Y), and the Cartesian-to-polar / polar-to-Cartesian conversions are:
+
+- `theta = atan2(x, y)`
+- `x = rho * sin(theta)`, `y = rho * cos(theta)`
+
+This is confirmed by both [Sandify](https://github.com/jeffeb3/sandify) (`geometry.js`, `toThetaRho`) and [jsisyphus](https://github.com/markyland/SisyphusForTheRestOfUs) (`Point.java`: *"The zero radial is coincident with the positive y axis"*).
 
 **Continuous theta unwinding** is critical.
 Theta must accumulate across the full path -- if the path spirals clockwise, theta decreases past 0, -pi, -2pi, etc.
@@ -39,7 +48,7 @@ Algorithm:
 
 ```rust
 for each point after the first:
-    raw_theta = atan2(y, x)
+    raw_theta = atan2(x, y)
     // Choose the equivalent angle closest to previous theta
     delta = raw_theta - prev_theta
     while delta > PI:
