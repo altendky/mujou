@@ -57,8 +57,8 @@ Physical diameters are from the project README. The Dune Weaver software does no
 
 | Model | Physical Diameter | Enclosure |
 | --- | --- | --- |
-| DW Pro | 75cm / 29.5" | IKEA VITTSJOE table |
-| DW Gold | 45cm / 17.7" | IKEA TORSJOE side table |
+| DW Pro | 75cm / 29.5" | IKEA VITTSJÖ table |
+| DW Gold | 45cm / 17.7" | IKEA TORSJÖ side table |
 | DW Mini Pro | 25cm / 9.8" | IKEA BLANDA bowl |
 
 ### Sandsara
