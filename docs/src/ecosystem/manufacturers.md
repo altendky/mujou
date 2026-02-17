@@ -26,8 +26,8 @@ Sand field diameter (or dimensions for rectangular tables) determines the resolv
 | Model | Sand Diameter | Overall Size | Status |
 | --- | --- | --- | --- |
 | Oasis Mini | 9" / 234mm | 9" dia x 3" tall | Shipping (50,000+ units) |
-| Oasis Side Table | 20" / 500mm | 20" dia x 21" tall | Pre-order (shipping March 2026) |
-| Oasis Coffee Table | 34" / 850mm | 34" dia x 16" tall | Pre-order (shipping March 2026) |
+| Oasis Side Table | 20" / 500mm | 20" dia x 21" tall | Pre-order, shipping March 2026 (as of Feb 2026) |
+| Oasis Coffee Table | 34" / 850mm | 34" dia x 16" tall | Pre-order, shipping March 2026 (as of Feb 2026) |
 
 ### Sisyphus Industries -- Round Tables
 
@@ -71,7 +71,7 @@ Physical diameters are from the project README. The Dune Weaver software does no
 ## Notes
 
 - **Sisyphus Industries** is the original commercial kinetic sand table, inspired by Bruce Shapiro's art installations. Their .thr format has become the de facto standard for polar sand tables.
-- **Oasis (Grounded)** targets a more affordable price point. The Oasis Mini ($129) is the most accessible commercial sand table. Side Table and Coffee Table are in pre-order (shipping March 2026).
+- **Oasis (Grounded)** targets a more affordable price point. The Oasis Mini ($129) is the most accessible commercial sand table. Side Table and Coffee Table are in pre-order, shipping March 2026 (as of Feb 2026).
 - **Sandsara** has two firmware generations with different format support. The original open-source firmware ([GitHub](https://github.com/Sandsara/firmwareSandsara)) reads .thr files directly from the SD card. The newer Mini Pro firmware uses a proprietary binary `.bin` format transferred over BLE only. The official app includes a pattern creator described as "powered by Sandify." See [formats](formats.md#sandsara) for details on the binary format.
 - **CrunchLabs Sand Garden** was a Mark Rober educational product. Though apparently discontinued, Image2Sand's "Default" output format was built specifically for it. The large CrunchLabs/Mark Rober YouTube audience means there may be many Sand Gardens in the wild.
 - **Dune Weaver** is the most active open-source sand table project (282 GitHub stars, v4.0.5 as of Feb 2026). It uses a Raspberry Pi + DLC32/ESP32 running FluidNC, with a modern React web UI. All three models use IKEA furniture as the enclosure. Accepts .thr files only -- no SVG support.

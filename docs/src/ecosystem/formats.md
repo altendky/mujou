@@ -37,8 +37,8 @@ The Oasis Mini requires specific mm-based SVG dimensions (sourced from the templ
 | Model | SVG Document Size | Circle Diameter | Margin | Status |
 | --- | --- | --- | --- | --- |
 | Oasis Mini | 200mm x 200mm | 195mm | 2.5mm per side | **Confirmed** (in use) |
-| Oasis Side Table | Unknown | Unknown | Unknown | Ships March 2026 |
-| Oasis Coffee Table | Unknown | Unknown | Unknown | Ships March 2026 |
+| Oasis Side Table | Unknown | Unknown | Unknown | Ships March 2026 (as of Feb 2026) |
+| Oasis Coffee Table | Unknown | Unknown | Unknown | Ships March 2026 (as of Feb 2026) |
 
 The 200mm value comes from the Oasis template file. The 195mm circle diameter leaves a 2.5mm margin per side -- this likely accounts for ball clearance but is not yet confirmed exactly. mujou currently hardcodes these values in `svg.rs` with a TODO to generalize.
 
@@ -82,7 +82,7 @@ The original ESP32-based firmware ([GitHub](https://github.com/Sandsara/firmware
 
 These are read from the SD card. The firmware also supports BLE file transfer.
 
-### Mini Pro Firmware (current models, proprietary)
+### Mini Pro Firmware (current models as of Feb 2026, proprietary)
 
 The Mini Pro uses a proprietary binary `.bin` format transferred exclusively over Bluetooth Low Energy (BLE). The format has been reverse-engineered by the [sandsara-hacs](https://github.com/monxas/sandsara-hacs) project (a Home Assistant integration):
 
