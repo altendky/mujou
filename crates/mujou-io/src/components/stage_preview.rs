@@ -208,8 +208,8 @@ fn render_vector_preview(
                     // Diagnostic: top-N longest segments (color-coded).
                     {render_top_segments(&top_segments)}
 
-                    // Diagnostic: green circle at path start point.
-                    {render_start_indicator(polyline, show_diagnostics)}
+                    // Diagnostic: hollow green circle at path start point.
+                    {render_start_indicator(polyline, show_diagnostics, w, h)}
                 }
             }
         }
@@ -295,27 +295,42 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
     }
 }
 
-/// Render a green circle at the first point of the joined path.
+/// Render a hollow green circle at the first point of the joined path.
 ///
-/// This gives the user a clear visual indicator of where the machine
-/// will start drawing, which is especially useful for verifying that
-/// the [`StartPointStrategy`] (inside vs outside) is producing the
-/// desired result.
-fn render_start_indicator(polyline: &mujou_pipeline::Polyline, show: bool) -> Element {
+/// The radius and stroke width are proportional to the image diagonal
+/// so the indicator looks consistent across different image sizes.
+/// `vector-effect: non-scaling-stroke` keeps the stroke visually
+/// stable when the browser scales the SVG to fit the viewport.
+fn render_start_indicator(
+    polyline: &mujou_pipeline::Polyline,
+    show: bool,
+    w: u32,
+    h: u32,
+) -> Element {
     if !show {
         return rsx! {};
     }
     let Some(start) = polyline.first() else {
         return rsx! {};
     };
+
+    // Radius is proportional to the image diagonal so the circle is
+    // a consistent fraction of the drawing regardless of resolution.
+    // Stroke width uses `vector-effect: non-scaling-stroke` so it
+    // stays a constant 2 screen-pixels regardless of how the browser
+    // scales the SVG to fit the viewport.
+    let diag = f64::from(w).hypot(f64::from(h));
+    let r = diag * 0.012;
+
     rsx! {
         circle {
             cx: "{start.x}",
             cy: "{start.y}",
-            r: "4",
-            fill: "#00cc44",
-            stroke: "white",
-            stroke_width: "1",
+            r: "{r}",
+            fill: "none",
+            stroke: "#00cc44",
+            stroke_width: "2",
+            "vector-effect": "non-scaling-stroke",
             opacity: "0.9",
             "data-layer": "start-indicator",
         }

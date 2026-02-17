@@ -143,24 +143,28 @@ pub(crate) fn image_center(dims: Dimensions) -> Point {
     Point::new(f64::from(dims.width) / 2.0, f64::from(dims.height) / 2.0)
 }
 
-/// Choose the best starting contour index from `candidates` (non-empty
-/// contours) based on [`StartPointStrategy`] and image `dimensions`.
+/// Choose the best starting contour from `candidates` and determine
+/// whether it should be reversed so the best endpoint comes first.
 ///
-/// For [`Outside`](StartPointStrategy::Outside), selects the candidate
-/// whose endpoint (first or last) is **farthest** from the image center.
-/// For [`Inside`](StartPointStrategy::Inside), selects the candidate
-/// whose endpoint is **nearest** to the image center.
+/// For [`Outside`](StartPointStrategy::Outside), the endpoint
+/// **farthest** from the image center should lead the path.
+/// For [`Inside`](StartPointStrategy::Inside), the endpoint
+/// **nearest** to the image center should lead.
 ///
-/// Returns the index into `candidates`.  Panics if `candidates` is empty.
+/// Returns `(index, reversed)` where `reversed` is `true` when the
+/// contour's *last* point was the winning endpoint and the contour
+/// should be emitted in reverse order.  Panics if `candidates` is
+/// empty.
 pub(crate) fn choose_start_contour(
     candidates: &[&Polyline],
     strategy: StartPointStrategy,
     dims: Dimensions,
-) -> usize {
+) -> (usize, bool) {
     debug_assert!(!candidates.is_empty(), "candidates must be non-empty");
     let center = image_center(dims);
 
     let mut best_idx = 0;
+    let mut best_is_last = false;
     let mut best_dist = match strategy {
         StartPointStrategy::Outside => f64::NEG_INFINITY,
         StartPointStrategy::Inside => f64::INFINITY,
@@ -168,8 +172,13 @@ pub(crate) fn choose_start_contour(
 
     for (i, contour) in candidates.iter().enumerate() {
         // Consider both endpoints of each contour.
-        for pt in contour.first().iter().chain(contour.last().iter()) {
-            let dist = center.distance_squared(**pt);
+        for (is_last, pt) in contour
+            .first()
+            .into_iter()
+            .map(|p| (false, p))
+            .chain(contour.last().into_iter().map(|p| (true, p)))
+        {
+            let dist = center.distance_squared(*pt);
             let is_better = match strategy {
                 StartPointStrategy::Outside => dist > best_dist,
                 StartPointStrategy::Inside => dist < best_dist,
@@ -177,11 +186,12 @@ pub(crate) fn choose_start_contour(
             if is_better {
                 best_dist = dist;
                 best_idx = i;
+                best_is_last = is_last;
             }
         }
     }
 
-    best_idx
+    (best_idx, best_is_last)
 }
 
 /// Nearest-neighbor ordering followed by straight-line concatenation.
@@ -540,9 +550,17 @@ fn join_retrace(contours: &[Polyline], strategy: StartPointStrategy, dims: Dimen
     let mut cache: Vec<(f64, usize, usize)> = vec![(f64::INFINITY, 0, 0); n];
 
     // Start with the candidate chosen by the start-point strategy.
-    let start_idx = choose_start_contour(&candidates, strategy, dims);
+    // Reverse the contour when its best endpoint is the last point
+    // so the path begins at the correct (innermost / outermost) end.
+    let (start_idx, start_reversed) = choose_start_contour(&candidates, strategy, dims);
     used[start_idx] = true;
-    emit_and_index(&mut output, &mut grid, candidates[start_idx].points());
+    if start_reversed {
+        let mut pts: Vec<Point> = candidates[start_idx].points().to_vec();
+        pts.reverse();
+        emit_and_index(&mut output, &mut grid, &pts);
+    } else {
+        emit_and_index(&mut output, &mut grid, candidates[start_idx].points());
+    }
 
     // Seed caches: query ALL candidates against initial grid.
     for (j, sample_pts) in samples.iter().enumerate() {
@@ -847,7 +865,7 @@ mod tests {
         let outer = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
 
         let candidates: Vec<&Polyline> = vec![&inner, &outer];
-        let idx = choose_start_contour(&candidates, StartPointStrategy::Outside, dims);
+        let (idx, _) = choose_start_contour(&candidates, StartPointStrategy::Outside, dims);
         assert_eq!(
             idx, 1,
             "Outside should pick the contour farthest from center"
@@ -865,8 +883,45 @@ mod tests {
         let outer = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(5.0, 0.0)]);
 
         let candidates: Vec<&Polyline> = vec![&inner, &outer];
-        let idx = choose_start_contour(&candidates, StartPointStrategy::Inside, dims);
+        let (idx, _) = choose_start_contour(&candidates, StartPointStrategy::Inside, dims);
         assert_eq!(idx, 0, "Inside should pick the contour nearest to center");
+    }
+
+    #[test]
+    fn choose_start_contour_reverses_when_best_endpoint_is_last() {
+        // Contour goes from center (50,50) to corner (0,0).
+        // Outside should pick this contour AND flag it for reversal
+        // so the corner endpoint leads the path.
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let contour = Polyline::new(vec![Point::new(50.0, 50.0), Point::new(0.0, 0.0)]);
+        let candidates: Vec<&Polyline> = vec![&contour];
+        let (idx, reversed) = choose_start_contour(&candidates, StartPointStrategy::Outside, dims);
+        assert_eq!(idx, 0);
+        assert!(
+            reversed,
+            "should reverse: best endpoint (0,0) is the last point"
+        );
+    }
+
+    #[test]
+    fn choose_start_contour_no_reverse_when_best_endpoint_is_first() {
+        // Contour goes from corner (0,0) to center (50,50).
+        // Outside should pick this contour and NOT reverse it.
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let contour = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(50.0, 50.0)]);
+        let candidates: Vec<&Polyline> = vec![&contour];
+        let (idx, reversed) = choose_start_contour(&candidates, StartPointStrategy::Outside, dims);
+        assert_eq!(idx, 0);
+        assert!(
+            !reversed,
+            "should not reverse: best endpoint (0,0) is the first point"
+        );
     }
 
     #[test]
@@ -964,6 +1019,81 @@ mod tests {
         assert!(
             first.x > 40.0 && first.x < 60.0,
             "Inside retrace should begin near center, got ({}, {})",
+            first.x,
+            first.y,
+        );
+    }
+
+    #[test]
+    fn straight_line_outside_orients_start_contour() {
+        // Contour runs from center to corner: (50,50) -> (0,0).
+        // With Outside, the path should START at (0,0) — i.e. the
+        // contour must be reversed.
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let contour = Polyline::new(vec![Point::new(50.0, 50.0), Point::new(0.0, 0.0)]);
+        let config = PipelineConfig {
+            path_joiner: PathJoinerKind::StraightLine,
+            start_point: StartPointStrategy::Outside,
+            ..PipelineConfig::default()
+        };
+        let output = config.path_joiner.join(&[contour], &config, dims);
+        let first = output.path.first().unwrap();
+        assert_eq!(
+            *first,
+            Point::new(0.0, 0.0),
+            "Outside should orient the start contour so the outermost endpoint leads, got ({}, {})",
+            first.x,
+            first.y,
+        );
+    }
+
+    #[test]
+    fn retrace_outside_orients_start_contour() {
+        // Same scenario with Retrace joiner.
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let contour = Polyline::new(vec![Point::new(50.0, 50.0), Point::new(0.0, 0.0)]);
+        let config = PipelineConfig {
+            path_joiner: PathJoinerKind::Retrace,
+            start_point: StartPointStrategy::Outside,
+            ..PipelineConfig::default()
+        };
+        let output = config.path_joiner.join(&[contour], &config, dims);
+        let first = output.path.first().unwrap();
+        assert_eq!(
+            *first,
+            Point::new(0.0, 0.0),
+            "Retrace Outside should orient the start contour so the outermost endpoint leads, got ({}, {})",
+            first.x,
+            first.y,
+        );
+    }
+
+    #[test]
+    fn straight_line_inside_orients_start_contour() {
+        // Contour runs from corner to center: (0,0) -> (50,50).
+        // With Inside, the path should START at (50,50) — reversed.
+        let dims = Dimensions {
+            width: 100,
+            height: 100,
+        };
+        let contour = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(50.0, 50.0)]);
+        let config = PipelineConfig {
+            path_joiner: PathJoinerKind::StraightLine,
+            start_point: StartPointStrategy::Inside,
+            ..PipelineConfig::default()
+        };
+        let output = config.path_joiner.join(&[contour], &config, dims);
+        let first = output.path.first().unwrap();
+        assert_eq!(
+            *first,
+            Point::new(50.0, 50.0),
+            "Inside should orient the start contour so the innermost endpoint leads, got ({}, {})",
             first.x,
             first.y,
         );

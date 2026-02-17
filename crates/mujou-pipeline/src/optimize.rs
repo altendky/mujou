@@ -39,9 +39,17 @@ pub fn optimize_path_order(
     let mut result = Vec::with_capacity(n);
 
     // Start with the contour chosen by the start-point strategy.
-    let start = choose_start_contour(&candidates, strategy, dims);
+    // `reversed` is true when the winning endpoint is the contour's
+    // last point, meaning we must flip it so the path begins there.
+    let (start, reversed) = choose_start_contour(&candidates, strategy, dims);
     visited[start] = true;
-    result.push(candidates[start].clone());
+    if reversed {
+        let mut pts = candidates[start].clone().into_points();
+        pts.reverse();
+        result.push(Polyline::new(pts));
+    } else {
+        result.push(candidates[start].clone());
+    }
 
     for _ in 1..n {
         let current_end = result
