@@ -45,7 +45,7 @@ fn trigger_download(content: &str, filename: &str, mime_type: &str) {
 | ----- | ------ | ------------ | -------------- |
 | Core | `mujou-pipeline`, `mujou-export` | No | No |
 | Integration | `mujou-io` | Yes | Yes |
-| Application | `mujou` | Yes | Yes |
+| Application | `mujou-app` | Yes | Yes |
 
 ## Pluggable Algorithm Strategies
 

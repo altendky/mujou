@@ -1527,7 +1527,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mujou"
+name = "mujou-app"
 version = "0.1.0"
 dependencies = [
  "dioxus",

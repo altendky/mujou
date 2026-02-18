@@ -51,7 +51,7 @@ PREVIEW_DIR="$ROOT/target/preview"
 if [ "$SKIP_BUILD" = false ]; then
 	echo "==> Building WASM app (dx bundle --release)..."
 	cd "$ROOT"
-	dx bundle --release --package mujou --platform web --base-path app
+	dx bundle --release --package mujou-app --platform web --base-path app
 
 	echo "==> Assembling preview directory..."
 	rm -rf "$PREVIEW_DIR"
@@ -64,7 +64,7 @@ if [ "$SKIP_BUILD" = false ]; then
 		"ANALYTICS=@$ROOT/site/analytics.html"
 
 	# Dioxus WASM app
-	cp -r "$ROOT/target/dx/mujou/release/web/public/"* "$PREVIEW_DIR/app/"
+	cp -r "$ROOT/target/dx/mujou-app/release/web/public/"* "$PREVIEW_DIR/app/"
 	cp "$PREVIEW_DIR/app/index.html" "$PREVIEW_DIR/app/404.html"
 
 	echo "==> Preview directory assembled at $PREVIEW_DIR"

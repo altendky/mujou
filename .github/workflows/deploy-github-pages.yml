@@ -44,7 +44,7 @@ jobs:
           tool: dioxus-cli@0.7.3
 
       - name: Build WASM app
-        run: dx bundle --release --package mujou --platform web --base-path app
+        run: dx bundle --release --package mujou-app --platform web --base-path app
 
       - name: Generate OG image
         run: |
@@ -64,7 +64,7 @@ jobs:
             "REPO_URL=${REPO_URL}" \
             "ANALYTICS=@site/analytics.html"
           cp target/og-image.png deploy/og-image.png
-          cp -r target/dx/mujou/release/web/public/* deploy/app/
+          cp -r target/dx/mujou-app/release/web/public/* deploy/app/
           cp deploy/app/index.html deploy/app/404.html
 
       - name: Configure GitHub Pages
