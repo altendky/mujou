@@ -532,9 +532,9 @@ impl PipelineConfig {
                 self.simplify_tolerance,
             )));
         }
-        if !(0.0..=1.5).contains(&self.mask_scale) {
+        if self.mask_mode != MaskMode::Off && !(0.01..=1.5).contains(&self.mask_scale) {
             return Err(PipelineError::InvalidConfig(format!(
-                "mask_scale must be in [0.0, 1.5], got {}",
+                "mask_scale must be in [0.01, 1.5] when mask is enabled, got {}",
                 self.mask_scale,
             )));
         }
@@ -1238,12 +1238,27 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_mask_scale_zero() {
+    fn validate_accepts_mask_scale_zero_when_off() {
         let config = PipelineConfig {
+            mask_mode: MaskMode::Off,
             mask_scale: 0.0,
             ..PipelineConfig::default()
         };
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_mask_scale_below_minimum_when_enabled() {
+        let config = PipelineConfig {
+            mask_mode: MaskMode::Circle,
+            mask_scale: 0.0,
+            ..PipelineConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_scale")),
+            "expected InvalidConfig about mask_scale, got {err:?}",
+        );
     }
 
     #[test]
