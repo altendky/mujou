@@ -925,14 +925,38 @@ impl PipelineStage for Masked {
 
     fn metrics(&self) -> Option<StageMetrics> {
         let mr = self.mask_result.as_ref()?;
-        let radius_px = self.dimensions.mask_radius(self.config.mask_scale);
+        let shape_info = match self.config.mask_mode {
+            MaskMode::Off => "off".to_owned(),
+            MaskMode::Circle => {
+                let radius_px = self.dimensions.mask_radius(self.config.mask_scale);
+                format!("d={:.2} r={radius_px:.1}px", self.config.mask_scale)
+            }
+            MaskMode::Rectangle => {
+                let (hw, hh) = self.dimensions.mask_rect_half_dims(
+                    self.config.mask_scale,
+                    self.config.mask_aspect_ratio,
+                    self.config.mask_landscape,
+                );
+                format!(
+                    "scale={:.2} ar={:.2} {} {:.1}\u{00d7}{:.1}px",
+                    self.config.mask_scale,
+                    self.config.mask_aspect_ratio,
+                    if self.config.mask_landscape {
+                        "land"
+                    } else {
+                        "port"
+                    },
+                    hw * 2.0,
+                    hh * 2.0,
+                )
+            }
+        };
         // Counts only clipped polylines (excludes the optional border
         // polyline, which is an addition rather than a clipping result).
         // The subsequent Joined stage uses `all_polylines()` which
         // includes the border, so its input count may differ.
         Some(StageMetrics::Mask {
-            diameter: self.config.mask_scale,
-            radius_px,
+            shape_info,
             polylines_before: self.simplified.len(),
             polylines_after: mr.clipped.len(),
             points_before: self.simplified.iter().map(Polyline::len).sum(),
