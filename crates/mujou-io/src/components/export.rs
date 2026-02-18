@@ -60,7 +60,7 @@ fn now_timestamp() -> String {
 /// Export popup with format checkboxes and a download button.
 ///
 /// Renders a modal overlay (matching the info modal pattern) with
-/// checkboxes for each export format. Currently only SVG is functional;
+/// checkboxes for each export format. SVG and THR are functional;
 /// future formats are shown but disabled. The popup dismisses on
 /// backdrop click, the Cancel button, or after a successful download.
 #[component]
@@ -69,6 +69,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
 
     let has_result = props.result.is_some();
     let mut svg_selected = use_signal(|| true);
+    let mut thr_selected = use_signal(|| false);
     let mut export_error = use_signal(|| Option::<String>::None);
 
     // Clear stale export errors when the popup opens.  `show` is a
@@ -91,8 +92,9 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
         let config_json = props.config_json;
         move |_| {
             if let Some(ref res) = result {
+                let timestamp = now_timestamp();
+
                 if svg_selected() {
-                    let timestamp = now_timestamp();
                     let description = format!("{config_description}\nExported: {timestamp}");
                     let metadata = mujou_export::SvgMetadata {
                         title: Some(&filename),
@@ -111,17 +113,42 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                     if let Err(e) =
                         download::trigger_download(&svg, &download_name, "image/svg+xml")
                     {
-                        export_error.set(Some(format!("Download failed: {e}")));
+                        export_error.set(Some(format!("SVG download failed: {e}")));
                         return;
                     }
                     analytics::track_export("svg");
                 }
+
+                if thr_selected() {
+                    let description = format!("{config_description}\nExported: {timestamp}");
+                    let thr_metadata = mujou_export::ThrMetadata {
+                        title: Some(&filename),
+                        description: Some(&description),
+                        timestamp: Some(&timestamp),
+                        config_json: config_json.as_deref(),
+                    };
+                    let polyline = res.final_polyline();
+                    let mask_shape = res.masked.as_ref().map(|mr| &mr.shape);
+                    let thr = mujou_export::to_thr(
+                        std::slice::from_ref(polyline),
+                        res.dimensions,
+                        &thr_metadata,
+                        mask_shape,
+                    );
+                    let download_name = format!("{filename}_{timestamp}.thr");
+                    if let Err(e) = download::trigger_download(&thr, &download_name, "text/plain") {
+                        export_error.set(Some(format!("THR download failed: {e}")));
+                        return;
+                    }
+                    analytics::track_export("thr");
+                }
+
                 export_error.set(None);
             }
         }
     };
 
-    let any_selected = svg_selected();
+    let any_selected = svg_selected() || thr_selected();
 
     let label_enabled = "flex items-center gap-3 cursor-pointer";
     let label_disabled = "flex items-center gap-3 cursor-not-allowed opacity-50";
@@ -171,12 +198,22 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         span { "SVG" }
                     }
 
-                    // Future format checkboxes (disabled until serializers exist)
-                    label { class: label_disabled,
-                        input { r#type: "checkbox", disabled: true, class: "w-4 h-4" }
+                    label {
+                        class: if has_result { label_enabled } else { label_disabled },
+                        r#for: "export-thr-checkbox",
+                        input {
+                            id: "export-thr-checkbox",
+                            r#type: "checkbox",
+                            checked: thr_selected(),
+                            disabled: !has_result,
+                            oninput: move |_| thr_selected.toggle(),
+                            class: "w-4 h-4 accent-[var(--btn-primary)]",
+                        }
                         span { "THR" }
-                        span { class: "text-xs text-[var(--text-secondary)]", "(coming soon)" }
+                        span { class: "text-xs text-[var(--text-secondary)]", "(Sisyphus, Oasis, Dune Weaver)" }
                     }
+
+                    // Future format checkboxes (disabled until serializers exist)
                     label { class: label_disabled,
                         input { r#type: "checkbox", disabled: true, class: "w-4 h-4" }
                         span { "G-code" }
@@ -224,6 +261,9 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                             aria_label: "app.grounded.so (opens in new tab)",
                             "app.grounded.so"
                         }
+                    }
+                    p {
+                        "Sisyphus / Dune Weaver / Sandsara: use THR, upload via your table's app"
                     }
                 }
             }

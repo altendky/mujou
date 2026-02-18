@@ -16,7 +16,8 @@
 //!     .trace_contours()?
 //!     .simplify()
 //!     .mask()
-//!     .join();
+//!     .join()
+//!     .subsample();
 //!
 //! let staged = pipeline.into_result();
 //! # Ok(())
@@ -507,14 +508,13 @@ impl Masked {
 
 // ───────────────────────── Stage 8: Joined ───────────────────────────
 
-/// Pipeline state after path joining — the final stage.
+/// Pipeline state after path joining.
 ///
-/// Call [`into_result`](Self::into_result) to extract the
-/// [`StagedResult`] containing all intermediates.
+/// Call [`subsample`](Self::subsample) to advance to the final stage.
 ///
 /// See the [module-level memory notes](self#memory) for the cost of
 /// retaining all prior raster intermediates.
-#[must_use = "call .into_result() to extract the StagedResult"]
+#[must_use = "pipeline stages are consumed by advancing — call .subsample() to continue"]
 pub struct Joined {
     config: PipelineConfig,
     original: RgbaImage,
@@ -542,6 +542,70 @@ impl Joined {
         self.dimensions
     }
 
+    /// Advance to the subsampling stage — the final pipeline step.
+    pub fn subsample(self) -> Subsampled {
+        let subsampled = crate::subsample::subsample(&self.path, self.config.subsample_max_length);
+        Subsampled {
+            config: self.config,
+            original: self.original,
+            downsampled: self.downsampled,
+            blurred: self.blurred,
+            edges: self.edges,
+            contours: self.contours,
+            simplified: self.simplified,
+            masked: self.masked,
+            joined: self.path,
+            subsampled,
+            quality_metrics: self.quality_metrics,
+            dimensions: self.dimensions,
+        }
+    }
+}
+
+// ───────────────────────── Stage 9: Subsampled ──────────────────────
+
+/// Pipeline state after segment subsampling — the final stage.
+///
+/// Long segments in the joined path have been subdivided so no
+/// segment exceeds `config.subsample_max_length` pixels. This
+/// prevents angular artifacts when converting to polar coordinates
+/// for THR export.
+///
+/// Call [`into_result`](Self::into_result) to extract the
+/// [`StagedResult`] containing all intermediates.
+///
+/// See the [module-level memory notes](self#memory) for the cost of
+/// retaining all prior raster intermediates.
+#[must_use = "call .into_result() to extract the StagedResult"]
+#[allow(clippy::struct_field_names)]
+pub struct Subsampled {
+    config: PipelineConfig,
+    original: RgbaImage,
+    downsampled: RgbaImage,
+    blurred: RgbaImage,
+    edges: GrayImage,
+    contours: Vec<Polyline>,
+    simplified: Vec<Polyline>,
+    masked: Option<MaskResult>,
+    joined: Polyline,
+    subsampled: Polyline,
+    quality_metrics: Option<JoinQualityMetrics>,
+    dimensions: Dimensions,
+}
+
+impl Subsampled {
+    /// The subsampled output path.
+    #[must_use]
+    pub const fn subsampled(&self) -> &Polyline {
+        &self.subsampled
+    }
+
+    /// Image dimensions.
+    #[must_use]
+    pub const fn dimensions(&self) -> Dimensions {
+        self.dimensions
+    }
+
     /// Consume the pipeline and return the full [`StagedResult`].
     #[must_use]
     pub fn into_result(self) -> StagedResult {
@@ -556,7 +620,8 @@ impl Joined {
             contours: self.contours,
             simplified: self.simplified,
             masked: self.masked,
-            joined: self.path,
+            joined: self.joined,
+            subsampled: self.subsampled,
             mst_edge_details,
             dimensions: self.dimensions,
         }
@@ -566,7 +631,7 @@ impl Joined {
 // ──────────────────── PipelineStage trait + Stage enum ────────────────
 
 /// Total number of stages in the pipeline.
-pub const STAGE_COUNT: usize = 9;
+pub const STAGE_COUNT: usize = 10;
 
 /// The output produced by a single pipeline stage.
 ///
@@ -619,6 +684,13 @@ pub enum StageOutput<'a> {
     Joined {
         /// The single continuous output path.
         joined: &'a Polyline,
+        /// Image dimensions.
+        dimensions: Dimensions,
+    },
+    /// Segment subsampling result.
+    Subsampled {
+        /// The subsampled output path.
+        subsampled: &'a Polyline,
         /// Image dimensions.
         dimensions: Dimensions,
     },
@@ -969,7 +1041,7 @@ impl PipelineStage for Masked {
     }
 
     fn complete(self) -> Result<StagedResult, PipelineError> {
-        Ok(self.join().into_result())
+        Ok(self.join().subsample().into_result())
     }
 }
 
@@ -1011,6 +1083,37 @@ impl PipelineStage for Joined {
             output_point_count,
             expansion_ratio,
             quality: self.quality_metrics.clone(),
+        })
+    }
+
+    fn next(self) -> Result<Option<Stage>, PipelineError> {
+        Ok(Some(Stage::Subsampled(self.subsample())))
+    }
+
+    fn complete(self) -> Result<StagedResult, PipelineError> {
+        Ok(self.subsample().into_result())
+    }
+}
+
+impl PipelineStage for Subsampled {
+    const NAME: &str = "subsample";
+    const INDEX: usize = 9;
+
+    fn output(&self) -> StageOutput<'_> {
+        StageOutput::Subsampled {
+            subsampled: &self.subsampled,
+            dimensions: self.dimensions,
+        }
+    }
+
+    #[allow(clippy::cast_precision_loss)]
+    fn metrics(&self) -> Option<StageMetrics> {
+        let points_before = self.joined.len();
+        let points_after = self.subsampled.len();
+        Some(StageMetrics::Subsample {
+            max_length: self.config.subsample_max_length,
+            points_before,
+            points_after,
         })
     }
 
@@ -1063,6 +1166,8 @@ pub enum Stage {
     Masked(Masked),
     /// See [`Joined`].
     Joined(Joined),
+    /// See [`Subsampled`].
+    Subsampled(Subsampled),
 }
 
 /// Compile-time guard: if a [`Stage`] variant is added, this match becomes
@@ -1078,7 +1183,8 @@ const fn _stage_count_guard(s: &Stage) {
         | Stage::ContoursTraced(_)
         | Stage::Simplified(_)
         | Stage::Masked(_)
-        | Stage::Joined(_) => {}
+        | Stage::Joined(_)
+        | Stage::Subsampled(_) => {}
     }
 }
 
@@ -1105,6 +1211,7 @@ macro_rules! delegate {
             Self::Simplified(s) => s.$method($($arg),*),
             Self::Masked(s) => s.$method($($arg),*),
             Self::Joined(s) => s.$method($($arg),*),
+            Self::Subsampled(s) => s.$method($($arg),*),
         }
     };
 }
@@ -1146,7 +1253,7 @@ impl Stage {
     /// Whether the pipeline is at the final stage.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
-        matches!(self, Self::Joined(_))
+        matches!(self, Self::Subsampled(_))
     }
 
     /// Advance to the next stage.
@@ -1285,6 +1392,12 @@ impl From<Joined> for Stage {
     }
 }
 
+impl From<Subsampled> for Stage {
+    fn from(s: Subsampled) -> Self {
+        Self::Subsampled(s)
+    }
+}
+
 // ───────────────────── Pipeline entry point ──────────────────────────
 
 /// Incremental image processing pipeline.
@@ -1305,6 +1418,7 @@ impl From<Joined> for Stage {
 ///     .simplify()
 ///     .mask()
 ///     .join()
+///     .subsample()
 ///     .into_result();
 /// # Ok(())
 /// # }
@@ -1478,7 +1592,10 @@ impl PipelineCache {
         let joined = masked.join();
         on_stage(Joined::INDEX, false);
 
-        let staged = Arc::new(joined.into_result());
+        let subsampled = joined.subsample();
+        on_stage(Subsampled::INDEX, false);
+
+        let staged = Arc::new(subsampled.into_result());
         let cache = Self {
             image_hash,
             config: cache_config,
@@ -1606,7 +1723,8 @@ impl PipelineCache {
             contours,
             simplified,
             masked,
-            joined: _,
+            joined,
+            subsampled: _,
             mst_edge_details: _,
             dimensions,
         } = staged;
@@ -1684,9 +1802,24 @@ impl PipelineCache {
                 dimensions,
             }),
 
+            // Stage 9 changed (subsample) — resume from Joined (index 8).
+            9 => Stage::Joined(Joined {
+                config: new_config.clone(),
+                original,
+                downsampled,
+                blurred,
+                edges,
+                contours,
+                simplified,
+                masked,
+                path: joined,
+                quality_metrics: None,
+                dimensions,
+            }),
+
             _ => unreachable!(
                 "earliest_changed_stage returned {earliest_changed}, \
-                 expected 2..=8"
+                 expected 2..=9"
             ),
         }
     }
@@ -1917,6 +2050,7 @@ mod tests {
             .simplify()
             .mask()
             .join()
+            .subsample()
             .into_result();
 
         assert_eq!(staged.original, pipeline_result.original);
@@ -1927,6 +2061,7 @@ mod tests {
         assert_eq!(staged.simplified, pipeline_result.simplified);
         assert_eq!(staged.masked, pipeline_result.masked);
         assert_eq!(staged.joined, pipeline_result.joined);
+        assert_eq!(staged.subsampled, pipeline_result.subsampled);
         assert_eq!(staged.dimensions, pipeline_result.dimensions);
     }
 
@@ -1950,6 +2085,7 @@ mod tests {
             .simplify()
             .mask()
             .join()
+            .subsample()
             .into_result();
 
         assert_eq!(staged.edges, pipeline_result.edges);
@@ -1977,6 +2113,7 @@ mod tests {
             .simplify()
             .mask()
             .join()
+            .subsample()
             .into_result();
 
         assert_eq!(staged.masked, pipeline_result.masked);
@@ -2043,6 +2180,7 @@ mod tests {
             (6, "simplify"),
             (7, "mask"),
             (8, "join"),
+            (9, "subsample"),
         ];
         assert_eq!(log.as_slice(), &expected);
     }
@@ -2064,6 +2202,7 @@ mod tests {
             .simplify()
             .mask()
             .join()
+            .subsample()
             .into_result();
 
         // Loop API.
@@ -2079,6 +2218,7 @@ mod tests {
         assert_eq!(chained.simplified, looped.simplified);
         assert_eq!(chained.masked, looped.masked);
         assert_eq!(chained.joined, looped.joined);
+        assert_eq!(chained.subsampled, looped.subsampled);
         assert_eq!(chained.dimensions, looped.dimensions);
     }
 
@@ -2131,9 +2271,9 @@ mod tests {
     }
 
     #[test]
-    fn next_on_joined_returns_none() {
+    fn next_on_subsampled_returns_none() {
         let png = sharp_edge_png(40, 40);
-        let joined = Pipeline::new(png, PipelineConfig::default())
+        let subsampled = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
             .downsample()
@@ -2143,8 +2283,9 @@ mod tests {
             .unwrap()
             .simplify()
             .mask()
-            .join();
-        assert!(joined.next().unwrap().is_none());
+            .join()
+            .subsample();
+        assert!(subsampled.next().unwrap().is_none());
     }
 
     #[test]
@@ -2176,6 +2317,7 @@ mod tests {
                 StageOutput::Simplified { .. } => 6,
                 StageOutput::Masked { .. } => 7,
                 StageOutput::Joined { .. } => 8,
+                StageOutput::Subsampled { .. } => 9,
             };
             assert_eq!(idx, variant_idx, "output variant mismatch at index {idx}");
             visited += 1;
@@ -2231,7 +2373,7 @@ mod tests {
 
         let (_, log) = drive_to_end(start).unwrap();
         let indices: Vec<usize> = log.iter().map(|(idx, _)| *idx).collect();
-        assert_eq!(indices, vec![0, 1, 2, 3, 4, 5, 6, 7, 8]);
+        assert_eq!(indices, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
     }
 
     #[test]
@@ -2256,6 +2398,7 @@ mod tests {
         assert_eq!(a.simplified, b.simplified, "simplified mismatch");
         assert_eq!(a.masked, b.masked, "masked mismatch");
         assert_eq!(a.joined, b.joined, "joined mismatch");
+        assert_eq!(a.subsampled, b.subsampled, "subsampled mismatch");
         assert_eq!(a.dimensions, b.dimensions, "dimensions mismatch");
     }
 

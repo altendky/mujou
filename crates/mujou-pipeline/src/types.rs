@@ -429,6 +429,18 @@ pub struct PipelineConfig {
     /// nearest center (suitable for polar tables homing to rho = 0).
     #[serde(default)]
     pub start_point: StartPointStrategy,
+
+    /// Maximum segment length in pixels for subsampling.
+    ///
+    /// After path joining, any segment longer than this value is
+    /// subdivided into evenly-spaced sub-segments. This prevents
+    /// angular artifacts when long straight Cartesian segments are
+    /// converted to polar coordinates for THR export.
+    ///
+    /// Must be positive. Set to a large value (e.g. `f64::INFINITY`)
+    /// to effectively disable subsampling.
+    #[serde(default = "PipelineConfig::default_subsample_max_length")]
+    pub subsample_max_length: f64,
 }
 
 impl PipelineConfig {
@@ -473,6 +485,13 @@ impl PipelineConfig {
     };
     /// Default start point strategy (outside / perimeter).
     pub const DEFAULT_START_POINT: StartPointStrategy = StartPointStrategy::Outside;
+    /// Default subsample max segment length in pixels.
+    ///
+    /// Chosen to be small enough to prevent angular artifacts in polar
+    /// conversion while avoiding excessive point counts. At the default
+    /// working resolution of 1000px, a 500px-radius circle would have
+    /// segments of ~2px, well within a 2% arc.
+    pub const DEFAULT_SUBSAMPLE_MAX_LENGTH: f64 = 2.0;
 
     // Serde default helpers — serde's per-field `#[serde(default)]` uses
     // the *type's* `Default`, which is wrong for `f64` (0.0) and `bool`
@@ -485,6 +504,9 @@ impl PipelineConfig {
     }
     const fn default_mask_landscape() -> bool {
         Self::DEFAULT_MASK_LANDSCAPE
+    }
+    const fn default_subsample_max_length() -> f64 {
+        Self::DEFAULT_SUBSAMPLE_MAX_LENGTH
     }
 
     /// Validate that all fields satisfy the documented invariants.
@@ -576,6 +598,12 @@ impl PipelineConfig {
                 "at least one edge channel must be enabled".to_owned(),
             ));
         }
+        if self.subsample_max_length <= 0.0 {
+            return Err(PipelineError::InvalidConfig(format!(
+                "subsample_max_length must be positive, got {}",
+                self.subsample_max_length,
+            )));
+        }
         Ok(())
     }
 }
@@ -602,6 +630,7 @@ impl Default for PipelineConfig {
             parity_strategy: Self::DEFAULT_PARITY_STRATEGY,
             edge_channels: Self::DEFAULT_EDGE_CHANNELS,
             start_point: Self::DEFAULT_START_POINT,
+            subsample_max_length: Self::DEFAULT_SUBSAMPLE_MAX_LENGTH,
         }
     }
 }
@@ -635,6 +664,7 @@ impl PipelineConfig {
             parity_strategy,
             edge_channels,
             start_point,
+            subsample_max_length,
         } = self;
 
         *blur_sigma == other.blur_sigma
@@ -656,6 +686,7 @@ impl PipelineConfig {
             && *parity_strategy == other.parity_strategy
             && *edge_channels == other.edge_channels
             && *start_point == other.start_point
+            && *subsample_max_length == other.subsample_max_length
     }
 
     /// Return the zero-based index of the earliest pipeline stage whose
@@ -698,6 +729,7 @@ impl PipelineConfig {
             parity_strategy,
             edge_channels,
             start_point,
+            subsample_max_length,
         } = self;
 
         // Stage 2 — downsample: working_resolution, downsample_filter
@@ -752,6 +784,11 @@ impl PipelineConfig {
             || *start_point != other.start_point
         {
             return 8;
+        }
+
+        // Stage 9 — subsampling: subsample_max_length
+        if *subsample_max_length != other.subsample_max_length {
+            return 9;
         }
 
         // All pipeline-relevant fields match.
@@ -809,11 +846,17 @@ pub struct StagedResult {
     /// boundary (with explicit per-endpoint clip metadata) and an
     /// optional border polyline matching the mask shape.
     pub masked: Option<MaskResult>,
-    /// Stage 8: joined single continuous path (always the final output).
+    /// Stage 8: joined single continuous path.
     ///
     /// When masking is enabled, this is the join of the masked polylines.
     /// When disabled, this is the join of the simplified polylines.
     pub joined: Polyline,
+    /// Stage 9: subsampled path (the final output).
+    ///
+    /// Long segments in the joined path are subdivided so no segment
+    /// exceeds `config.subsample_max_length` pixels. This prevents
+    /// angular artifacts in polar (THR) conversion.
+    pub subsampled: Polyline,
     /// Per-MST-edge diagnostic details from the join stage.
     ///
     /// Present only when the MST joiner is used. Enables diagnostic
@@ -824,14 +867,13 @@ pub struct StagedResult {
 }
 
 impl StagedResult {
-    /// Returns the final output polyline — always the joined path.
+    /// Returns the final output polyline — the subsampled path.
     ///
-    /// Since masking now happens before joining, `joined` always contains
-    /// the final single continuous path regardless of whether a circular
-    /// mask was applied.
+    /// The subsampled path is the joined path with long segments
+    /// subdivided to prevent angular artifacts in polar conversion.
     #[must_use]
     pub const fn final_polyline(&self) -> &Polyline {
-        &self.joined
+        &self.subsampled
     }
 }
 
@@ -849,6 +891,8 @@ struct StagedResultProxy {
     simplified: Vec<Polyline>,
     masked: Option<MaskResult>,
     joined: Polyline,
+    #[serde(default)]
+    subsampled: Option<Polyline>,
     #[serde(default)]
     mst_edge_details: Vec<crate::MstEdgeInfo>,
     dimensions: Dimensions,
@@ -881,6 +925,7 @@ impl Serialize for StagedResult {
             simplified: self.simplified.clone(),
             masked: self.masked.clone(),
             joined: self.joined.clone(),
+            subsampled: Some(self.subsampled.clone()),
             mst_edge_details: self.mst_edge_details.clone(),
             dimensions: self.dimensions,
         };
@@ -907,6 +952,9 @@ impl<'de> Deserialize<'de> for StagedResult {
         let edges = GrayImage::from_raw(proxy.edges.0, proxy.edges.1, proxy.edges.2)
             .ok_or_else(|| serde::de::Error::custom("invalid edges image dimensions"))?;
 
+        // Backward-compatible: if `subsampled` is absent (old data),
+        // fall back to a clone of `joined`.
+        let subsampled = proxy.subsampled.unwrap_or_else(|| proxy.joined.clone());
         Ok(Self {
             original,
             downsampled,
@@ -916,6 +964,7 @@ impl<'de> Deserialize<'de> for StagedResult {
             simplified: proxy.simplified,
             masked: proxy.masked,
             joined: proxy.joined,
+            subsampled,
             mst_edge_details: proxy.mst_edge_details,
             dimensions: proxy.dimensions,
         })
@@ -1136,6 +1185,10 @@ mod tests {
         assert!(!config.edge_channels.blue);
         assert!(!config.edge_channels.saturation);
         assert_eq!(config.start_point, StartPointStrategy::Outside);
+        assert!(
+            (config.subsample_max_length - 2.0).abs() < f64::EPSILON,
+            "default subsample_max_length should be 2.0",
+        );
     }
 
     #[test]
@@ -1464,6 +1517,7 @@ mod tests {
                 saturation: true,
             },
             start_point: StartPointStrategy::Inside,
+            subsample_max_length: 3.5,
         };
         let json = serde_json::to_string(&config).unwrap();
         let deserialized: PipelineConfig = serde_json::from_str(&json).unwrap();
@@ -1566,6 +1620,7 @@ mod tests {
             ])],
             masked: None,
             joined: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
+            subsampled: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
             mst_edge_details: vec![],
             dimensions: Dimensions {
                 width: 2,
@@ -1594,6 +1649,7 @@ mod tests {
         assert_eq!(staged.simplified, deserialized.simplified);
         assert_eq!(staged.masked, deserialized.masked);
         assert_eq!(staged.joined, deserialized.joined);
+        assert_eq!(staged.subsampled, deserialized.subsampled);
         assert_eq!(staged.mst_edge_details, deserialized.mst_edge_details);
         assert_eq!(staged.dimensions, deserialized.dimensions);
     }
@@ -1635,6 +1691,7 @@ mod tests {
             simplified: vec![],
             masked: None,
             joined: Polyline::new(vec![]),
+            subsampled: Polyline::new(vec![]),
             mst_edge_details: vec![],
             dimensions: Dimensions {
                 width: 1,

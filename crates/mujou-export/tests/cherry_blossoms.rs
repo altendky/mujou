@@ -509,6 +509,148 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     );
 }
 
+/// Run the cherry blossoms image through the pipeline and export to THR.
+///
+/// Validates header, rho range [0, 1], continuous theta, and 5-decimal
+/// precision — the same properties checked by the unit tests, but
+/// exercised on a real photograph.
+#[test]
+fn cherry_blossoms_pipeline_to_thr() {
+    let workspace_root = workspace_root();
+    let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
+    assert!(
+        image_path.exists(),
+        "cherry blossoms image not found at {image_path:?}"
+    );
+
+    let image_bytes = std::fs::read(&image_path).unwrap();
+    eprintln!("Loaded cherry-blossoms.png: {} bytes", image_bytes.len());
+
+    // Use same fast config as the SVG integration test.
+    let config = mujou_pipeline::PipelineConfig {
+        canny_low: 50.0,
+        canny_high: 150.0,
+        path_joiner: mujou_pipeline::PathJoinerKind::StraightLine,
+        mask_mode: mujou_pipeline::MaskMode::Off,
+        ..mujou_pipeline::PipelineConfig::default()
+    };
+    let result =
+        mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
+
+    let mask_shape = result.masked.as_ref().map(|mr| &mr.shape);
+    let thr = mujou_export::to_thr(
+        std::slice::from_ref(result.final_polyline()),
+        result.dimensions,
+        &mujou_export::ThrMetadata {
+            title: Some("cherry-blossoms.png"),
+            description: Some("integration test"),
+            ..mujou_export::ThrMetadata::default()
+        },
+        mask_shape,
+    );
+
+    // Header assertions.
+    assert!(thr.starts_with("# mujou\n"));
+    assert!(thr.contains("# Source: cherry-blossoms.png\n"));
+
+    // Parse data lines.
+    let pairs: Vec<(f64, f64)> = thr
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+        .map(|line| {
+            let mut parts = line.split_whitespace();
+            let theta: f64 = parts.next().unwrap().parse().unwrap();
+            let rho: f64 = parts.next().unwrap().parse().unwrap();
+            (theta, rho)
+        })
+        .collect();
+
+    eprintln!(
+        "THR output: {} theta-rho pairs, {} bytes",
+        pairs.len(),
+        thr.len(),
+    );
+    assert!(
+        pairs.len() >= 10,
+        "expected at least 10 theta-rho pairs from cherry blossoms, got {}",
+        pairs.len(),
+    );
+
+    // All rho values in [0, 1].
+    for (i, &(_, rho)) in pairs.iter().enumerate() {
+        assert!(
+            (0.0..=1.0001).contains(&rho),
+            "rho[{i}] = {rho} is outside [0, 1]",
+        );
+    }
+
+    // Precision: every data line should have 5 decimal places.
+    for line in thr
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+    {
+        for part in line.split_whitespace() {
+            let dot_pos = part.find('.').expect("should have decimal point");
+            let decimals = &part[dot_pos + 1..];
+            assert_eq!(decimals.len(), 5, "expected 5 decimal places in {part}",);
+        }
+    }
+
+    // Write THR to target for manual inspection.
+    let output_path = workspace_root.join("target/cherry-blossoms-output.thr");
+    std::fs::write(&output_path, &thr).unwrap();
+    eprintln!("THR written to {output_path:?} ({} bytes)", thr.len());
+}
+
+/// Run the cherry blossoms image through the pipeline with a circular
+/// mask and export to THR, validating that rho stays within [0, 1]
+/// even when the mask clips contours at the edge.
+#[test]
+fn cherry_blossoms_pipeline_to_thr_with_mask() {
+    let workspace_root = workspace_root();
+    let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
+    let image_bytes = std::fs::read(&image_path).unwrap();
+
+    let config = mujou_pipeline::PipelineConfig::default();
+    let result =
+        mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
+
+    let mask_shape = result.masked.as_ref().map(|mr| &mr.shape);
+    let thr = mujou_export::to_thr(
+        std::slice::from_ref(result.final_polyline()),
+        result.dimensions,
+        &mujou_export::ThrMetadata::default(),
+        mask_shape,
+    );
+
+    let pairs: Vec<(f64, f64)> = thr
+        .lines()
+        .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+        .map(|line| {
+            let mut parts = line.split_whitespace();
+            let theta: f64 = parts.next().unwrap().parse().unwrap();
+            let rho: f64 = parts.next().unwrap().parse().unwrap();
+            (theta, rho)
+        })
+        .collect();
+
+    eprintln!(
+        "THR with mask: {} pairs, mask_shape={:?}",
+        pairs.len(),
+        mask_shape,
+    );
+    assert!(!pairs.is_empty(), "expected non-empty THR output with mask");
+
+    // All rho values should be in [0, 1] (mask guarantees points
+    // are within the circle).
+    for (i, &(_, rho)) in pairs.iter().enumerate() {
+        assert!(
+            (0.0..=1.0001).contains(&rho),
+            "rho[{i}] = {rho} is outside [0, 1] with circular mask",
+        );
+    }
+}
+
 /// Generate a diagnostic SVG highlighting the top 5 longest segments
 /// in the joined output using the **default** pipeline config.
 ///

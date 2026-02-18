@@ -70,6 +70,8 @@ pub struct PipelineDiagnostics {
     pub mask: Option<StageDiagnostics>,
     /// Stage 8: path ordering + joining.
     pub join: StageDiagnostics,
+    /// Stage 9: segment subsampling.
+    pub subsample: StageDiagnostics,
     /// Total wall-clock duration of the entire pipeline (seconds).
     #[serde(with = "duration_serde")]
     pub total_duration: Duration,
@@ -203,6 +205,15 @@ pub enum StageMetrics {
         /// `None` for non-MST joiners.
         quality: Option<JoinQualityMetrics>,
     },
+    /// Segment subsampling metrics.
+    Subsample {
+        /// Maximum segment length in pixels.
+        max_length: f64,
+        /// Points in the joined path before subsampling.
+        points_before: usize,
+        /// Points after subsampling.
+        points_after: usize,
+    },
 }
 
 /// High-level summary counts for the entire pipeline.
@@ -262,6 +273,7 @@ impl PipelineDiagnostics {
                 s.push(("Mask", m));
             }
             s.push(("Join", &self.join));
+            s.push(("Subsample", &self.subsample));
             s
         };
 
@@ -416,6 +428,13 @@ fn format_metrics(metrics: &StageMetrics) -> String {
                 base
             }
         }
+        StageMetrics::Subsample {
+            max_length,
+            points_before,
+            points_after,
+        } => {
+            format!("max_len={max_length:.2}px {points_before}->{points_after} pts")
+        }
     }
 }
 
@@ -505,7 +524,7 @@ pub fn process_staged_with_diagnostics<C: Clock>(
 ) -> Result<(crate::StagedResult, PipelineDiagnostics), crate::PipelineError> {
     use crate::pipeline::{
         Advance, Blurred, ContoursTraced, Decoded, Downsampled, EdgesDetected, Joined, Masked,
-        PipelineStage as _, STAGE_COUNT, Simplified, Stage,
+        PipelineStage as _, STAGE_COUNT, Simplified, Stage, Subsampled,
     };
 
     let pipeline_start = clock.now();
@@ -575,6 +594,9 @@ pub fn process_staged_with_diagnostics<C: Clock>(
                     join: stage_diags[Joined::INDEX]
                         .take()
                         .ok_or_else(|| diag_missing(Joined::NAME))?,
+                    subsample: stage_diags[Subsampled::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Subsampled::NAME))?,
                     total_duration,
                     summary,
                 };
@@ -728,7 +750,8 @@ mod tests {
         // mask disabled -> None
         assert!(diag.mask.is_none());
         assert_eq!(diag.join.duration, ten_ms);
-        assert_eq!(diag.total_duration, Duration::from_millis(100));
+        assert_eq!(diag.subsample.duration, ten_ms);
+        assert_eq!(diag.total_duration, Duration::from_millis(110));
 
         // Summary should reflect the 40x40 image.
         assert_eq!(diag.summary.image_width, 40);
@@ -782,7 +805,8 @@ mod tests {
         assert_eq!(mask.duration, ten_ms);
 
         assert_eq!(diag.join.duration, ten_ms);
-        assert_eq!(diag.total_duration, Duration::from_millis(100));
+        assert_eq!(diag.subsample.duration, ten_ms);
+        assert_eq!(diag.total_duration, Duration::from_millis(110));
 
         // Summary should reflect the 40x40 image.
         assert_eq!(diag.summary.image_width, 40);
@@ -861,13 +885,21 @@ mod tests {
                     quality: None,
                 },
             },
-            total_duration: Duration::from_millis(110),
+            subsample: StageDiagnostics {
+                duration: Duration::from_millis(2),
+                metrics: StageMetrics::Subsample {
+                    max_length: 2.0,
+                    points_before: 150,
+                    points_after: 200,
+                },
+            },
+            total_duration: Duration::from_millis(112),
             summary: PipelineSummary {
                 image_width: 100,
                 image_height: 100,
                 pixel_count: 10000,
                 contour_count: 10,
-                final_point_count: 150,
+                final_point_count: 200,
             },
         };
 
@@ -949,13 +981,21 @@ mod tests {
                     quality: None,
                 },
             },
-            total_duration: Duration::from_millis(80),
+            subsample: StageDiagnostics {
+                duration: Duration::from_millis(1),
+                metrics: StageMetrics::Subsample {
+                    max_length: 2.0,
+                    points_before: 120,
+                    points_after: 150,
+                },
+            },
+            total_duration: Duration::from_millis(81),
             summary: PipelineSummary {
                 image_width: 256,
                 image_height: 192,
                 pixel_count: 49152,
                 contour_count: 8,
-                final_point_count: 120,
+                final_point_count: 150,
             },
         };
 

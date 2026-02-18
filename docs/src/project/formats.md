@@ -14,16 +14,44 @@ For Sisyphus tables, Oasis Mini, and DIY polar sand tables.
 - Plain text, one `theta rho` pair per line (space-separated)
 - Theta: continuous radians (accumulating, does NOT wrap at 2pi)
 - Rho: 0.0 (center) to 1.0 (edge), normalized
+- Lines beginning with `#` are comments, ignored by table firmware
 
 ### Example
 
 ```text
-0.0 0.0
-0.1 0.15
-0.2 0.30
-0.5 0.45
-1.0 0.60
+# mujou
+# Source: cherry-blossoms.jpg
+# blur=1.4, canny=15/40, simplify=2, tracer=BorderFollowing, joiner=Mst, mask=75%, res=256
+# Exported: 2026-02-14_12-30-45
+# Config: {"blur_sigma":1.4,"canny_low":15.0,...}
+0.00000 0.00000
+0.10000 0.15000
+0.20000 0.30000
+0.50000 0.45000
+1.00000 0.60000
 ```
+
+### Metadata
+
+Metadata is embedded as `#`-prefixed comment lines at the top of the file.
+This mirrors the SVG exporter's `<title>`, `<desc>`, and `<metadata>` approach
+and follows the convention established by [Sandify](https://github.com/jeffeb3/sandify),
+which uses `#` comments for file name, type, and section markers.
+
+| Line prefix | Content | Purpose |
+| ----------- | ------- | ------- |
+| `# mujou` | Fixed identifier | Identifies the file as mujou-generated |
+| `# Source:` | Source image filename | Provenance |
+| `#` (free-form) | Pipeline parameters summary | Human-readable settings (blur, canny, simplify, etc.) |
+| `# Exported:` | Timestamp | When the file was exported |
+| `# Config:` | Full `PipelineConfig` JSON | Machine-parseable settings for reproducibility |
+
+All metadata lines are optional.  Parsers should skip any line beginning with `#`.
+
+The `# Config:` line contains the complete serialized `PipelineConfig` as a
+single JSON object, matching the content of the SVG exporter's
+`<mujou:pipeline>` element.  This allows re-importing settings to reproduce
+the exact same output.
 
 ### XY-to-Polar Conversion
 
