@@ -484,7 +484,7 @@ impl PipelineConfig {
     /// - `canny_high <= canny_max`
     /// - `canny_max <= edge::max_gradient_magnitude()`
     /// - `simplify_tolerance >= 0`
-    /// - `mask_scale` in `[0.0, 1.5]`
+    /// - `mask_scale` in `[0.01, 1.5]` when `mask_mode` is not `Off` (unconstrained when `Off`)
     /// - `mask_aspect_ratio` in `[1.0, 4.0]`
     /// - `working_resolution > 0`
     /// - `mst_neighbours > 0`
