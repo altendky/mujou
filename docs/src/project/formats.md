@@ -48,6 +48,8 @@ which uses `#` comments for file name, type, and section markers.
 
 All metadata lines are optional.  Parsers should skip any line beginning with `#`.
 
+Each metadata value must occupy a single line.  Producers must not embed newline characters within a `#` comment value — continuation text after a newline would lack the `#` prefix and be misinterpreted as theta-rho data by table firmware.
+
 The `# Config:` line contains the complete serialized `PipelineConfig` as a
 single JSON object, matching the content of the SVG exporter's
 `<mujou:pipeline>` element.  This allows re-importing settings to reproduce
