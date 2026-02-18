@@ -285,7 +285,7 @@ fn cherry_blossoms_mst_edge_diagnostics() {
 
     eprintln!("\n=== MST Edge Diagnostics ===");
     eprintln!(
-        "Mask: center=({:.1}, {:.1}) radius={:.1}px diameter_frac={:.2}",
+        "Mask: center=({:.1}, {:.1}) radius={:.1}px mask_scale={:.2}",
         center_x, center_y, radius, config.mask_scale,
     );
     eprintln!("Total MST edges: {}", quality.mst_edge_details.len());
