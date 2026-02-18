@@ -51,7 +51,7 @@ fn cherry_blossoms_pipeline_to_svg() {
         canny_low: 50.0,
         canny_high: 150.0,
         path_joiner: mujou_pipeline::PathJoinerKind::StraightLine,
-        circular_mask: false,
+        mask_mode: mujou_pipeline::MaskMode::Off,
         ..mujou_pipeline::PipelineConfig::default()
     };
     let result = mujou_pipeline::process(&image_bytes, &config).expect("pipeline should succeed");
@@ -67,7 +67,7 @@ fn cherry_blossoms_pipeline_to_svg() {
         "expected non-empty polyline from cherry blossoms image"
     );
 
-    // Export to SVG (no mask — circular_mask=false in this test config).
+    // Export to SVG (no mask — mask_mode=Off in this test config).
     let svg = mujou_export::to_svg(
         &[result.polyline],
         result.dimensions,
@@ -87,7 +87,7 @@ fn cherry_blossoms_pipeline_to_svg() {
 }
 
 /// Verify the app's default config (`low=15`, `high=40`, Mst,
-/// `circular_mask=true`) can process the cherry blossoms image without OOM.
+/// `mask_mode=Circle`) can process the cherry blossoms image without OOM.
 /// Lower thresholds produce many more edges that can exhaust WASM memory.
 #[test]
 fn cherry_blossoms_default_config() {
@@ -129,7 +129,7 @@ fn cherry_blossoms_parity_strategy_comparison() {
         canny_low: 50.0,
         canny_high: 150.0,
         path_joiner: mujou_pipeline::PathJoinerKind::Mst,
-        circular_mask: false,
+        mask_mode: mujou_pipeline::MaskMode::Off,
         ..mujou_pipeline::PipelineConfig::default()
     };
 
@@ -251,9 +251,9 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     eprintln!("Loaded cherry-blossoms.png: {} bytes", image_bytes.len());
 
     // Match the exact config used to produce the image with the visible
-    // long diagonal: mask_diameter=0.6, mst_neighbours=200, Optimal parity.
+    // long diagonal: mask_scale=0.6, mst_neighbours=200, Optimal parity.
     let config = mujou_pipeline::PipelineConfig {
-        mask_diameter: 0.6,
+        mask_scale: 0.6,
         mst_neighbours: 200,
         parity_strategy: mujou_pipeline::ParityStrategy::Optimal,
         ..mujou_pipeline::PipelineConfig::default()
@@ -281,12 +281,12 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     let center_x = w / 2.0;
     let center_y = h / 2.0;
     let diagonal = w.hypot(h);
-    let radius = diagonal * config.mask_diameter / 2.0;
+    let radius = diagonal * config.mask_scale / 2.0;
 
     eprintln!("\n=== MST Edge Diagnostics ===");
     eprintln!(
         "Mask: center=({:.1}, {:.1}) radius={:.1}px diameter_frac={:.2}",
-        center_x, center_y, radius, config.mask_diameter,
+        center_x, center_y, radius, config.mask_scale,
     );
     eprintln!("Total MST edges: {}", quality.mst_edge_details.len());
     eprintln!();

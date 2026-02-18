@@ -750,10 +750,18 @@ fn app() -> Element {
                     cfg.simplify_tolerance,
                     cfg.contour_tracer,
                     cfg.path_joiner,
-                    if cfg.circular_mask {
-                        format!("{:.0}%", cfg.mask_diameter * 100.0)
-                    } else {
-                        "off".to_owned()
+                    match cfg.mask_mode {
+                        mujou_pipeline::MaskMode::Off => "off".to_owned(),
+                        mujou_pipeline::MaskMode::Circle => {
+                            format!("circle {:.0}%", cfg.mask_scale * 100.0)
+                        }
+                        mujou_pipeline::MaskMode::Rectangle => {
+                            format!(
+                                "rect {:.0}% ar={:.2}",
+                                cfg.mask_scale * 100.0,
+                                cfg.mask_aspect_ratio,
+                            )
+                        }
                     },
                     cfg.working_resolution,
                 )

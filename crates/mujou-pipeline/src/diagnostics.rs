@@ -66,7 +66,7 @@ pub struct PipelineDiagnostics {
     pub contour_tracing: StageDiagnostics,
     /// Stage 6: RDP path simplification.
     pub simplification: StageDiagnostics,
-    /// Stage 7: circular mask (only when `config.circular_mask == true`).
+    /// Stage 7: mask (only when `config.mask_mode` is not `Off`).
     pub mask: Option<StageDiagnostics>,
     /// Stage 8: path ordering + joining.
     pub join: StageDiagnostics,
@@ -699,7 +699,7 @@ mod tests {
     fn fake_clock_diagnostics_without_invert() {
         let png = sharp_edge_png(40, 40);
         let config = crate::PipelineConfig {
-            circular_mask: false,
+            mask_mode: crate::mask::MaskMode::Off,
             invert: false,
             ..crate::PipelineConfig::default()
         };
@@ -747,7 +747,7 @@ mod tests {
     fn fake_clock_diagnostics_with_invert_and_mask() {
         let png = sharp_edge_png(40, 40);
         let config = crate::PipelineConfig {
-            circular_mask: true,
+            mask_mode: crate::mask::MaskMode::Circle,
             invert: true,
             ..crate::PipelineConfig::default()
         };

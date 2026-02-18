@@ -48,7 +48,7 @@ use image::DynamicImage;
 use crate::contour::ContourTracer;
 use crate::diagnostics::StageMetrics;
 use crate::join::PathJoiner;
-use crate::mask::{BorderPathMode, MaskResult, MaskShape};
+use crate::mask::{BorderPathMode, MaskMode, MaskResult, MaskShape};
 use crate::mst_join::JoinQualityMetrics;
 use crate::types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, RgbaImage, StagedResult,
@@ -362,42 +362,75 @@ impl Simplified {
         &self.reduced
     }
 
+    /// Clip polylines to the given mask shape and optionally generate a
+    /// border polyline. Shared by both Circle and Rectangle modes.
+    fn clip_and_border(
+        polylines: &[Polyline],
+        shape: MaskShape,
+        border_mode: BorderPathMode,
+    ) -> MaskResult {
+        let clipped = crate::mask::apply_mask(polylines, &shape);
+
+        let border = match border_mode {
+            BorderPathMode::Off => None,
+            BorderPathMode::On => Some(shape.border_polyline()),
+            BorderPathMode::Auto => {
+                let any_clipped = clipped.iter().any(|c| c.start_clipped || c.end_clipped);
+                if any_clipped {
+                    Some(shape.border_polyline())
+                } else {
+                    None
+                }
+            }
+        };
+
+        MaskResult {
+            clipped,
+            border,
+            shape,
+        }
+    }
+
     /// Advance to the masking stage.
     ///
-    /// When `config.circular_mask` is `true`, polylines are clipped to a
-    /// circular boundary and an optional border polyline is generated
-    /// based on [`BorderPathMode`]. When `false`, this is a no-op
-    /// pass-through.
+    /// When `config.mask_mode` is `Circle` or `Rectangle`, polylines are
+    /// clipped to the corresponding boundary and an optional border
+    /// polyline is generated based on [`BorderPathMode`]. When `Off`,
+    /// this is a no-op pass-through.
     pub fn mask(self) -> Masked {
-        let mask_result = if self.config.circular_mask {
-            let center = Point::new(
-                f64::from(self.dimensions.width) / 2.0,
-                f64::from(self.dimensions.height) / 2.0,
-            );
-            let radius = self.dimensions.mask_radius(self.config.mask_diameter);
-            let shape = MaskShape::Circle { center, radius };
-            let clipped = crate::mask::apply_mask(&self.reduced, &shape);
+        let center = Point::new(
+            f64::from(self.dimensions.width) / 2.0,
+            f64::from(self.dimensions.height) / 2.0,
+        );
 
-            let border = match self.config.border_path {
-                BorderPathMode::Off => None,
-                BorderPathMode::On => Some(shape.border_polyline()),
-                BorderPathMode::Auto => {
-                    let any_clipped = clipped.iter().any(|c| c.start_clipped || c.end_clipped);
-                    if any_clipped {
-                        Some(shape.border_polyline())
-                    } else {
-                        None
-                    }
-                }
-            };
-
-            Some(MaskResult {
-                clipped,
-                border,
-                shape,
-            })
-        } else {
-            None
+        let mask_result = match self.config.mask_mode {
+            MaskMode::Off => None,
+            MaskMode::Circle => {
+                let radius = self.dimensions.mask_radius(self.config.mask_scale);
+                let shape = MaskShape::Circle { center, radius };
+                Some(Self::clip_and_border(
+                    &self.reduced,
+                    shape,
+                    self.config.border_path,
+                ))
+            }
+            MaskMode::Rectangle => {
+                let (half_width, half_height) = self.dimensions.mask_rect_half_dims(
+                    self.config.mask_scale,
+                    self.config.mask_aspect_ratio,
+                    self.config.mask_landscape,
+                );
+                let shape = MaskShape::Rectangle {
+                    center,
+                    half_width,
+                    half_height,
+                };
+                Some(Self::clip_and_border(
+                    &self.reduced,
+                    shape,
+                    self.config.border_path,
+                ))
+            }
         };
         Masked {
             config: self.config,
@@ -415,7 +448,7 @@ impl Simplified {
 
 // ───────────────────────── Stage 7: Masked ───────────────────────────
 
-/// Pipeline state after optional circular masking.
+/// Pipeline state after optional masking (circle or rectangle).
 ///
 /// Call [`join`](Self::join) to advance to the final stage.
 ///
@@ -892,13 +925,13 @@ impl PipelineStage for Masked {
 
     fn metrics(&self) -> Option<StageMetrics> {
         let mr = self.mask_result.as_ref()?;
-        let radius_px = self.dimensions.mask_radius(self.config.mask_diameter);
+        let radius_px = self.dimensions.mask_radius(self.config.mask_scale);
         // Counts only clipped polylines (excludes the optional border
         // polyline, which is an addition rather than a clipping result).
         // The subsequent Joined stage uses `all_polylines()` which
         // includes the border, so its input count may differ.
         Some(StageMetrics::Mask {
-            diameter: self.config.mask_diameter,
+            diameter: self.config.mask_scale,
             radius_px,
             polylines_before: self.simplified.len(),
             polylines_after: mr.clipped.len(),
@@ -1789,8 +1822,8 @@ mod tests {
     fn masked_with_circular_mask_enabled() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            circular_mask: true,
-            mask_diameter: 0.8,
+            mask_mode: crate::mask::MaskMode::Circle,
+            mask_scale: 0.8,
             ..PipelineConfig::default()
         };
         let masked = Pipeline::new(png, config)
@@ -1807,10 +1840,10 @@ mod tests {
     }
 
     #[test]
-    fn masked_with_circular_mask_disabled() {
+    fn masked_with_mask_disabled() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            circular_mask: false,
+            mask_mode: crate::mask::MaskMode::Off,
             ..PipelineConfig::default()
         };
         let masked = Pipeline::new(png, config)
@@ -1903,8 +1936,8 @@ mod tests {
     fn full_pipeline_with_mask() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            circular_mask: true,
-            mask_diameter: 0.8,
+            mask_mode: crate::mask::MaskMode::Circle,
+            mask_scale: 0.8,
             ..PipelineConfig::default()
         };
 
@@ -2226,12 +2259,12 @@ mod tests {
 
     #[test]
     fn cache_changed_late_stage_produces_correct_result() {
-        // Change mask_diameter (stage 7) — stages 0-6 should be cached,
+        // Change mask_scale (stage 7) — stages 0-6 should be cached,
         // only stages 7-8 re-run.
         let png = sharp_edge_png(40, 40);
         let config1 = PipelineConfig::default();
         let config2 = PipelineConfig {
-            mask_diameter: 1.0,
+            mask_scale: 1.0,
             ..PipelineConfig::default()
         };
 
@@ -2404,7 +2437,7 @@ mod tests {
         };
         let config3 = PipelineConfig {
             blur_sigma: 2.0,
-            mask_diameter: 1.0,
+            mask_scale: 1.0,
             ..PipelineConfig::default()
         };
 

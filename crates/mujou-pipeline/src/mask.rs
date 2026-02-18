@@ -16,6 +16,31 @@ use crate::types::{Point, Polyline};
 
 // ──────────────────────────── Public types ────────────────────────────
 
+/// Controls which mask shape is applied.
+///
+/// `Off` disables masking entirely (no clipping). `Circle` and
+/// `Rectangle` enable the corresponding mask shape.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MaskMode {
+    /// No mask — polylines pass through unclipped.
+    Off,
+    /// Circular mask (existing behavior).
+    #[default]
+    Circle,
+    /// Axis-aligned rectangular mask (new).
+    Rectangle,
+}
+
+impl fmt::Display for MaskMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Off => f.write_str("Off"),
+            Self::Circle => f.write_str("Circle"),
+            Self::Rectangle => f.write_str("Rectangle"),
+        }
+    }
+}
+
 /// Resolved mask geometry used for both clipping and border generation.
 ///
 /// Adding a new shape variant requires implementing both clipping (in
@@ -30,6 +55,15 @@ pub enum MaskShape {
         /// Radius of the circle in pixels.
         radius: f64,
     },
+    /// Axis-aligned rectangular mask.
+    Rectangle {
+        /// Centre of the rectangle in image coordinates.
+        center: Point,
+        /// Half the width of the rectangle in pixels.
+        half_width: f64,
+        /// Half the height of the rectangle in pixels.
+        half_height: f64,
+    },
 }
 
 impl MaskShape {
@@ -43,6 +77,11 @@ impl MaskShape {
     pub fn border_polyline(&self) -> Polyline {
         match self {
             Self::Circle { center, radius } => generate_circle_border(*center, *radius),
+            Self::Rectangle {
+                center,
+                half_width,
+                half_height,
+            } => generate_rectangle_border(*center, *half_width, *half_height),
         }
     }
 }
@@ -113,7 +152,7 @@ impl MaskResult {
 /// boundary rather than across open space, reducing visible artifacts
 /// near the edge.
 ///
-/// Only takes effect when a mask is enabled (`circular_mask = true`).
+/// Only takes effect when a mask is enabled (`mask_mode` is not `Off`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum BorderPathMode {
     /// Never add a border path.
@@ -152,6 +191,14 @@ pub fn apply_mask(polylines: &[Polyline], shape: &MaskShape) -> Vec<ClippedPolyl
         MaskShape::Circle { center, radius } => polylines
             .iter()
             .flat_map(|pl| clip_polyline_to_circle(pl, *center, *radius))
+            .collect(),
+        MaskShape::Rectangle {
+            center,
+            half_width,
+            half_height,
+        } => polylines
+            .iter()
+            .flat_map(|pl| clip_polyline_to_rectangle(pl, *center, *half_width, *half_height))
             .collect(),
     }
 }
@@ -309,6 +356,187 @@ fn generate_circle_border(center: Point, radius: f64) -> Polyline {
     // Close the loop: last point equals the first.
     points.push(points[0]);
     Polyline::new(points)
+}
+
+// ──────────────────── Rectangle clipping (internal) ──────────────────
+
+/// Clip a single polyline to an axis-aligned rectangle, splitting at
+/// boundary crossings.
+///
+/// Uses the same 4-case structure as [`clip_polyline_to_circle`]:
+/// inside→inside, inside→outside, outside→inside, outside→outside
+/// (with pass-through check).
+fn clip_polyline_to_rectangle(
+    polyline: &Polyline,
+    center: Point,
+    half_width: f64,
+    half_height: f64,
+) -> Vec<ClippedPolyline> {
+    let points = polyline.points();
+    if points.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result = Vec::new();
+    let mut current_segment: Vec<Point> = Vec::new();
+    let mut current_start_clipped = false;
+
+    for i in 0..points.len() {
+        let p = points[i];
+        let p_inside = is_inside_rect(p, center, half_width, half_height);
+
+        if i == 0 {
+            if p_inside {
+                current_segment.push(p);
+                current_start_clipped = false;
+            }
+            continue;
+        }
+
+        let prev = points[i - 1];
+        let prev_inside = is_inside_rect(prev, center, half_width, half_height);
+
+        match (prev_inside, p_inside) {
+            (true, true) => {
+                current_segment.push(p);
+            }
+            (true, false) => {
+                // Exiting the rectangle.
+                let intersections =
+                    line_rect_intersections(prev, p, center, half_width, half_height);
+                let end_clipped = intersections.first().is_some_and(|ix| {
+                    current_segment.push(*ix);
+                    true
+                });
+                if current_segment.len() >= 2 {
+                    result.push(ClippedPolyline {
+                        polyline: Polyline::new(std::mem::take(&mut current_segment)),
+                        start_clipped: current_start_clipped,
+                        end_clipped,
+                    });
+                } else {
+                    current_segment.clear();
+                }
+            }
+            (false, true) => {
+                // Entering the rectangle.
+                let intersections =
+                    line_rect_intersections(prev, p, center, half_width, half_height);
+                if let Some(ix) = intersections.first() {
+                    current_start_clipped = true;
+                    current_segment.push(*ix);
+                } else {
+                    current_start_clipped = false;
+                }
+                current_segment.push(p);
+            }
+            (false, false) => {
+                // Both outside: check if the segment passes through.
+                let intersections =
+                    line_rect_intersections(prev, p, center, half_width, half_height);
+                if intersections.len() >= 2 {
+                    // Flush any residual segment.
+                    if current_segment.len() >= 2 {
+                        result.push(ClippedPolyline {
+                            polyline: Polyline::new(std::mem::take(&mut current_segment)),
+                            start_clipped: current_start_clipped,
+                            end_clipped: false,
+                        });
+                    } else {
+                        current_segment.clear();
+                    }
+                    result.push(ClippedPolyline {
+                        polyline: Polyline::new(vec![intersections[0], intersections[1]]),
+                        start_clipped: true,
+                        end_clipped: true,
+                    });
+                }
+            }
+        }
+    }
+
+    // Flush any remaining segment.
+    if current_segment.len() >= 2 {
+        result.push(ClippedPolyline {
+            polyline: Polyline::new(current_segment),
+            start_clipped: current_start_clipped,
+            end_clipped: false,
+        });
+    }
+
+    result
+}
+
+/// Generate a closed rectangle border polyline (5 points: 4 corners +
+/// closing point).
+fn generate_rectangle_border(center: Point, half_width: f64, half_height: f64) -> Polyline {
+    debug_assert!(
+        half_width > 0.0 && half_height > 0.0,
+        "border half-dimensions must be positive, got hw={half_width}, hh={half_height}",
+    );
+    let tl = Point::new(center.x - half_width, center.y - half_height);
+    let tr = Point::new(center.x + half_width, center.y - half_height);
+    let br = Point::new(center.x + half_width, center.y + half_height);
+    let bl = Point::new(center.x - half_width, center.y + half_height);
+    Polyline::new(vec![tl, tr, br, bl, tl])
+}
+
+/// Check if a point is inside or on the axis-aligned rectangle.
+fn is_inside_rect(p: Point, center: Point, half_width: f64, half_height: f64) -> bool {
+    (p.x - center.x).abs() <= half_width && (p.y - center.y).abs() <= half_height
+}
+
+/// Find intersection points of a line segment with an axis-aligned
+/// rectangle, returned in order of increasing parameter `t` along the
+/// segment from `a` to `b`.
+///
+/// Uses parametric form `P(t) = a + t*(b-a)` for `t` in `[0,1]`.
+/// Solves for `t` where `P(t)` hits each of the 4 edges:
+/// `x = cx ± hw`, `y = cy ± hh`.
+fn line_rect_intersections(
+    a: Point,
+    b: Point,
+    center: Point,
+    half_width: f64,
+    half_height: f64,
+) -> Vec<Point> {
+    let dx = b.x - a.x;
+    let dy = b.y - a.y;
+
+    let mut hits: Vec<(f64, Point)> = Vec::new();
+
+    // Check vertical edges: x = cx ± hw
+    for &edge_x in &[center.x - half_width, center.x + half_width] {
+        if dx.abs() > 1e-15 {
+            let t = (edge_x - a.x) / dx;
+            if (0.0..=1.0).contains(&t) {
+                let y = t.mul_add(dy, a.y);
+                if (y - center.y).abs() <= half_height + 1e-10 {
+                    hits.push((t, Point::new(edge_x, y)));
+                }
+            }
+        }
+    }
+
+    // Check horizontal edges: y = cy ± hh
+    for &edge_y in &[center.y - half_height, center.y + half_height] {
+        if dy.abs() > 1e-15 {
+            let t = (edge_y - a.y) / dy;
+            if (0.0..=1.0).contains(&t) {
+                let x = t.mul_add(dx, a.x);
+                if (x - center.x).abs() <= half_width + 1e-10 {
+                    hits.push((t, Point::new(x, edge_y)));
+                }
+            }
+        }
+    }
+
+    // Sort by parameter t and deduplicate near-coincident hits (corner
+    // intersections produce two hits at the same t).
+    hits.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    hits.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-10);
+
+    hits.into_iter().map(|(_, p)| p).collect()
 }
 
 // ──────────────────── Geometry helpers (internal) ─────────────────────
@@ -706,6 +934,181 @@ mod tests {
                 "border point should be on circle",
             );
         }
+    }
+
+    // ── clip_polyline_to_rectangle ─────────────────────────────────
+
+    const HALF_W: f64 = 10.0;
+    const HALF_H: f64 = 8.0;
+
+    #[test]
+    fn rect_empty_polyline_returns_empty() {
+        let pl = Polyline::new(vec![]);
+        let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn rect_entirely_inside_unchanged() {
+        let pl = Polyline::new(vec![
+            Point::new(0.0, 0.0),
+            Point::new(3.0, 0.0),
+            Point::new(3.0, 3.0),
+        ]);
+        let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].polyline.len(), 3);
+        assert!(!result[0].start_clipped);
+        assert!(!result[0].end_clipped);
+    }
+
+    #[test]
+    fn rect_entirely_outside_returns_empty() {
+        let pl = Polyline::new(vec![
+            Point::new(20.0, 20.0),
+            Point::new(30.0, 20.0),
+            Point::new(30.0, 30.0),
+        ]);
+        let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn rect_segment_exiting_is_clipped() {
+        // Path starts inside and goes right to (20,0), exiting at x=10.
+        let pl = Polyline::new(vec![Point::new(0.0, 0.0), Point::new(20.0, 0.0)]);
+        let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].polyline.len(), 2);
+        assert!(!result[0].start_clipped);
+        assert!(result[0].end_clipped);
+        let clipped = result[0].polyline.points()[1];
+        assert!((clipped.x - HALF_W).abs() < 1e-6, "should clip at x=10");
+    }
+
+    #[test]
+    fn rect_segment_entering_is_clipped() {
+        // Path starts outside (-20, 0) and goes to (0, 0), entering at x=-10.
+        let pl = Polyline::new(vec![Point::new(-20.0, 0.0), Point::new(0.0, 0.0)]);
+        let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].polyline.len(), 2);
+        assert!(result[0].start_clipped);
+        assert!(!result[0].end_clipped);
+        let entry = result[0].polyline.points()[0];
+        assert!((entry.x - (-HALF_W)).abs() < 1e-6, "should enter at x=-10");
+    }
+
+    #[test]
+    fn rect_path_crossing_through_produces_clipped_segment() {
+        // Path goes from (-20, 0) to (20, 0), crossing through.
+        let pl = Polyline::new(vec![Point::new(-20.0, 0.0), Point::new(20.0, 0.0)]);
+        let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].polyline.len(), 2);
+        assert!(result[0].start_clipped);
+        assert!(result[0].end_clipped);
+        let p0 = result[0].polyline.points()[0];
+        let p1 = result[0].polyline.points()[1];
+        assert!((p0.x - (-HALF_W)).abs() < 1e-6);
+        assert!((p1.x - HALF_W).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rect_exit_and_reenter_produces_two_segments() {
+        // (0,0) -> (0,20) -> (5,0): exits top, re-enters top
+        let pl = Polyline::new(vec![
+            Point::new(0.0, 0.0),
+            Point::new(0.0, 20.0),
+            Point::new(5.0, 0.0),
+        ]);
+        let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
+        assert_eq!(
+            result.len(),
+            2,
+            "expected 2 segments for exit-and-reenter path, got {}",
+            result.len(),
+        );
+        assert!(!result[0].start_clipped);
+        assert!(result[0].end_clipped);
+        assert!(result[1].start_clipped);
+        assert!(!result[1].end_clipped);
+    }
+
+    #[test]
+    fn rect_point_on_boundary_is_inside() {
+        let pl = Polyline::new(vec![
+            Point::new(0.0, 0.0),
+            Point::new(HALF_W, 0.0), // exactly on right edge
+        ]);
+        let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
+        assert_eq!(result.len(), 1);
+        assert!(!result[0].start_clipped);
+        assert!(!result[0].end_clipped);
+    }
+
+    // ── generate_rectangle_border ────────────────────────────────────
+
+    #[test]
+    fn rectangle_border_is_closed() {
+        let border = generate_rectangle_border(CENTER, HALF_W, HALF_H);
+        assert_eq!(border.len(), 5);
+        assert_eq!(border.first(), border.last());
+    }
+
+    #[test]
+    fn rectangle_border_corners_are_correct() {
+        let border = generate_rectangle_border(CENTER, HALF_W, HALF_H);
+        let pts = border.points();
+        assert_eq!(pts[0], Point::new(-HALF_W, -HALF_H));
+        assert_eq!(pts[1], Point::new(HALF_W, -HALF_H));
+        assert_eq!(pts[2], Point::new(HALF_W, HALF_H));
+        assert_eq!(pts[3], Point::new(-HALF_W, HALF_H));
+        assert_eq!(pts[4], pts[0]);
+    }
+
+    #[test]
+    fn mask_shape_border_polyline_dispatches_to_rectangle() {
+        let shape = MaskShape::Rectangle {
+            center: CENTER,
+            half_width: HALF_W,
+            half_height: HALF_H,
+        };
+        let border = shape.border_polyline();
+        assert_eq!(border.len(), 5);
+        assert_eq!(border.first(), border.last());
+    }
+
+    // ── MaskMode ─────────────────────────────────────────────────────
+
+    #[test]
+    fn mask_mode_default_is_circle() {
+        assert_eq!(MaskMode::default(), MaskMode::Circle);
+    }
+
+    #[test]
+    fn mask_mode_display() {
+        assert_eq!(MaskMode::Off.to_string(), "Off");
+        assert_eq!(MaskMode::Circle.to_string(), "Circle");
+        assert_eq!(MaskMode::Rectangle.to_string(), "Rectangle");
+    }
+
+    // ── apply_mask with Rectangle ────────────────────────────────────
+
+    #[test]
+    fn apply_mask_rectangle_processes_multiple_polylines() {
+        let polylines = vec![
+            Polyline::new(vec![Point::new(0.0, 0.0), Point::new(3.0, 0.0)]),
+            Polyline::new(vec![Point::new(20.0, 20.0), Point::new(30.0, 20.0)]),
+        ];
+        let shape = MaskShape::Rectangle {
+            center: CENTER,
+            half_width: HALF_W,
+            half_height: HALF_H,
+        };
+        let result = apply_mask(&polylines, &shape);
+        // First polyline is inside, second is outside.
+        assert_eq!(result.len(), 1);
     }
 
     // ── BorderPathMode ───────────────────────────────────────────────

@@ -310,6 +310,34 @@ pub fn to_svg(
                     .set("preserveAspectRatio", "xMidYMid meet");
                 (doc, Some((scale, offset_x, offset_y)))
             }
+            MaskShape::Rectangle {
+                center,
+                half_width,
+                half_height,
+            } => {
+                let rect_width = 2.0 * half_width;
+                let rect_height = 2.0 * half_height;
+                // Use DOCUMENT_SIZE_MM for the longer axis, scale the
+                // shorter axis proportionally.  Add a margin matching
+                // the circle convention (CIRCLE_DIAMETER_MM / DOCUMENT_SIZE_MM).
+                let margin_ratio = CIRCLE_DIAMETER_MM / DOCUMENT_SIZE_MM;
+                let longer = rect_width.max(rect_height);
+                let vb_width = rect_width / margin_ratio;
+                let vb_height = rect_height / margin_ratio;
+                let scale = DOCUMENT_SIZE_MM / (longer / margin_ratio);
+                let doc_width_mm = vb_width * scale;
+                let doc_height_mm = vb_height * scale;
+                let margin_x = (vb_width - rect_width) / 2.0;
+                let margin_y = (vb_height - rect_height) / 2.0;
+                let offset_x = center.x - half_width - margin_x;
+                let offset_y = center.y - half_height - margin_y;
+                let doc = Document::new()
+                    .set("width", format!("{doc_width_mm}mm"))
+                    .set("height", format!("{doc_height_mm}mm"))
+                    .set("viewBox", format!("0 0 {doc_width_mm} {doc_height_mm}"))
+                    .set("preserveAspectRatio", "xMidYMid meet");
+                (doc, Some((scale, offset_x, offset_y)))
+            }
         },
     );
 

@@ -57,13 +57,13 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Parity::Greedy)]
     parity_strategy: Parity,
 
-    /// Disable circular mask.
+    /// Disable mask.
     #[arg(long)]
     no_mask: bool,
 
-    /// Mask diameter as fraction of image diagonal (0.0-1.5).
-    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_DIAMETER)]
-    mask_diameter: f64,
+    /// Mask scale as fraction of image dimension (0.0-1.5).
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_SCALE)]
+    mask_scale: f64,
 
     /// Invert edge map before contour tracing.
     #[arg(long)]
@@ -175,8 +175,12 @@ fn config_from_cli(cli: &Cli) -> Result<mujou_pipeline::PipelineConfig, String> 
             Parity::Greedy => mujou_pipeline::ParityStrategy::Greedy,
             Parity::Optimal => mujou_pipeline::ParityStrategy::Optimal,
         },
-        circular_mask: !cli.no_mask,
-        mask_diameter: cli.mask_diameter,
+        mask_mode: if cli.no_mask {
+            mujou_pipeline::MaskMode::Off
+        } else {
+            mujou_pipeline::MaskMode::Circle
+        },
+        mask_scale: cli.mask_scale,
         invert: cli.invert,
         working_resolution: cli.working_resolution,
         downsample_filter: match cli.downsample_filter {
