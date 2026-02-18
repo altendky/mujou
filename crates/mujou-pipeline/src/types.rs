@@ -598,7 +598,7 @@ impl PipelineConfig {
                 "at least one edge channel must be enabled".to_owned(),
             ));
         }
-        if self.subsample_max_length <= 0.0 {
+        if self.subsample_max_length <= 0.0 || self.subsample_max_length.is_nan() {
             return Err(PipelineError::InvalidConfig(format!(
                 "subsample_max_length must be positive, got {}",
                 self.subsample_max_length,
