@@ -357,6 +357,116 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             }
         }
 
+        StageId::Masked => {
+            let mask_mode = config.mask_mode;
+            let scale = config.mask_scale;
+            let aspect_ratio = config.mask_aspect_ratio;
+            let landscape = config.mask_landscape;
+            let mask_active = !matches!(mask_mode, MaskMode::Off);
+            let is_rectangle = matches!(mask_mode, MaskMode::Rectangle);
+            let config_mode = config.clone();
+            let config_slider = config.clone();
+            let config_aspect = config.clone();
+            let config_orient = config.clone();
+            let config_border = config.clone();
+            rsx! {
+                div { class: "space-y-2",
+                    {render_select(
+                        "mask_mode",
+                        "Mask Mode",
+                        desc("Choose mask shape: Off, Circle, or Rectangle."),
+                        &[("Off", "Off"), ("Circle", "Circle"), ("Rectangle", "Rectangle")],
+                        match mask_mode {
+                            MaskMode::Off => "Off",
+                            MaskMode::Circle => "Circle",
+                            MaskMode::Rectangle => "Rectangle",
+                        },
+                        move |v: String| {
+                            let mut c = config_mode.clone();
+                            c.mask_mode = match v.as_str() {
+                                "Circle" => MaskMode::Circle,
+                                "Rectangle" => MaskMode::Rectangle,
+                                _ => MaskMode::Off,
+                            };
+                            on_change.call(c);
+                        },
+                    )}
+
+                    if mask_active {
+                        {render_slider(
+                            "mask_scale",
+                            "Mask Scale",
+                            desc("Scale factor for the mask shape."),
+                            scale,
+                            0.1,
+                            1.5,
+                            0.01,
+                            2,
+                            move |v: f64| {
+                                let mut c = config_slider.clone();
+                                c.mask_scale = v;
+                                on_change.call(c);
+                            },
+                        )}
+
+                        if is_rectangle {
+                            {render_slider(
+                                "mask_aspect_ratio",
+                                "Aspect Ratio",
+                                desc("Rectangle longer-to-shorter side ratio (1.0 = square)."),
+                                aspect_ratio,
+                                1.0,
+                                4.0,
+                                0.01,
+                                2,
+                                move |v: f64| {
+                                    let mut c = config_aspect.clone();
+                                    c.mask_aspect_ratio = v;
+                                    on_change.call(c);
+                                },
+                            )}
+
+                            if aspect_ratio > 1.0 {
+                                {render_select(
+                                    "mask_orientation",
+                                    "Orientation",
+                                    desc("Landscape: longer side is horizontal. Portrait: longer side is vertical."),
+                                    &[("Landscape", "Landscape"), ("Portrait", "Portrait")],
+                                    if landscape { "Landscape" } else { "Portrait" },
+                                    move |v: String| {
+                                        let mut c = config_orient.clone();
+                                        c.mask_landscape = v == "Landscape";
+                                        on_change.call(c);
+                                    },
+                                )}
+                            }
+                        }
+
+                        {render_select(
+                            "border_path",
+                            "Border Path",
+                            desc("Add a border polyline along the mask edge to route connections along the boundary."),
+                            &[("Auto", "Auto"), ("On", "On"), ("Off", "Off")],
+                            match config_border.border_path {
+                                BorderPathMode::Auto => "Auto",
+                                BorderPathMode::On => "On",
+                                BorderPathMode::Off => "Off",
+                            },
+                            move |v: String| {
+                                let mut c = config_border.clone();
+                                c.border_path = match v.as_str() {
+                                    "On" => BorderPathMode::On,
+                                    "Off" => BorderPathMode::Off,
+                                    _ => BorderPathMode::Auto,
+                                };
+                                on_change.call(c);
+                            },
+                        )}
+                    }
+                }
+            }
+        }
+
         StageId::Join => {
             let config_select = config.clone();
             let config_start = config.clone();
@@ -466,116 +576,6 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             on_change.call(c);
                         },
                     )}
-                }
-            }
-        }
-
-        StageId::Masked => {
-            let mask_mode = config.mask_mode;
-            let scale = config.mask_scale;
-            let aspect_ratio = config.mask_aspect_ratio;
-            let landscape = config.mask_landscape;
-            let mask_active = !matches!(mask_mode, MaskMode::Off);
-            let is_rectangle = matches!(mask_mode, MaskMode::Rectangle);
-            let config_mode = config.clone();
-            let config_slider = config.clone();
-            let config_aspect = config.clone();
-            let config_orient = config.clone();
-            let config_border = config.clone();
-            rsx! {
-                div { class: "space-y-2",
-                    {render_select(
-                        "mask_mode",
-                        "Mask Mode",
-                        desc("Choose mask shape: Off, Circle, or Rectangle."),
-                        &[("Off", "Off"), ("Circle", "Circle"), ("Rectangle", "Rectangle")],
-                        match mask_mode {
-                            MaskMode::Off => "Off",
-                            MaskMode::Circle => "Circle",
-                            MaskMode::Rectangle => "Rectangle",
-                        },
-                        move |v: String| {
-                            let mut c = config_mode.clone();
-                            c.mask_mode = match v.as_str() {
-                                "Circle" => MaskMode::Circle,
-                                "Rectangle" => MaskMode::Rectangle,
-                                _ => MaskMode::Off,
-                            };
-                            on_change.call(c);
-                        },
-                    )}
-
-                    if mask_active {
-                        {render_slider(
-                            "mask_scale",
-                            "Mask Scale",
-                            desc("Scale factor for the mask shape."),
-                            scale,
-                            0.1,
-                            1.5,
-                            0.01,
-                            2,
-                            move |v: f64| {
-                                let mut c = config_slider.clone();
-                                c.mask_scale = v;
-                                on_change.call(c);
-                            },
-                        )}
-
-                        if is_rectangle {
-                            {render_slider(
-                                "mask_aspect_ratio",
-                                "Aspect Ratio",
-                                desc("Rectangle longer-to-shorter side ratio (1.0 = square)."),
-                                aspect_ratio,
-                                1.0,
-                                4.0,
-                                0.01,
-                                2,
-                                move |v: f64| {
-                                    let mut c = config_aspect.clone();
-                                    c.mask_aspect_ratio = v;
-                                    on_change.call(c);
-                                },
-                            )}
-
-                            if aspect_ratio > 1.0 {
-                                {render_select(
-                                    "mask_orientation",
-                                    "Orientation",
-                                    desc("Landscape: longer side is horizontal. Portrait: longer side is vertical."),
-                                    &[("Landscape", "Landscape"), ("Portrait", "Portrait")],
-                                    if landscape { "Landscape" } else { "Portrait" },
-                                    move |v: String| {
-                                        let mut c = config_orient.clone();
-                                        c.mask_landscape = v == "Landscape";
-                                        on_change.call(c);
-                                    },
-                                )}
-                            }
-                        }
-
-                        {render_select(
-                            "border_path",
-                            "Border Path",
-                            desc("Add a border polyline along the mask edge to route connections along the boundary."),
-                            &[("Auto", "Auto"), ("On", "On"), ("Off", "Off")],
-                            match config_border.border_path {
-                                BorderPathMode::Auto => "Auto",
-                                BorderPathMode::On => "On",
-                                BorderPathMode::Off => "Off",
-                            },
-                            move |v: String| {
-                                let mut c = config_border.clone();
-                                c.border_path = match v.as_str() {
-                                    "On" => BorderPathMode::On,
-                                    "Off" => BorderPathMode::Off,
-                                    _ => BorderPathMode::Auto,
-                                };
-                                on_change.call(c);
-                            },
-                        )}
-                    }
                 }
             }
         }
