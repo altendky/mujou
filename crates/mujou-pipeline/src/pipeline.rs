@@ -1725,7 +1725,7 @@ impl PipelineCache {
             masked,
             joined,
             subsampled: _,
-            mst_edge_details: _,
+            mst_edge_details,
             dimensions,
         } = staged;
 
@@ -1803,19 +1803,29 @@ impl PipelineCache {
             }),
 
             // Stage 9 changed (subsample) — resume from Joined (index 8).
-            9 => Stage::Joined(Joined {
-                config: new_config.clone(),
-                original,
-                downsampled,
-                blurred,
-                edges,
-                contours,
-                simplified,
-                masked,
-                path: joined,
-                quality_metrics: None,
-                dimensions,
-            }),
+            9 => {
+                let quality_metrics = if mst_edge_details.is_empty() {
+                    None
+                } else {
+                    Some(JoinQualityMetrics {
+                        mst_edge_details,
+                        ..JoinQualityMetrics::default()
+                    })
+                };
+                Stage::Joined(Joined {
+                    config: new_config.clone(),
+                    original,
+                    downsampled,
+                    blurred,
+                    edges,
+                    contours,
+                    simplified,
+                    masked,
+                    path: joined,
+                    quality_metrics,
+                    dimensions,
+                })
+            }
 
             _ => unreachable!(
                 "earliest_changed_stage returned {earliest_changed}, \
