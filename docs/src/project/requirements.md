@@ -143,6 +143,6 @@ deploy/                         # assembled by CI (not checked in)
 │   ├── index.html              # Dioxus app entry (from dx bundle)
 │   ├── 404.html                # copy of index.html for client-side routing
 │   └── assets/
-│       ├── mujou-app_bg-*.wasm  # content-hashed WASM binary
-│       └── mujou-app-*.js      # content-hashed JS loader
+│       ├── mujou_app_bg-*.wasm  # content-hashed WASM binary
+│       └── mujou_app-*.js      # content-hashed JS loader
 ```
