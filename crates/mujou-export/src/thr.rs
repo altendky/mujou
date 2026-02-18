@@ -108,7 +108,9 @@ pub fn to_thr(
         let _ = writeln!(out, "# Source: {title}");
     }
     if let Some(description) = metadata.description {
-        let _ = writeln!(out, "# {description}");
+        for line in description.lines() {
+            let _ = writeln!(out, "# {line}");
+        }
     }
     if let Some(timestamp) = metadata.timestamp {
         let _ = writeln!(out, "# Exported: {timestamp}");

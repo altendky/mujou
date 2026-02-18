@@ -120,10 +120,9 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                 }
 
                 if thr_selected() {
-                    let description = format!("{config_description}\nExported: {timestamp}");
                     let thr_metadata = mujou_export::ThrMetadata {
                         title: Some(&filename),
-                        description: Some(&description),
+                        description: Some(&config_description),
                         timestamp: Some(&timestamp),
                         config_json: config_json.as_deref(),
                     };
