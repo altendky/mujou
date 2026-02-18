@@ -301,7 +301,7 @@ impl fmt::Display for StartPointStrategy {
 /// Fields are currently public with no construction-time validation.
 /// A validated constructor (`try_new`) or builder should be added to
 /// enforce invariants such as `blur_sigma > 0`, `canny_low <= canny_high`,
-/// `canny_low >= 1.0`, `mask_scale in [0.01, 1.5] when mask is enabled`, and
+/// `canny_low >= 1.0`, `mask_scale in [0.01, 1.5]`, and
 /// `simplify_tolerance >= 0.0`.
 /// Invalid values would return [`PipelineError::InvalidConfig`].
 /// See [open-questions: PipelineConfig validation](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
@@ -484,7 +484,7 @@ impl PipelineConfig {
     /// - `canny_high <= canny_max`
     /// - `canny_max <= edge::max_gradient_magnitude()`
     /// - `simplify_tolerance >= 0`
-    /// - `mask_scale` in `[0.01, 1.5]` when `mask_mode` is not `Off` (unconstrained when `Off`)
+    /// - `mask_scale` in `[0.01, 1.5]`
     /// - `mask_aspect_ratio` in `[1.0, 4.0]`
     /// - `working_resolution > 0`
     /// - `mst_neighbours > 0`
@@ -532,9 +532,9 @@ impl PipelineConfig {
                 self.simplify_tolerance,
             )));
         }
-        if self.mask_mode != MaskMode::Off && !(0.01..=1.5).contains(&self.mask_scale) {
+        if !(0.01..=1.5).contains(&self.mask_scale) {
             return Err(PipelineError::InvalidConfig(format!(
-                "mask_scale must be in [0.01, 1.5] when mask is enabled, got {}",
+                "mask_scale must be in [0.01, 1.5], got {}",
                 self.mask_scale,
             )));
         }
@@ -1243,19 +1243,8 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_mask_scale_zero_when_off() {
+    fn validate_rejects_mask_scale_below_minimum() {
         let config = PipelineConfig {
-            mask_mode: MaskMode::Off,
-            mask_scale: 0.0,
-            ..PipelineConfig::default()
-        };
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn validate_rejects_mask_scale_below_minimum_when_enabled() {
-        let config = PipelineConfig {
-            mask_mode: MaskMode::Circle,
             mask_scale: 0.0,
             ..PipelineConfig::default()
         };
@@ -1264,6 +1253,15 @@ mod tests {
             matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_scale")),
             "expected InvalidConfig about mask_scale, got {err:?}",
         );
+    }
+
+    #[test]
+    fn validate_accepts_mask_scale_minimum() {
+        let config = PipelineConfig {
+            mask_scale: 0.01,
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_ok());
     }
 
     #[test]
