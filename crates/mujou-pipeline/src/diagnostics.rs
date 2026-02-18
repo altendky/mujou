@@ -66,7 +66,7 @@ pub struct PipelineDiagnostics {
     pub contour_tracing: StageDiagnostics,
     /// Stage 6: RDP path simplification.
     pub simplification: StageDiagnostics,
-    /// Stage 7: circular mask (only when `config.circular_mask == true`).
+    /// Stage 7: mask (only when `config.mask_mode` is not `Off`).
     pub mask: Option<StageDiagnostics>,
     /// Stage 8: path ordering + joining.
     pub join: StageDiagnostics,
@@ -170,12 +170,13 @@ pub enum StageMetrics {
         /// Reduction ratio: `1.0 - (after / before)`.
         reduction_ratio: f64,
     },
-    /// Circular mask metrics.
+    /// Mask metrics (circle or rectangle).
     Mask {
-        /// Mask diameter as fraction of image diagonal.
-        diameter: f64,
-        /// Mask radius in pixels.
-        radius_px: f64,
+        /// Human-readable description of the mask geometry.
+        ///
+        /// For circles: `"d=0.75 r=123.4px"`.
+        /// For rectangles: `"scale=0.75 ar=2.00 land 100.0×50.0px"`.
+        shape_info: String,
         /// Number of polylines before masking.
         polylines_before: usize,
         /// Number of polylines after masking (may increase due to splits).
@@ -364,15 +365,14 @@ fn format_metrics(metrics: &StageMetrics) -> String {
             )
         }
         StageMetrics::Mask {
-            diameter,
-            radius_px,
+            shape_info,
             polylines_before,
             polylines_after,
             points_before,
             points_after,
         } => {
             format!(
-                "d={diameter:.2} r={radius_px:.1}px polys={polylines_before}->{polylines_after} pts={points_before}->{points_after}",
+                "{shape_info} polys={polylines_before}->{polylines_after} pts={points_before}->{points_after}",
             )
         }
         StageMetrics::Join {
@@ -699,7 +699,7 @@ mod tests {
     fn fake_clock_diagnostics_without_invert() {
         let png = sharp_edge_png(40, 40);
         let config = crate::PipelineConfig {
-            circular_mask: false,
+            mask_mode: crate::mask::MaskMode::Off,
             invert: false,
             ..crate::PipelineConfig::default()
         };
@@ -747,7 +747,7 @@ mod tests {
     fn fake_clock_diagnostics_with_invert_and_mask() {
         let png = sharp_edge_png(40, 40);
         let config = crate::PipelineConfig {
-            circular_mask: true,
+            mask_mode: crate::mask::MaskMode::Circle,
             invert: true,
             ..crate::PipelineConfig::default()
         };

@@ -107,18 +107,23 @@ Otherwise, intermediate points are dropped.
 
 **User parameter:** `simplify_tolerance` (f64, default: 2.0 pixels)
 
-### 7. Circular Mask (Optional)
+### 7. Mask (Optional)
 
-For round sand tables (Sisyphus, Oasis Mini), clip all polylines to a circle centered on the image.
-Points outside the circle are removed.
-Polylines that cross the circle boundary are split at the intersection.
+Clip all polylines to a mask shape centered on the image.
+Points outside the mask are removed.
+Polylines that cross the mask boundary are split at the intersection.
 Contours entirely outside the mask are discarded before joining, so the join step only connects surviving contours.
+
+Two mask shapes are supported:
+
+- **Circle** — for round sand tables (Sisyphus, Oasis Mini). `mask_scale` is a fraction of the image diagonal; at 1.0 the circle circumscribes the full image.
+- **Rectangle** — axis-aligned rectangle. `mask_scale` controls the shorter dimension relative to the image's shorter dimension. `mask_aspect_ratio` extends the longer dimension. `mask_landscape` controls orientation.
 
 The mask stage returns a `MaskResult` containing `Vec<ClippedPolyline>` with explicit per-endpoint clip metadata (`start_clipped`, `end_clipped`) identifying every point that was created by intersection with the mask boundary.
 
 #### Border path
 
-When clipping creates boundary endpoints, the joiner may connect them across open space near the edge, producing visually jarring artifacts. The `border_path` option adds a border polyline matching the mask shape (a circle sampled at ~3px arc-length spacing). This gives the joiner a path along the mask boundary so connections between boundary endpoints route along the edge rather than cutting across empty space.
+When clipping creates boundary endpoints, the joiner may connect them across open space near the edge, producing visually jarring artifacts. The `border_path` option adds a border polyline matching the mask shape (a circle sampled at ~3px arc-length spacing, or a closed 4-corner rectangle). This gives the joiner a path along the mask boundary so connections between boundary endpoints route along the edge rather than cutting across empty space.
 
 Three modes:
 
@@ -128,12 +133,14 @@ Three modes:
 | `On` | Always add the border polyline when the mask is enabled |
 | `Off` | Never add a border polyline |
 
-The border shape is tied to the mask shape via the `MaskShape` enum — adding a new mask geometry (e.g. rectangle) requires implementing both clipping and border generation for that shape, enforced by exhaustive `match` arms.
+The border shape is tied to the mask shape via the `MaskShape` enum — each shape variant implements both clipping and border generation, enforced by exhaustive `match` arms.
 
 **User parameters:**
 
-- `circular_mask` (bool, default: true)
-- `mask_diameter` (f64, fraction of image diagonal, 0.0-1.5, default: 0.75)
+- `mask_mode` (`MaskMode`, default: `Circle`) — `Off`, `Circle`, or `Rectangle`
+- `mask_scale` (f64, 0.0-1.5, default: 0.75) — scale factor for the mask shape
+- `mask_aspect_ratio` (f64, 1.0-4.0, default: 1.0) — rectangle aspect ratio (only for Rectangle)
+- `mask_landscape` (bool, default: true) — rectangle orientation (only for Rectangle)
 - `border_path` (`BorderPathMode`, default: `Auto`)
 
 ### 8. Path Ordering + Joining
@@ -217,8 +224,10 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `contour_tracer` | `ContourTracer` | `BorderFollowing` | Contour tracing algorithm ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `simplify_tolerance` | f64 | 2.0 | RDP simplification tolerance (pixels) |
 | `path_joiner` | `PathJoiner` | `Mst` | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
-| `circular_mask` | bool | true | Clip output to circle |
-| `mask_diameter` | f64 | 0.75 | Mask diameter as fraction of image diagonal (0.0-1.5) |
+| `mask_mode` | `MaskMode` | `Circle` | Mask shape: `Off`, `Circle`, `Rectangle` |
+| `mask_scale` | f64 | 0.75 | Scale factor for mask shape (0.0-1.5) |
+| `mask_aspect_ratio` | f64 | 1.0 | Rectangle aspect ratio (1.0-4.0, Rectangle only) |
+| `mask_landscape` | bool | true | Rectangle orientation (Rectangle only) |
 | `border_path` | `BorderPathMode` | `Auto` | Add border polyline along mask edge (`Auto`/`On`/`Off`) |
 | `invert` | bool | false | Invert edge map |
 

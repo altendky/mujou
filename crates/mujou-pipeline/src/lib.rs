@@ -29,7 +29,7 @@ pub use diagnostics::PipelineDiagnostics;
 pub use downsample::DownsampleFilter;
 pub use edge::max_gradient_magnitude;
 pub use join::{JoinOutput, PathJoiner, PathJoinerKind};
-pub use mask::{BorderPathMode, ClippedPolyline, MaskResult, MaskShape};
+pub use mask::{BorderPathMode, ClippedPolyline, MaskMode, MaskResult, MaskShape};
 pub use mst_join::{JoinQualityMetrics, MstEdgeInfo, ParityStrategy};
 pub use pipeline::{Pipeline, PipelineCache};
 pub use segment_analysis::{RankedSegment, SEGMENT_COLORS, find_top_segments};
@@ -54,7 +54,7 @@ pub use types::{
 /// 5. Optional edge map inversion
 /// 6. Contour tracing (pluggable strategy)
 /// 7. Path simplification (Ramer-Douglas-Peucker)
-/// 8. Optional circular mask
+/// 8. Optional mask (circle or rectangle)
 /// 9. Path ordering + joining into single continuous path (pluggable strategy;
 ///    each joiner handles its own ordering internally)
 ///
@@ -191,8 +191,8 @@ mod tests {
     fn process_with_circular_mask() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            circular_mask: true,
-            mask_diameter: 0.8,
+            mask_mode: MaskMode::Circle,
+            mask_scale: 0.8,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
@@ -217,11 +217,11 @@ mod tests {
     #[test]
     fn process_with_circular_mask_nonsquare() {
         // Non-square image: mask radius is based on the diagonal so at
-        // mask_diameter=1.0 the circle circumscribes the full image.
+        // mask_scale=1.0 the circle circumscribes the full image.
         let png = sharp_edge_png(60, 40);
         let config = PipelineConfig {
-            circular_mask: true,
-            mask_diameter: 1.0,
+            mask_mode: MaskMode::Circle,
+            mask_scale: 1.0,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
@@ -245,12 +245,12 @@ mod tests {
 
     #[test]
     fn process_with_circular_mask_above_one() {
-        // mask_diameter > 1.0 produces a circle larger than the diagonal,
+        // mask_scale > 1.0 produces a circle larger than the diagonal,
         // so all image content should survive clipping.
         let png = sharp_edge_png(60, 40);
         let config = PipelineConfig {
-            circular_mask: true,
-            mask_diameter: 1.3,
+            mask_mode: MaskMode::Circle,
+            mask_scale: 1.3,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
@@ -327,17 +327,17 @@ mod tests {
     fn process_staged_with_mask_populates_masked() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            circular_mask: true,
-            mask_diameter: 1.0,
+            mask_mode: MaskMode::Circle,
+            mask_scale: 1.0,
             ..PipelineConfig::default()
         };
         let staged = process_staged(&png, &config).unwrap();
 
         assert!(
             staged.masked.is_some(),
-            "expected Some masked polylines when circular_mask=true"
+            "expected Some masked polylines when mask_mode=Circle"
         );
-        // With mask_diameter=1.0 (circumscribing diagonal), the vertical
+        // With mask_scale=1.0 (circumscribing diagonal), the vertical
         // edge at x=20 on a 40x40 image should survive clipping.
         assert!(
             !staged.masked.as_ref().unwrap().clipped.is_empty(),
@@ -349,8 +349,8 @@ mod tests {
     fn process_staged_final_polyline_returns_joined_with_mask() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            circular_mask: true,
-            mask_diameter: 0.8,
+            mask_mode: MaskMode::Circle,
+            mask_scale: 0.8,
             ..PipelineConfig::default()
         };
         let staged = process_staged(&png, &config).unwrap();

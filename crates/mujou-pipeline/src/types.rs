@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::contour::ContourTracerKind;
 use crate::downsample::DownsampleFilter;
 use crate::join::PathJoinerKind;
-use crate::mask::{BorderPathMode, MaskResult};
+use crate::mask::{BorderPathMode, MaskMode, MaskResult};
 
 /// Re-export `GrayImage` so downstream crates can reference
 /// intermediate raster data without depending on `image` directly.
@@ -131,16 +131,43 @@ pub struct Dimensions {
 }
 
 impl Dimensions {
-    /// Compute the mask circle radius in pixels for a given `mask_diameter`.
+    /// Compute the mask circle radius in pixels for a given `mask_scale`.
     ///
-    /// The diameter is expressed as a fraction of the image diagonal
+    /// The scale is expressed as a fraction of the image diagonal
     /// (`sqrt(width² + height²)`), so at 1.0 the circle circumscribes the
     /// entire image.
     #[must_use]
-    pub fn mask_radius(self, mask_diameter: f64) -> f64 {
+    pub fn mask_radius(self, mask_scale: f64) -> f64 {
         let w = f64::from(self.width);
         let h = f64::from(self.height);
-        w.hypot(h) * mask_diameter / 2.0
+        w.hypot(h) * mask_scale / 2.0
+    }
+
+    /// Compute the rectangular mask half-dimensions in pixels.
+    ///
+    /// `mask_scale` controls the **shorter** dimension of the rectangle
+    /// relative to the image's shorter dimension. `mask_aspect_ratio`
+    /// extends the longer dimension. `mask_landscape` determines
+    /// orientation.
+    ///
+    /// Returns `(half_width, half_height)`.
+    #[must_use]
+    pub fn mask_rect_half_dims(
+        self,
+        mask_scale: f64,
+        mask_aspect_ratio: f64,
+        mask_landscape: bool,
+    ) -> (f64, f64) {
+        let w = f64::from(self.width);
+        let h = f64::from(self.height);
+        let shorter_image_dim = w.min(h);
+        let rect_shorter_side = shorter_image_dim * mask_scale;
+        let rect_longer_side = rect_shorter_side * mask_aspect_ratio;
+        if mask_landscape {
+            (rect_longer_side / 2.0, rect_shorter_side / 2.0)
+        } else {
+            (rect_shorter_side / 2.0, rect_longer_side / 2.0)
+        }
     }
 }
 
@@ -274,7 +301,7 @@ impl fmt::Display for StartPointStrategy {
 /// Fields are currently public with no construction-time validation.
 /// A validated constructor (`try_new`) or builder should be added to
 /// enforce invariants such as `blur_sigma > 0`, `canny_low <= canny_high`,
-/// `canny_low >= 1.0`, `0.0 <= mask_diameter <= 1.5`, and
+/// `canny_low >= 1.0`, `mask_scale in [0.01, 1.5]`, and
 /// `simplify_tolerance >= 0.0`.
 /// Invalid values would return [`PipelineError::InvalidConfig`].
 /// See [open-questions: PipelineConfig validation](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
@@ -316,21 +343,41 @@ pub struct PipelineConfig {
     /// contours into a single continuous path.
     pub path_joiner: PathJoinerKind,
 
-    /// Whether to clip output paths to a circular mask.
-    /// Useful for round sand tables.
-    pub circular_mask: bool,
+    /// Which mask shape to apply (Off / Circle / Rectangle).
+    #[serde(default)]
+    pub mask_mode: MaskMode,
 
-    /// Mask diameter as a fraction of image diagonal (0.0 to 1.5).
-    /// At 1.0 the circle circumscribes the full image (all four corners
-    /// lie on or inside the circle). Only used when `circular_mask` is
-    /// `true`.
-    pub mask_diameter: f64,
+    /// Mask scale factor ([0.01, 1.5]).
+    ///
+    /// For circles: fraction of image diagonal (at 1.0 the circle
+    /// circumscribes the full image).
+    /// For rectangles: fraction of the image's shorter dimension
+    /// controlling the rectangle's shorter side.
+    #[serde(default = "PipelineConfig::default_mask_scale")]
+    pub mask_scale: f64,
+
+    /// Rectangle mask aspect ratio (1.0 to 4.0).
+    ///
+    /// Controls how much the rectangle's longer dimension extends
+    /// relative to its shorter dimension. At 1.0 the rectangle is
+    /// square. Only used when `mask_mode` is `Rectangle`.
+    #[serde(default = "PipelineConfig::default_mask_aspect_ratio")]
+    pub mask_aspect_ratio: f64,
+
+    /// Whether the rectangle mask is in landscape orientation.
+    ///
+    /// When `true`, the longer dimension is horizontal. When `false`,
+    /// the longer dimension is vertical. Has no effect when
+    /// `mask_aspect_ratio == 1.0` (square). Only used when `mask_mode`
+    /// is `Rectangle`.
+    #[serde(default = "PipelineConfig::default_mask_landscape")]
+    pub mask_landscape: bool,
 
     /// Whether to add a border polyline matching the mask shape.
     ///
     /// The border lets the joiner route connections along the mask
     /// boundary rather than across open space.  Only takes effect when
-    /// `circular_mask` is `true`.
+    /// `mask_mode` is not `Off`.
     #[serde(default)]
     pub border_path: BorderPathMode,
 
@@ -395,10 +442,14 @@ impl PipelineConfig {
     pub const DEFAULT_CANNY_MAX: f32 = 60.0;
     /// Default RDP simplification tolerance in pixels.
     pub const DEFAULT_SIMPLIFY_TOLERANCE: f64 = 1.0;
-    /// Default circular mask enabled state.
-    pub const DEFAULT_CIRCULAR_MASK: bool = true;
-    /// Default mask diameter as a fraction of image diagonal.
-    pub const DEFAULT_MASK_DIAMETER: f64 = 0.75;
+    /// Default mask mode (Circle).
+    pub const DEFAULT_MASK_MODE: MaskMode = MaskMode::Circle;
+    /// Default mask scale factor.
+    pub const DEFAULT_MASK_SCALE: f64 = 0.75;
+    /// Default rectangle mask aspect ratio (square).
+    pub const DEFAULT_MASK_ASPECT_RATIO: f64 = 1.0;
+    /// Default rectangle mask landscape orientation.
+    pub const DEFAULT_MASK_LANDSCAPE: bool = true;
     /// Default border path mode (auto-detect based on clipping).
     pub const DEFAULT_BORDER_PATH: BorderPathMode = BorderPathMode::Auto;
     /// Default edge map inversion state.
@@ -423,6 +474,19 @@ impl PipelineConfig {
     /// Default start point strategy (outside / perimeter).
     pub const DEFAULT_START_POINT: StartPointStrategy = StartPointStrategy::Outside;
 
+    // Serde default helpers — serde's per-field `#[serde(default)]` uses
+    // the *type's* `Default`, which is wrong for `f64` (0.0) and `bool`
+    // (false).  These functions return the pipeline-specific defaults.
+    const fn default_mask_scale() -> f64 {
+        Self::DEFAULT_MASK_SCALE
+    }
+    const fn default_mask_aspect_ratio() -> f64 {
+        Self::DEFAULT_MASK_ASPECT_RATIO
+    }
+    const fn default_mask_landscape() -> bool {
+        Self::DEFAULT_MASK_LANDSCAPE
+    }
+
     /// Validate that all fields satisfy the documented invariants.
     ///
     /// Returns `Ok(())` if the config is valid, or
@@ -437,7 +501,8 @@ impl PipelineConfig {
     /// - `canny_high <= canny_max`
     /// - `canny_max <= edge::max_gradient_magnitude()`
     /// - `simplify_tolerance >= 0`
-    /// - `mask_diameter` in `[0.0, 1.5]`
+    /// - `mask_scale` in `[0.01, 1.5]`
+    /// - `mask_aspect_ratio` in `[1.0, 4.0]`
     /// - `working_resolution > 0`
     /// - `mst_neighbours > 0`
     ///
@@ -484,10 +549,16 @@ impl PipelineConfig {
                 self.simplify_tolerance,
             )));
         }
-        if !(0.0..=1.5).contains(&self.mask_diameter) {
+        if !(0.01..=1.5).contains(&self.mask_scale) {
             return Err(PipelineError::InvalidConfig(format!(
-                "mask_diameter must be in [0.0, 1.5], got {}",
-                self.mask_diameter,
+                "mask_scale must be in [0.01, 1.5], got {}",
+                self.mask_scale,
+            )));
+        }
+        if !(1.0..=4.0).contains(&self.mask_aspect_ratio) {
+            return Err(PipelineError::InvalidConfig(format!(
+                "mask_aspect_ratio must be in [1.0, 4.0], got {}",
+                self.mask_aspect_ratio,
             )));
         }
         if self.working_resolution == 0 {
@@ -519,8 +590,10 @@ impl Default for PipelineConfig {
             contour_tracer: ContourTracerKind::default(),
             simplify_tolerance: Self::DEFAULT_SIMPLIFY_TOLERANCE,
             path_joiner: PathJoinerKind::default(),
-            circular_mask: Self::DEFAULT_CIRCULAR_MASK,
-            mask_diameter: Self::DEFAULT_MASK_DIAMETER,
+            mask_mode: Self::DEFAULT_MASK_MODE,
+            mask_scale: Self::DEFAULT_MASK_SCALE,
+            mask_aspect_ratio: Self::DEFAULT_MASK_ASPECT_RATIO,
+            mask_landscape: Self::DEFAULT_MASK_LANDSCAPE,
             border_path: Self::DEFAULT_BORDER_PATH,
             invert: Self::DEFAULT_INVERT,
             working_resolution: Self::DEFAULT_WORKING_RESOLUTION,
@@ -550,8 +623,10 @@ impl PipelineConfig {
             contour_tracer,
             simplify_tolerance,
             path_joiner,
-            circular_mask,
-            mask_diameter,
+            mask_mode,
+            mask_scale,
+            mask_aspect_ratio,
+            mask_landscape,
             border_path,
             invert,
             working_resolution,
@@ -568,8 +643,11 @@ impl PipelineConfig {
             && *contour_tracer == other.contour_tracer
             && *simplify_tolerance == other.simplify_tolerance
             && *path_joiner == other.path_joiner
-            && *circular_mask == other.circular_mask
-            && *mask_diameter == other.mask_diameter
+            && *mask_mode == other.mask_mode
+            && *mask_scale == other.mask_scale
+            && (*mask_mode != MaskMode::Rectangle
+                || (*mask_aspect_ratio == other.mask_aspect_ratio
+                    && *mask_landscape == other.mask_landscape))
             && *border_path == other.border_path
             && *invert == other.invert
             && *working_resolution == other.working_resolution
@@ -608,8 +686,10 @@ impl PipelineConfig {
             contour_tracer,
             simplify_tolerance,
             path_joiner,
-            circular_mask,
-            mask_diameter,
+            mask_mode,
+            mask_scale,
+            mask_aspect_ratio,
+            mask_landscape,
             border_path,
             invert,
             working_resolution,
@@ -651,9 +731,15 @@ impl PipelineConfig {
             return 6;
         }
 
-        // Stage 7 — masking: circular_mask, mask_diameter, border_path
-        if *circular_mask != other.circular_mask
-            || *mask_diameter != other.mask_diameter
+        // Stage 7 — masking: mask_mode, mask_scale, mask_aspect_ratio, mask_landscape, border_path
+        // mask_aspect_ratio and mask_landscape only affect output in Rectangle mode.
+        let rect_relevant =
+            *mask_mode == MaskMode::Rectangle || other.mask_mode == MaskMode::Rectangle;
+        if *mask_mode != other.mask_mode
+            || *mask_scale != other.mask_scale
+            || (rect_relevant
+                && (*mask_aspect_ratio != other.mask_aspect_ratio
+                    || *mask_landscape != other.mask_landscape))
             || *border_path != other.border_path
         {
             return 7;
@@ -717,7 +803,7 @@ pub struct StagedResult {
     pub contours: Vec<Polyline>,
     /// Stage 6: RDP-simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Stage 7: mask result (`Some` only when `circular_mask=true`).
+    /// Stage 7: mask result (`Some` only when `mask_mode` is not `Off`).
     ///
     /// Contains the simplified polylines after clipping to the mask
     /// boundary (with explicit per-endpoint clip metadata) and an
@@ -1031,8 +1117,10 @@ mod tests {
         assert_eq!(config.contour_tracer, ContourTracerKind::BorderFollowing);
         assert!((config.simplify_tolerance - 1.0).abs() < f64::EPSILON);
         assert_eq!(config.path_joiner, PathJoinerKind::Mst);
-        assert!(config.circular_mask);
-        assert!((config.mask_diameter - 0.75).abs() < f64::EPSILON);
+        assert_eq!(config.mask_mode, MaskMode::Circle);
+        assert!((config.mask_scale - 0.75).abs() < f64::EPSILON);
+        assert!((config.mask_aspect_ratio - 1.0).abs() < f64::EPSILON);
+        assert!(config.mask_landscape);
         assert!(!config.invert);
         assert_eq!(config.working_resolution, 1000);
         assert_eq!(config.downsample_filter, DownsampleFilter::Triangle);
@@ -1083,10 +1171,44 @@ mod tests {
         assert!(!a.pipeline_eq(&b), "invert change should be detected");
 
         let mut b = a.clone();
-        b.circular_mask = !a.circular_mask;
+        b.mask_mode = MaskMode::Off;
+        assert!(!a.pipeline_eq(&b), "mask_mode change should be detected");
+
+        // Rectangle-only fields need both configs in Rectangle mode to
+        // test that field-level changes are detected (not just a mode
+        // mismatch).
+        let a_rect = PipelineConfig {
+            mask_mode: MaskMode::Rectangle,
+            ..PipelineConfig::default()
+        };
+
+        let mut b = a_rect.clone();
+        b.mask_aspect_ratio = 2.0;
         assert!(
-            !a.pipeline_eq(&b),
-            "circular_mask change should be detected"
+            !a_rect.pipeline_eq(&b),
+            "mask_aspect_ratio change should be detected in Rectangle mode"
+        );
+
+        let mut b = a_rect.clone();
+        b.mask_landscape = !a_rect.mask_landscape;
+        assert!(
+            !a_rect.pipeline_eq(&b),
+            "mask_landscape change should be detected in Rectangle mode"
+        );
+
+        // Circle mode correctly ignores rectangle-only fields.
+        let mut b = a.clone();
+        b.mask_aspect_ratio = 2.0;
+        assert!(
+            a.pipeline_eq(&b),
+            "mask_aspect_ratio change should be ignored in Circle mode"
+        );
+
+        let mut b = a.clone();
+        b.mask_landscape = !a.mask_landscape;
+        assert!(
+            a.pipeline_eq(&b),
+            "mask_landscape change should be ignored in Circle mode"
         );
 
         // ContourTracerKind currently has only one variant (BorderFollowing).
@@ -1107,11 +1229,8 @@ mod tests {
         assert!(!a.pipeline_eq(&b), "path_joiner change should be detected");
 
         let mut b = a.clone();
-        b.mask_diameter -= 0.1;
-        assert!(
-            !a.pipeline_eq(&b),
-            "mask_diameter change should be detected"
-        );
+        b.mask_scale -= 0.1;
+        assert!(!a.pipeline_eq(&b), "mask_scale change should be detected");
 
         let mut b = a.clone();
         b.mst_neighbours += 10;
@@ -1164,55 +1283,100 @@ mod tests {
     }
 
     #[test]
-    fn validate_accepts_mask_diameter_zero() {
+    fn validate_rejects_mask_scale_below_minimum() {
         let config = PipelineConfig {
-            mask_diameter: 0.0,
-            ..PipelineConfig::default()
-        };
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn validate_accepts_mask_diameter_max() {
-        let config = PipelineConfig {
-            mask_diameter: 1.5,
-            ..PipelineConfig::default()
-        };
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn validate_accepts_mask_diameter_above_one() {
-        let config = PipelineConfig {
-            mask_diameter: 1.3,
-            ..PipelineConfig::default()
-        };
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn validate_rejects_mask_diameter_negative() {
-        let config = PipelineConfig {
-            mask_diameter: -0.01,
+            mask_scale: 0.0,
             ..PipelineConfig::default()
         };
         let err = config.validate().unwrap_err();
         assert!(
-            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_diameter")),
-            "expected InvalidConfig about mask_diameter, got {err:?}",
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_scale")),
+            "expected InvalidConfig about mask_scale, got {err:?}",
         );
     }
 
     #[test]
-    fn validate_rejects_mask_diameter_above_max() {
+    fn validate_accepts_mask_scale_minimum() {
         let config = PipelineConfig {
-            mask_diameter: 1.51,
+            mask_scale: 0.01,
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_mask_scale_max() {
+        let config = PipelineConfig {
+            mask_scale: 1.5,
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_mask_scale_above_one() {
+        let config = PipelineConfig {
+            mask_scale: 1.3,
+            ..PipelineConfig::default()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_mask_scale_negative() {
+        let config = PipelineConfig {
+            mask_scale: -0.01,
             ..PipelineConfig::default()
         };
         let err = config.validate().unwrap_err();
         assert!(
-            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_diameter")),
-            "expected InvalidConfig about mask_diameter, got {err:?}",
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_scale")),
+            "expected InvalidConfig about mask_scale, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mask_scale_above_max() {
+        let config = PipelineConfig {
+            mask_scale: 1.51,
+            ..PipelineConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_scale")),
+            "expected InvalidConfig about mask_scale, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn validate_accepts_mask_aspect_ratio_default() {
+        let config = PipelineConfig::default();
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_mask_aspect_ratio_below_one() {
+        let config = PipelineConfig {
+            mask_aspect_ratio: 0.9,
+            ..PipelineConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_aspect_ratio")),
+            "expected InvalidConfig about mask_aspect_ratio, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn validate_rejects_mask_aspect_ratio_above_max() {
+        let config = PipelineConfig {
+            mask_aspect_ratio: 4.01,
+            ..PipelineConfig::default()
+        };
+        let err = config.validate().unwrap_err();
+        assert!(
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("mask_aspect_ratio")),
+            "expected InvalidConfig about mask_aspect_ratio, got {err:?}",
         );
     }
 
@@ -1282,8 +1446,10 @@ mod tests {
             contour_tracer: ContourTracerKind::BorderFollowing,
             simplify_tolerance: 1.5,
             path_joiner: PathJoinerKind::Retrace,
-            circular_mask: true,
-            mask_diameter: 0.85,
+            mask_mode: MaskMode::Rectangle,
+            mask_scale: 0.85,
+            mask_aspect_ratio: 2.0,
+            mask_landscape: false,
             border_path: BorderPathMode::On,
             invert: true,
             working_resolution: 256,
@@ -1316,8 +1482,10 @@ mod tests {
             "contour_tracer": "BorderFollowing",
             "simplify_tolerance": 2.0,
             "path_joiner": "Mst",
-            "circular_mask": true,
-            "mask_diameter": 1.0,
+            "mask_mode": "Circle",
+            "mask_scale": 1.0,
+            "mask_aspect_ratio": 1.0,
+            "mask_landscape": true,
             "invert": false,
             "working_resolution": 256,
             "downsample_filter": "Disabled",
@@ -1334,6 +1502,36 @@ mod tests {
         );
         // Also verifies start_point defaults when absent.
         assert_eq!(config.start_point, StartPointStrategy::Outside);
+    }
+
+    #[test]
+    fn pipeline_config_deserializes_without_mask_fields() {
+        // Old configs from before mask fields were added should still
+        // deserialize, falling back to the pipeline-specific defaults.
+        let json = r#"{
+            "blur_sigma": 1.4,
+            "canny_low": 15.0,
+            "canny_high": 40.0,
+            "canny_max": 60.0,
+            "contour_tracer": "BorderFollowing",
+            "simplify_tolerance": 2.0,
+            "path_joiner": "Mst",
+            "invert": false,
+            "working_resolution": 256,
+            "downsample_filter": "Disabled",
+            "mst_neighbours": 100
+        }"#;
+        let config: PipelineConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.mask_mode, MaskMode::Circle);
+        assert!((config.mask_scale - PipelineConfig::DEFAULT_MASK_SCALE).abs() < f64::EPSILON,);
+        assert!(
+            (config.mask_aspect_ratio - PipelineConfig::DEFAULT_MASK_ASPECT_RATIO).abs()
+                < f64::EPSILON,
+        );
+        assert_eq!(
+            config.mask_landscape,
+            PipelineConfig::DEFAULT_MASK_LANDSCAPE
+        );
     }
 
     #[test]
@@ -1563,20 +1761,20 @@ mod tests {
     }
 
     #[test]
-    fn earliest_changed_stage_circular_mask() {
+    fn earliest_changed_stage_mask_mode() {
         let a = PipelineConfig::default();
         let b = PipelineConfig {
-            circular_mask: !a.circular_mask,
+            mask_mode: MaskMode::Off,
             ..PipelineConfig::default()
         };
         assert_eq!(a.earliest_changed_stage(&b), 7);
     }
 
     #[test]
-    fn earliest_changed_stage_mask_diameter() {
+    fn earliest_changed_stage_mask_scale() {
         let a = PipelineConfig::default();
         let b = PipelineConfig {
-            mask_diameter: 1.2,
+            mask_scale: 1.2,
             ..PipelineConfig::default()
         };
         assert_eq!(a.earliest_changed_stage(&b), 7);
@@ -1624,12 +1822,12 @@ mod tests {
 
     #[test]
     fn earliest_changed_stage_returns_earliest() {
-        // When both blur_sigma (stage 3) and mask_diameter (stage 7)
+        // When both blur_sigma (stage 3) and mask_scale (stage 7)
         // change, the earliest stage should be 3.
         let a = PipelineConfig::default();
         let b = PipelineConfig {
             blur_sigma: 5.0,
-            mask_diameter: 1.2,
+            mask_scale: 1.2,
             ..PipelineConfig::default()
         };
         assert_eq!(a.earliest_changed_stage(&b), 3);
