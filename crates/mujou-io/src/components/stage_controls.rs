@@ -446,6 +446,30 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             }
         }
 
+        StageId::Subsampled => {
+            let value = config.subsample_max_length;
+            let config = config.clone();
+            rsx! {
+                div { class: "space-y-2",
+                    {render_slider(
+                        "subsample_max_length",
+                        "Max Segment Length",
+                        desc("Maximum segment length in pixels. Longer segments are subdivided for smooth polar (THR) conversion."),
+                        value,
+                        0.5,
+                        20.0,
+                        0.1,
+                        1,
+                        move |v: f64| {
+                            let mut c = config.clone();
+                            c.subsample_max_length = v;
+                            on_change.call(c);
+                        },
+                    )}
+                }
+            }
+        }
+
         StageId::Masked => {
             let mask_mode = config.mask_mode;
             let scale = config.mask_scale;

@@ -32,6 +32,7 @@ struct VectorResult {
     simplified: Vec<Polyline>,
     masked: Option<MaskResult>,
     joined: Polyline,
+    subsampled: Polyline,
     #[serde(default)]
     mst_edge_details: Vec<MstEdgeInfo>,
     dimensions: Dimensions,
@@ -59,8 +60,14 @@ pub struct WorkerResult {
     pub simplified: Vec<Polyline>,
     /// Mask result (if circular mask was applied, before joining).
     pub masked: Option<MaskResult>,
-    /// Joined single polyline (always the final output).
+    /// Joined single polyline (before subsampling).
     pub joined: Polyline,
+    /// Subsampled polyline — the final output.
+    ///
+    /// Long segments in the joined path are subdivided so no segment
+    /// exceeds `config.subsample_max_length` pixels. This prevents
+    /// angular artifacts in polar (THR) conversion.
+    pub subsampled: Polyline,
     /// Per-MST-edge diagnostic details from the join stage.
     ///
     /// Present only when the MST joiner is used. Enables diagnostic
@@ -71,14 +78,13 @@ pub struct WorkerResult {
 }
 
 impl WorkerResult {
-    /// The final output polyline — always the joined path.
+    /// The final output polyline — the subsampled path.
     ///
-    /// Since masking now happens before joining, `joined` always contains
-    /// the final single continuous path regardless of whether a circular
-    /// mask was applied.
+    /// The subsampled path is the joined path with long segments
+    /// subdivided to prevent angular artifacts in polar conversion.
     #[must_use]
     pub const fn final_polyline(&self) -> &Polyline {
-        &self.joined
+        &self.subsampled
     }
 
     /// Select the polylines to display for a given vector stage.
@@ -95,15 +101,16 @@ impl WorkerResult {
                 || Cow::Borrowed(self.simplified.as_slice()),
                 |mr| Cow::Owned(mr.all_polylines().cloned().collect()),
             ),
-            // Simplified is the natural default; raster and Join stages
-            // don't use this helper but are listed explicitly so new
-            // StageId variants trigger a compiler error.
+            // Simplified is the natural default; raster, Join, and
+            // Subsampled stages don't use this helper but are listed
+            // explicitly so new StageId variants trigger a compiler error.
             StageId::Simplified
             | StageId::Original
             | StageId::Downsampled
             | StageId::Blur
             | StageId::Edges
-            | StageId::Join => Cow::Borrowed(&self.simplified),
+            | StageId::Join
+            | StageId::Subsampled => Cow::Borrowed(&self.simplified),
         }
     }
 }
@@ -393,6 +400,7 @@ fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
         simplified: vector.simplified,
         masked: vector.masked,
         joined: vector.joined,
+        subsampled: vector.subsampled,
         mst_edge_details: vector.mst_edge_details,
         dimensions: vector.dimensions,
     })

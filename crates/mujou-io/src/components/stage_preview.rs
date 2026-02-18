@@ -165,6 +165,32 @@ fn render_vector_preview(
             }
         }
 
+        StageId::Subsampled => {
+            let polyline = &result.subsampled;
+            let view_box = compute_view_box(std::slice::from_ref(polyline), w, h);
+            let d = build_path_data(polyline);
+
+            rsx! {
+                svg {
+                    xmlns: "http://www.w3.org/2000/svg",
+                    view_box: "{view_box}",
+                    class: "w-full h-full bg-[var(--preview-bg)] rounded",
+                    "preserveAspectRatio": "xMidYMid meet",
+                    role: "img",
+                    "aria-label": "Subsampled stage preview",
+
+                    if !d.is_empty() {
+                        path {
+                            d: "{d}",
+                            fill: "none",
+                            stroke: "var(--preview-stroke)",
+                            stroke_width: "1",
+                        }
+                    }
+                }
+            }
+        }
+
         StageId::Join => {
             let polyline = &result.joined;
             let view_box = compute_view_box(std::slice::from_ref(polyline), w, h);
