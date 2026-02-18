@@ -57,13 +57,21 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Parity::Greedy)]
     parity_strategy: Parity,
 
-    /// Disable mask.
-    #[arg(long)]
-    no_mask: bool,
+    /// Mask shape (off, circle, rectangle).
+    #[arg(long, value_enum, default_value_t = CLI_DEFAULT_MASK_MODE)]
+    mask_mode: CliMaskMode,
 
-    /// Mask scale as fraction of image dimension (0.0-1.5).
+    /// Mask scale as fraction of image dimension (0.01-1.5).
     #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_SCALE)]
     mask_scale: f64,
+
+    /// Rectangle mask aspect ratio (1.0-4.0, width/height before orientation).
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_ASPECT_RATIO)]
+    mask_aspect_ratio: f64,
+
+    /// Rectangle mask orientation: longer side is horizontal.
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_LANDSCAPE)]
+    mask_landscape: bool,
 
     /// Invert edge map before contour tracing.
     #[arg(long)]
@@ -116,6 +124,35 @@ enum Parity {
     /// Optimal matching by graph distance (DP for small n, greedy fallback).
     Optimal,
 }
+
+/// Mask shape selection.
+///
+/// Mirrors [`mujou_pipeline::MaskMode`] so that an exhaustive `match` in
+/// [`config_from_cli`] forces a compile error when a new upstream variant
+/// is added without a corresponding CLI entry.
+#[derive(Clone, Copy, ValueEnum)]
+enum CliMaskMode {
+    /// No mask — polylines pass through unclipped.
+    Off,
+    /// Circular mask.
+    Circle,
+    /// Axis-aligned rectangular mask.
+    Rectangle,
+}
+
+/// Maps a [`mujou_pipeline::MaskMode`] to the local CLI [`CliMaskMode`] enum.
+const fn mask_mode_from_pipeline(m: mujou_pipeline::MaskMode) -> CliMaskMode {
+    match m {
+        mujou_pipeline::MaskMode::Off => CliMaskMode::Off,
+        mujou_pipeline::MaskMode::Circle => CliMaskMode::Circle,
+        mujou_pipeline::MaskMode::Rectangle => CliMaskMode::Rectangle,
+    }
+}
+
+/// The CLI default mask mode, derived from [`PipelineConfig::DEFAULT_MASK_MODE`]
+/// so the two cannot silently diverge.
+const CLI_DEFAULT_MASK_MODE: CliMaskMode =
+    mask_mode_from_pipeline(mujou_pipeline::PipelineConfig::DEFAULT_MASK_MODE);
 
 /// Downsample resampling filter selection.
 #[derive(Clone, Copy, ValueEnum)]
@@ -175,12 +212,14 @@ fn config_from_cli(cli: &Cli) -> Result<mujou_pipeline::PipelineConfig, String> 
             Parity::Greedy => mujou_pipeline::ParityStrategy::Greedy,
             Parity::Optimal => mujou_pipeline::ParityStrategy::Optimal,
         },
-        mask_mode: if cli.no_mask {
-            mujou_pipeline::MaskMode::Off
-        } else {
-            mujou_pipeline::MaskMode::Circle
+        mask_mode: match cli.mask_mode {
+            CliMaskMode::Off => mujou_pipeline::MaskMode::Off,
+            CliMaskMode::Circle => mujou_pipeline::MaskMode::Circle,
+            CliMaskMode::Rectangle => mujou_pipeline::MaskMode::Rectangle,
         },
         mask_scale: cli.mask_scale,
+        mask_aspect_ratio: cli.mask_aspect_ratio,
+        mask_landscape: cli.mask_landscape,
         invert: cli.invert,
         working_resolution: cli.working_resolution,
         downsample_filter: match cli.downsample_filter {
