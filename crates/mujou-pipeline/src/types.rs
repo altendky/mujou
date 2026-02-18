@@ -1174,18 +1174,41 @@ mod tests {
         b.mask_mode = MaskMode::Off;
         assert!(!a.pipeline_eq(&b), "mask_mode change should be detected");
 
+        // Rectangle-only fields need both configs in Rectangle mode to
+        // test that field-level changes are detected (not just a mode
+        // mismatch).
+        let a_rect = PipelineConfig {
+            mask_mode: MaskMode::Rectangle,
+            ..PipelineConfig::default()
+        };
+
+        let mut b = a_rect.clone();
+        b.mask_aspect_ratio = 2.0;
+        assert!(
+            !a_rect.pipeline_eq(&b),
+            "mask_aspect_ratio change should be detected in Rectangle mode"
+        );
+
+        let mut b = a_rect.clone();
+        b.mask_landscape = !a_rect.mask_landscape;
+        assert!(
+            !a_rect.pipeline_eq(&b),
+            "mask_landscape change should be detected in Rectangle mode"
+        );
+
+        // Circle mode correctly ignores rectangle-only fields.
         let mut b = a.clone();
         b.mask_aspect_ratio = 2.0;
         assert!(
-            !a.pipeline_eq(&b),
-            "mask_aspect_ratio change should be detected"
+            a.pipeline_eq(&b),
+            "mask_aspect_ratio change should be ignored in Circle mode"
         );
 
         let mut b = a.clone();
         b.mask_landscape = !a.mask_landscape;
         assert!(
-            !a.pipeline_eq(&b),
-            "mask_landscape change should be detected"
+            a.pipeline_eq(&b),
+            "mask_landscape change should be ignored in Circle mode"
         );
 
         // ContourTracerKind currently has only one variant (BorderFollowing).
