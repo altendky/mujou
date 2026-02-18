@@ -628,8 +628,9 @@ impl PipelineConfig {
             && *path_joiner == other.path_joiner
             && *mask_mode == other.mask_mode
             && *mask_scale == other.mask_scale
-            && *mask_aspect_ratio == other.mask_aspect_ratio
-            && *mask_landscape == other.mask_landscape
+            && (*mask_mode != MaskMode::Rectangle
+                || (*mask_aspect_ratio == other.mask_aspect_ratio
+                    && *mask_landscape == other.mask_landscape))
             && *border_path == other.border_path
             && *invert == other.invert
             && *working_resolution == other.working_resolution
@@ -714,10 +715,14 @@ impl PipelineConfig {
         }
 
         // Stage 7 — masking: mask_mode, mask_scale, mask_aspect_ratio, mask_landscape, border_path
+        // mask_aspect_ratio and mask_landscape only affect output in Rectangle mode.
+        let rect_relevant =
+            *mask_mode == MaskMode::Rectangle || other.mask_mode == MaskMode::Rectangle;
         if *mask_mode != other.mask_mode
             || *mask_scale != other.mask_scale
-            || *mask_aspect_ratio != other.mask_aspect_ratio
-            || *mask_landscape != other.mask_landscape
+            || (rect_relevant
+                && (*mask_aspect_ratio != other.mask_aspect_ratio
+                    || *mask_landscape != other.mask_landscape))
             || *border_path != other.border_path
         {
             return 7;
