@@ -6,7 +6,7 @@
 ┌───────────────────────────────────────────────────────┐
 │                   Application Layer                    │
 │  ┌─────────────────────────────────────────────────┐  │
-│  │                    mujou                          │  │
+│  │                   mujou-app                        │  │
 │  │       (Dioxus web app - wires everything)        │  │
 │  └─────────────────────────────────────────────────┘  │
 ├───────────────────────────────────────────────────────┤
@@ -67,7 +67,7 @@ mujou/
 │   │           ├── preview.rs    # SVG preview of paths
 │   │           ├── controls.rs   # Parameter sliders
 │   │           └── export.rs     # Export format buttons
-│   └── mujou/                    # Binary entry point
+│   └── mujou-app/                # Binary entry point
 │       ├── Cargo.toml
 │       └── src/
 │           └── main.rs
@@ -94,7 +94,7 @@ mujou/
 
 | Crate | Layer | Purpose |
 | ----- | ----- | ------- |
-| `mujou` | Application | Dioxus web app entry point, wires everything together |
+| `mujou-app` | Application | Dioxus app entry point, wires everything together |
 | `mujou-io` | Integration | Browser I/O (file upload, downloads, DOM), Dioxus components |
 | `mujou-pipeline` | Core | Pure image processing: grayscale, blur, Canny, contour tracing, RDP, path optimization (no I/O) |
 | `mujou-export` | Core | Pure format serializers: THR, G-code, SVG, DXF, PNG (no I/O) |

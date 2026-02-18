@@ -5,9 +5,9 @@
 - [ ] Install Dioxus CLI, verify `dx new` works
 - [ ] Scaffold project with `dx new`, restructure into Cargo workspace
 - [ ] Create workspace `Cargo.toml` with centralized deps and lint config
-- [ ] Create crate structure: `mujou-pipeline`, `mujou-export`, `mujou-io`, `mujou`
+- [ ] Create crate structure: `mujou-pipeline`, `mujou-export`, `mujou-io`, `mujou-app`
 - [ ] Create `rust-toolchain.toml`, `rustfmt.toml`, `.gitignore`
-- [ ] Create `Dioxus.toml` pointing to the `mujou` binary crate
+- [ ] Create `Dioxus.toml` pointing to the `mujou-app` binary crate
 - [ ] Set up Tailwind CSS (`tailwind.css`, asset pipeline)
 - [ ] Add `LICENSE-MIT`, `LICENSE-APACHE`
 - [ ] Verify `dx serve --platform web` shows a basic page
@@ -36,7 +36,7 @@
 - [ ] Implement `png.rs` -- rasterize polylines to PNG bytes
 - [ ] Write unit tests for each serializer
 
-## Phase 3: Minimal UI (mujou-io + mujou)
+## Phase 3: Minimal UI (mujou-io + mujou-app)
 
 - [ ] Build `upload.rs` component -- file input + drag-drop zone
 - [ ] Build `preview.rs` component -- render polylines as inline SVG

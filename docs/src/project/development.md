@@ -22,9 +22,9 @@ npm ci
 #
 # Shared theme assets (site/theme.css, site/theme-toggle.js, site/theme-detect.js)
 # are copied to OUT_DIR by build.rs and injected via include_str!().
-# build.rs also generates crates/mujou/index.html (gitignored) with the
+# build.rs also generates crates/mujou-app/index.html (gitignored) with the
 # theme-detect script inlined in <head> to prevent flash of wrong theme.
-dx serve --platform web --package mujou
+dx serve --platform web --package mujou-app
 
 # Format
 cargo fmt
@@ -60,7 +60,7 @@ cargo install cargo-deny --locked
 | Test Type | Location | Coverage Target |
 | --------- | -------- | --------------- |
 | Unit tests | `crates/*/src/**/*.rs` | 100% with exclusions |
-| Integration tests | `crates/mujou/tests/` | Key workflows |
+| Integration tests | `crates/mujou-app/tests/` | Key workflows |
 
 ### Core Crate Testing
 

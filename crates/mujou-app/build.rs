@@ -2,11 +2,11 @@
 // return Result to.  Cargo treats a non-zero exit as a build failure.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-//! Build script for the mujou binary crate.
+//! Build script for the mujou-app binary crate.
 //!
 //! ## Tailwind CSS compilation (see [issue #12])
 //!
-//! Runs `npx @tailwindcss/cli` to compile `crates/mujou/tailwind.css`
+//! Runs `npx @tailwindcss/cli` to compile `crates/mujou-app/tailwind.css`
 //! into `$OUT_DIR/assets/tailwind.css`.  This replaces the Dioxus
 //! CLI's bundled Tailwind integration so we control the version and
 //! every `cargo` invocation (clippy, test, coverage, etc.) can compile
@@ -41,8 +41,8 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
 
-    // Workspace root is two levels up from crates/mujou/.
-    // This assumes the crate lives at `<workspace>/crates/mujou/`.
+    // Workspace root is two levels up from crates/mujou-app/.
+    // This assumes the crate lives at `<workspace>/crates/mujou-app/`.
     // If the directory structure changes (e.g. `crates/apps/mujou/`),
     // this will compute the wrong path — consider walking up
     // `manifest_dir.ancestors()` to find a `Cargo.toml` containing
@@ -62,7 +62,7 @@ fn main() {
 
 /// Compile Tailwind CSS via `npx @tailwindcss/cli`.
 ///
-/// Input:  `crates/mujou/tailwind.css`
+/// Input:  `crates/mujou-app/tailwind.css`
 /// Output: `$OUT_DIR/assets/tailwind.css`
 ///
 /// Writing to `OUT_DIR` (rather than the source tree) avoids issues
@@ -87,10 +87,10 @@ fn build_tailwind_css(manifest_dir: &Path, workspace_root: &Path, out_dir: &Path
 
     // Rerun when .rs files in UI crates change, because Tailwind scans
     // them for utility class names via `@source "../"` in the input CSS.
-    // Only `mujou` and `mujou-io` contain Tailwind utility classes;
+    // Only `mujou-app` and `mujou-io` contain Tailwind utility classes;
     // core crates (`mujou-pipeline`, `mujou-export`) do not.
     let crates_dir = workspace_root.join("crates");
-    register_rs_sources(&crates_dir.join("mujou"));
+    register_rs_sources(&crates_dir.join("mujou-app"));
     register_rs_sources(&crates_dir.join("mujou-io"));
 
     let input_lossy = input.to_string_lossy();
@@ -209,7 +209,7 @@ fn build_worker_wasm(workspace_root: &Path, out_dir: &Path) {
     // newer than all worker and pipeline source files.  This is
     // critical for dev speed: build.rs re-runs whenever *any*
     // registered file changes (including Tailwind-scanned .rs files
-    // in mujou/mujou-io), but the worker only needs rebuilding when
+    // in mujou-app/mujou-io), but the worker only needs rebuilding when
     // its own source or its pipeline dependency changes.
     // Without this check, wasm-pack (10-30s) runs on every save.
     if wasm_path.exists() && js_path.exists() {
@@ -319,7 +319,7 @@ fn is_any_newer_than(dir: &Path, reference: std::time::SystemTime) -> bool {
     false
 }
 
-/// Generate `crates/mujou/index.html` with the theme-detect script
+/// Generate `crates/mujou-app/index.html` with the theme-detect script
 /// inlined in `<head>`.
 ///
 /// Note: this writes to `manifest_dir` (the source tree) rather than

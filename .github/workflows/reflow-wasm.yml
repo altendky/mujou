@@ -33,4 +33,4 @@ jobs:
           tool: dioxus-cli@0.7.2
 
       - name: Build WASM
-        run: dx build --package mujou --platform web
+        run: dx build --package mujou-app --platform web
