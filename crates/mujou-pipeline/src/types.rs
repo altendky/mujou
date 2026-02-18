@@ -346,7 +346,7 @@ pub struct PipelineConfig {
     /// Which mask shape to apply (Off / Circle / Rectangle).
     pub mask_mode: MaskMode,
 
-    /// Mask scale factor (0.0 to 1.5).
+    /// Mask scale factor ([0.01, 1.5]).
     ///
     /// For circles: fraction of image diagonal (at 1.0 the circle
     /// circumscribes the full image).
