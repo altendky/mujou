@@ -1572,7 +1572,7 @@ pub fn join_mst(
     let polylines: Vec<&Polyline> = contours.iter().filter(|c| !c.is_empty()).collect();
 
     if polylines.is_empty() {
-        return (Polyline::new(Vec::new()), JoinQualityMetrics::empty());
+        return (Polyline::new(Vec::new()), JoinQualityMetrics::default());
     }
 
     if polylines.len() == 1 {
@@ -1670,26 +1670,6 @@ pub fn join_mst(
     };
 
     (polyline, metrics)
-}
-
-impl JoinQualityMetrics {
-    /// Metrics for an empty input (no contours to join).
-    #[must_use]
-    const fn empty() -> Self {
-        Self {
-            mst_edge_count: 0,
-            total_mst_edge_weight: 0.0,
-            max_mst_edge_weight: 0.0,
-            odd_vertices_before_fix: 0,
-            odd_vertices_after_fix: 0,
-            total_retrace_distance: 0.0,
-            total_path_length: 0.0,
-            graph_node_count: 0,
-            graph_edge_count_before_fix: 0,
-            graph_edge_count_after_fix: 0,
-            mst_edge_details: Vec::new(),
-        }
-    }
 }
 
 /// Compute the total Euclidean length of a `Polyline`.
