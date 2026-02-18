@@ -67,7 +67,7 @@ impl StageId {
     /// Map a pipeline-internal stage index to the corresponding UI stage.
     ///
     /// The pipeline has 10 internal stages (indices 0–9) while the UI
-    /// presents 8 stages. Backend stages 0 (`Pending`/source) and 1
+    /// presents 9 stages. Backend stages 0 (`Pending`/source) and 1
     /// (`Decoded`/decode) both map to [`StageId::Original`] because
     /// decode is the operation that produces the original preview image.
     /// Returns `None` for out-of-range indices.
