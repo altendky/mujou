@@ -301,7 +301,7 @@ impl fmt::Display for StartPointStrategy {
 /// Fields are currently public with no construction-time validation.
 /// A validated constructor (`try_new`) or builder should be added to
 /// enforce invariants such as `blur_sigma > 0`, `canny_low <= canny_high`,
-/// `canny_low >= 1.0`, `0.0 <= mask_scale <= 1.5`, and
+/// `canny_low >= 1.0`, `mask_scale in [0.01, 1.5] when mask is enabled`, and
 /// `simplify_tolerance >= 0.0`.
 /// Invalid values would return [`PipelineError::InvalidConfig`].
 /// See [open-questions: PipelineConfig validation](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
