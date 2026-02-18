@@ -136,26 +136,33 @@ pub fn to_thr(
                 0.0
             };
 
-            // Theta: atan2(x, y) convention (theta=0 points up / +Y).
-            // Note: image Y increases downward, but the atan2(dx, dy)
-            // convention combined with the ecosystem's coordinate system
-            // produces the correct result — Sandify and jsisyphus use
-            // the same image-space Y direction.
-            let raw_theta = dx.atan2(dy);
+            // At the exact polar origin (rho=0), theta is geometrically
+            // undefined.  Reuse the previous theta to avoid a spurious
+            // angular jump; default to 0.0 for the very first point.
+            let theta = if dist == 0.0 {
+                prev_theta.unwrap_or(0.0)
+            } else {
+                // Theta: atan2(x, y) convention (theta=0 points up / +Y).
+                // Note: image Y increases downward, but the atan2(dx, dy)
+                // convention combined with the ecosystem's coordinate system
+                // produces the correct result — Sandify and jsisyphus use
+                // the same image-space Y direction.
+                let raw_theta = dx.atan2(dy);
 
-            #[allow(clippy::while_float)]
-            let theta = prev_theta.map_or(raw_theta, |prev| {
-                // Continuous unwinding: choose the equivalent angle
-                // closest to the previous theta.
-                let mut delta = raw_theta - prev;
-                while delta > PI {
-                    delta -= 2.0 * PI;
-                }
-                while delta < -PI {
-                    delta += 2.0 * PI;
-                }
-                prev + delta
-            });
+                #[allow(clippy::while_float)]
+                prev_theta.map_or(raw_theta, |prev| {
+                    // Continuous unwinding: choose the equivalent angle
+                    // closest to the previous theta.
+                    let mut delta = raw_theta - prev;
+                    while delta > PI {
+                        delta -= 2.0 * PI;
+                    }
+                    while delta < -PI {
+                        delta += 2.0 * PI;
+                    }
+                    prev + delta
+                })
+            };
             prev_theta = Some(theta);
 
             let _ = writeln!(out, "{theta:.5} {rho:.5}");
