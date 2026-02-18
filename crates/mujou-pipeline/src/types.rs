@@ -344,6 +344,7 @@ pub struct PipelineConfig {
     pub path_joiner: PathJoinerKind,
 
     /// Which mask shape to apply (Off / Circle / Rectangle).
+    #[serde(default)]
     pub mask_mode: MaskMode,
 
     /// Mask scale factor ([0.01, 1.5]).
@@ -352,6 +353,7 @@ pub struct PipelineConfig {
     /// circumscribes the full image).
     /// For rectangles: fraction of the image's shorter dimension
     /// controlling the rectangle's shorter side.
+    #[serde(default = "PipelineConfig::default_mask_scale")]
     pub mask_scale: f64,
 
     /// Rectangle mask aspect ratio (1.0 to 4.0).
@@ -359,6 +361,7 @@ pub struct PipelineConfig {
     /// Controls how much the rectangle's longer dimension extends
     /// relative to its shorter dimension. At 1.0 the rectangle is
     /// square. Only used when `mask_mode` is `Rectangle`.
+    #[serde(default = "PipelineConfig::default_mask_aspect_ratio")]
     pub mask_aspect_ratio: f64,
 
     /// Whether the rectangle mask is in landscape orientation.
@@ -367,6 +370,7 @@ pub struct PipelineConfig {
     /// the longer dimension is vertical. Has no effect when
     /// `mask_aspect_ratio == 1.0` (square). Only used when `mask_mode`
     /// is `Rectangle`.
+    #[serde(default = "PipelineConfig::default_mask_landscape")]
     pub mask_landscape: bool,
 
     /// Whether to add a border polyline matching the mask shape.
@@ -469,6 +473,19 @@ impl PipelineConfig {
     };
     /// Default start point strategy (outside / perimeter).
     pub const DEFAULT_START_POINT: StartPointStrategy = StartPointStrategy::Outside;
+
+    // Serde default helpers — serde's per-field `#[serde(default)]` uses
+    // the *type's* `Default`, which is wrong for `f64` (0.0) and `bool`
+    // (false).  These functions return the pipeline-specific defaults.
+    const fn default_mask_scale() -> f64 {
+        Self::DEFAULT_MASK_SCALE
+    }
+    const fn default_mask_aspect_ratio() -> f64 {
+        Self::DEFAULT_MASK_ASPECT_RATIO
+    }
+    const fn default_mask_landscape() -> bool {
+        Self::DEFAULT_MASK_LANDSCAPE
+    }
 
     /// Validate that all fields satisfy the documented invariants.
     ///
@@ -1462,6 +1479,36 @@ mod tests {
         );
         // Also verifies start_point defaults when absent.
         assert_eq!(config.start_point, StartPointStrategy::Outside);
+    }
+
+    #[test]
+    fn pipeline_config_deserializes_without_mask_fields() {
+        // Old configs from before mask fields were added should still
+        // deserialize, falling back to the pipeline-specific defaults.
+        let json = r#"{
+            "blur_sigma": 1.4,
+            "canny_low": 15.0,
+            "canny_high": 40.0,
+            "canny_max": 60.0,
+            "contour_tracer": "BorderFollowing",
+            "simplify_tolerance": 2.0,
+            "path_joiner": "Mst",
+            "invert": false,
+            "working_resolution": 256,
+            "downsample_filter": "Disabled",
+            "mst_neighbours": 100
+        }"#;
+        let config: PipelineConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.mask_mode, MaskMode::Circle);
+        assert!((config.mask_scale - PipelineConfig::DEFAULT_MASK_SCALE).abs() < f64::EPSILON,);
+        assert!(
+            (config.mask_aspect_ratio - PipelineConfig::DEFAULT_MASK_ASPECT_RATIO).abs()
+                < f64::EPSILON,
+        );
+        assert_eq!(
+            config.mask_landscape,
+            PipelineConfig::DEFAULT_MASK_LANDSCAPE
+        );
     }
 
     #[test]
