@@ -757,9 +757,10 @@ fn app() -> Element {
                         }
                         mujou_pipeline::MaskMode::Rectangle => {
                             format!(
-                                "rect {:.0}% ar={:.2}",
+                                "rect {:.0}% ar={:.2} {}",
                                 cfg.mask_scale * 100.0,
                                 cfg.mask_aspect_ratio,
+                                if cfg.mask_landscape { "land" } else { "port" },
                             )
                         }
                     },
