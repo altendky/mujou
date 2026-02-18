@@ -105,7 +105,9 @@ pub fn to_thr(
     // --- Metadata header ---
     let _ = writeln!(out, "# mujou");
     if let Some(title) = metadata.title {
-        let _ = writeln!(out, "# Source: {title}");
+        for line in title.lines() {
+            let _ = writeln!(out, "# Source: {line}");
+        }
     }
     if let Some(description) = metadata.description {
         for line in description.lines() {
@@ -113,10 +115,14 @@ pub fn to_thr(
         }
     }
     if let Some(timestamp) = metadata.timestamp {
-        let _ = writeln!(out, "# Exported: {timestamp}");
+        for line in timestamp.lines() {
+            let _ = writeln!(out, "# Exported: {line}");
+        }
     }
     if let Some(config_json) = metadata.config_json {
-        let _ = writeln!(out, "# Config: {config_json}");
+        for line in config_json.lines() {
+            let _ = writeln!(out, "# Config: {line}");
+        }
     }
 
     // --- Theta-Rho data ---
