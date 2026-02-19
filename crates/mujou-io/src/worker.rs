@@ -30,9 +30,9 @@ use crate::raster;
 struct VectorResult {
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<MaskResult>,
+    canvas: MaskResult,
     joined: Polyline,
-    subsampled: Polyline,
+    output: Polyline,
     #[serde(default)]
     mst_edge_details: Vec<MstEdgeInfo>,
     dimensions: Dimensions,
@@ -58,16 +58,16 @@ pub struct WorkerResult {
     pub contours: Vec<Polyline>,
     /// Simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Mask result (if circular mask was applied, before joining).
-    pub masked: Option<MaskResult>,
+    /// Canvas result (clipped polylines and optional border, before joining).
+    pub canvas: MaskResult,
     /// Joined single polyline (before subsampling).
     pub joined: Polyline,
-    /// Subsampled polyline — the final output.
+    /// Output polyline — the final output.
     ///
     /// Long segments in the joined path are subdivided so no segment
     /// exceeds `config.subsample_max_length` pixels. This prevents
     /// angular artifacts in polar (THR) conversion.
-    pub subsampled: Polyline,
+    pub output: Polyline,
     /// Per-MST-edge diagnostic details from the join stage.
     ///
     /// Present only when the MST joiner is used. Enables diagnostic
@@ -78,13 +78,18 @@ pub struct WorkerResult {
 }
 
 impl WorkerResult {
-    /// The final output polyline — the subsampled path.
+    /// The final output polyline — the subsampled (THR-optimized) path.
     ///
     /// The subsampled path is the joined path with long segments
     /// subdivided to prevent angular artifacts in polar conversion.
+    ///
+    /// **SVG and other Cartesian exporters should use [`joined`](Self::joined)
+    /// directly.** The extra interpolated points add no visual benefit in
+    /// Cartesian coordinate systems and can cause compatibility issues
+    /// with downstream tools (e.g. grounded.so).
     #[must_use]
     pub const fn final_polyline(&self) -> &Polyline {
-        &self.subsampled
+        &self.output
     }
 
     /// Select the polylines to display for a given vector stage.
@@ -97,12 +102,9 @@ impl WorkerResult {
     pub fn polylines_for_stage(&self, stage: StageId) -> Cow<'_, [Polyline]> {
         match stage {
             StageId::Contours => Cow::Borrowed(&self.contours),
-            StageId::Masked => self.masked.as_ref().map_or_else(
-                || Cow::Borrowed(self.simplified.as_slice()),
-                |mr| Cow::Owned(mr.all_polylines().cloned().collect()),
-            ),
+            StageId::Canvas => Cow::Owned(self.canvas.all_polylines().cloned().collect()),
             // Simplified is the natural default; raster, Join, and
-            // Subsampled stages don't use this helper but are listed
+            // Output stages don't use this helper but are listed
             // explicitly so new StageId variants trigger a compiler error.
             StageId::Simplified
             | StageId::Original
@@ -110,7 +112,7 @@ impl WorkerResult {
             | StageId::Blur
             | StageId::Edges
             | StageId::Join
-            | StageId::Subsampled => Cow::Borrowed(&self.simplified),
+            | StageId::Output => Cow::Borrowed(&self.simplified),
         }
     }
 }
@@ -398,9 +400,9 @@ fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
         edges_dark_url,
         contours: vector.contours,
         simplified: vector.simplified,
-        masked: vector.masked,
+        canvas: vector.canvas,
         joined: vector.joined,
-        subsampled: vector.subsampled,
+        output: vector.output,
         mst_edge_details: vector.mst_edge_details,
         dimensions: vector.dimensions,
     })

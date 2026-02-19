@@ -16,25 +16,23 @@ use crate::types::{Point, Polyline};
 
 // ──────────────────────────── Public types ────────────────────────────
 
-/// Controls which mask shape is applied.
+/// Controls the canvas shape used for clipping.
 ///
-/// `Off` disables masking entirely (no clipping). `Circle` and
-/// `Rectangle` enable the corresponding mask shape.
+/// Every pipeline run clips polylines to a canvas shape. `Circle`
+/// produces a circular boundary (for round sand tables), `Rectangle`
+/// produces an axis-aligned rectangular boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum MaskMode {
-    /// No mask — polylines pass through unclipped.
-    Off,
-    /// Circular mask (existing behavior).
+pub enum CanvasShape {
+    /// Circular canvas (default — suitable for round sand tables).
     #[default]
     Circle,
-    /// Axis-aligned rectangular mask (new).
+    /// Axis-aligned rectangular canvas.
     Rectangle,
 }
 
-impl fmt::Display for MaskMode {
+impl fmt::Display for CanvasShape {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Off => f.write_str("Off"),
             Self::Circle => f.write_str("Circle"),
             Self::Rectangle => f.write_str("Rectangle"),
         }
@@ -145,23 +143,24 @@ impl MaskResult {
     }
 }
 
-/// Controls whether a border polyline matching the mask shape is added
+/// Controls whether a border polyline matching the canvas shape is added
 /// to the output.
 ///
-/// The border polyline lets the joiner route connections along the mask
+/// The border polyline lets the joiner route connections along the canvas
 /// boundary rather than across open space, reducing visible artifacts
 /// near the edge.
 ///
-/// Only takes effect when a mask is enabled (`mask_mode` is not `Off`).
+/// Canvas clipping always runs; this mode controls whether a border
+/// polyline is additionally generated alongside the clipped output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum BorderPathMode {
     /// Never add a border path.
     Off,
-    /// Add a border path only when the mask clips at least one polyline
+    /// Add a border path only when the canvas clips at least one polyline
     /// endpoint.
     #[default]
     Auto,
-    /// Always add a border path when a mask is enabled.
+    /// Always add a border path.
     On,
 }
 
@@ -1079,18 +1078,17 @@ mod tests {
         assert_eq!(border.first(), border.last());
     }
 
-    // ── MaskMode ─────────────────────────────────────────────────────
+    // ── CanvasShape ────────────────────────────────────────────────────
 
     #[test]
-    fn mask_mode_default_is_circle() {
-        assert_eq!(MaskMode::default(), MaskMode::Circle);
+    fn canvas_shape_default_is_circle() {
+        assert_eq!(CanvasShape::default(), CanvasShape::Circle);
     }
 
     #[test]
-    fn mask_mode_display() {
-        assert_eq!(MaskMode::Off.to_string(), "Off");
-        assert_eq!(MaskMode::Circle.to_string(), "Circle");
-        assert_eq!(MaskMode::Rectangle.to_string(), "Rectangle");
+    fn canvas_shape_display() {
+        assert_eq!(CanvasShape::Circle.to_string(), "Circle");
+        assert_eq!(CanvasShape::Rectangle.to_string(), "Rectangle");
     }
 
     // ── apply_mask with Rectangle ────────────────────────────────────

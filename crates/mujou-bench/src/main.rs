@@ -57,21 +57,21 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = Parity::Greedy)]
     parity_strategy: Parity,
 
-    /// Mask shape (off, circle, rectangle).
-    #[arg(long, value_enum, default_value_t = CLI_DEFAULT_MASK_MODE)]
-    mask_mode: CliMaskMode,
+    /// Canvas shape (circle, rectangle).
+    #[arg(long, value_enum, default_value_t = CLI_DEFAULT_SHAPE)]
+    shape: CliCanvasShape,
 
-    /// Mask scale as fraction of image dimension (0.01-1.5).
-    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_SCALE)]
-    mask_scale: f64,
+    /// Canvas scale divisor (0.1-4.0); radius = min(w,h) / (2 × scale).
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_SCALE)]
+    scale: f64,
 
-    /// Rectangle mask aspect ratio (1.0-4.0, width/height before orientation).
-    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_ASPECT_RATIO)]
-    mask_aspect_ratio: f64,
+    /// Rectangle canvas aspect ratio (1.0-4.0, width/height before orientation).
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_ASPECT_RATIO)]
+    aspect_ratio: f64,
 
-    /// Rectangle mask orientation: longer side is horizontal.
-    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_MASK_LANDSCAPE)]
-    mask_landscape: bool,
+    /// Rectangle canvas orientation: longer side is horizontal.
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_LANDSCAPE)]
+    landscape: bool,
 
     /// Invert edge map before contour tracing.
     #[arg(long)]
@@ -125,34 +125,31 @@ enum Parity {
     Optimal,
 }
 
-/// Mask shape selection.
+/// Canvas shape selection.
 ///
-/// Mirrors [`mujou_pipeline::MaskMode`] so that an exhaustive `match` in
+/// Mirrors [`mujou_pipeline::CanvasShape`] so that an exhaustive `match` in
 /// [`config_from_cli`] forces a compile error when a new upstream variant
 /// is added without a corresponding CLI entry.
 #[derive(Clone, Copy, ValueEnum)]
-enum CliMaskMode {
-    /// No mask — polylines pass through unclipped.
-    Off,
-    /// Circular mask.
+enum CliCanvasShape {
+    /// Circular canvas.
     Circle,
-    /// Axis-aligned rectangular mask.
+    /// Axis-aligned rectangular canvas.
     Rectangle,
 }
 
-/// Maps a [`mujou_pipeline::MaskMode`] to the local CLI [`CliMaskMode`] enum.
-const fn mask_mode_from_pipeline(m: mujou_pipeline::MaskMode) -> CliMaskMode {
+/// Maps a [`mujou_pipeline::CanvasShape`] to the local CLI [`CliCanvasShape`] enum.
+const fn canvas_shape_from_pipeline(m: mujou_pipeline::CanvasShape) -> CliCanvasShape {
     match m {
-        mujou_pipeline::MaskMode::Off => CliMaskMode::Off,
-        mujou_pipeline::MaskMode::Circle => CliMaskMode::Circle,
-        mujou_pipeline::MaskMode::Rectangle => CliMaskMode::Rectangle,
+        mujou_pipeline::CanvasShape::Circle => CliCanvasShape::Circle,
+        mujou_pipeline::CanvasShape::Rectangle => CliCanvasShape::Rectangle,
     }
 }
 
-/// The CLI default mask mode, derived from [`PipelineConfig::DEFAULT_MASK_MODE`]
+/// The CLI default canvas shape, derived from [`PipelineConfig::DEFAULT_SHAPE`]
 /// so the two cannot silently diverge.
-const CLI_DEFAULT_MASK_MODE: CliMaskMode =
-    mask_mode_from_pipeline(mujou_pipeline::PipelineConfig::DEFAULT_MASK_MODE);
+const CLI_DEFAULT_SHAPE: CliCanvasShape =
+    canvas_shape_from_pipeline(mujou_pipeline::PipelineConfig::DEFAULT_SHAPE);
 
 /// Downsample resampling filter selection.
 #[derive(Clone, Copy, ValueEnum)]
@@ -212,14 +209,13 @@ fn config_from_cli(cli: &Cli) -> Result<mujou_pipeline::PipelineConfig, String> 
             Parity::Greedy => mujou_pipeline::ParityStrategy::Greedy,
             Parity::Optimal => mujou_pipeline::ParityStrategy::Optimal,
         },
-        mask_mode: match cli.mask_mode {
-            CliMaskMode::Off => mujou_pipeline::MaskMode::Off,
-            CliMaskMode::Circle => mujou_pipeline::MaskMode::Circle,
-            CliMaskMode::Rectangle => mujou_pipeline::MaskMode::Rectangle,
+        shape: match cli.shape {
+            CliCanvasShape::Circle => mujou_pipeline::CanvasShape::Circle,
+            CliCanvasShape::Rectangle => mujou_pipeline::CanvasShape::Rectangle,
         },
-        mask_scale: cli.mask_scale,
-        mask_aspect_ratio: cli.mask_aspect_ratio,
-        mask_landscape: cli.mask_landscape,
+        scale: cli.scale,
+        aspect_ratio: cli.aspect_ratio,
+        landscape: cli.landscape,
         invert: cli.invert,
         working_resolution: cli.working_resolution,
         downsample_filter: match cli.downsample_filter {
@@ -303,12 +299,14 @@ fn main() -> ExitCode {
                         description: Some(&desc),
                         config_json: config_json.as_deref(),
                     };
-                    let mask_shape = staged.masked.as_ref().map(|mr| &mr.shape);
+                    let mapping =
+                        mujou_export::document_mapping(&staged.canvas.shape, config.border_margin);
+                    // Use the joined (pre-subsampled) path for SVG —
+                    // subsampling is for THR polar conversion, not Cartesian SVG.
                     let svg = mujou_export::to_svg(
-                        &[staged.final_polyline().clone()],
-                        staged.dimensions,
+                        std::slice::from_ref(&staged.joined),
                         &metadata,
-                        mask_shape,
+                        &mapping,
                     );
                     match std::fs::write(svg_path, &svg) {
                         Ok(()) => {
@@ -404,7 +402,7 @@ fn print_multi_run_summary(all_diagnostics: &[PipelineDiagnostics]) {
         ("Invert", |d| d.invert.as_ref().map(|s| s.duration)),
         ("Contour Tracing", |d| Some(d.contour_tracing.duration)),
         ("Simplification", |d| Some(d.simplification.duration)),
-        ("Mask", |d| d.mask.as_ref().map(|s| s.duration)),
+        ("Canvas", |d| Some(d.canvas.duration)),
         ("Join", |d| Some(d.join.duration)),
     ];
 

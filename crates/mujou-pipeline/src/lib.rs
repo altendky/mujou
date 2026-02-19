@@ -30,7 +30,7 @@ pub use diagnostics::PipelineDiagnostics;
 pub use downsample::DownsampleFilter;
 pub use edge::max_gradient_magnitude;
 pub use join::{JoinOutput, PathJoiner, PathJoinerKind};
-pub use mask::{BorderPathMode, ClippedPolyline, MaskMode, MaskResult, MaskShape};
+pub use mask::{BorderPathMode, CanvasShape, ClippedPolyline, MaskResult, MaskShape};
 pub use mst_join::{JoinQualityMetrics, MstEdgeInfo, ParityStrategy};
 pub use pipeline::{Pipeline, PipelineCache};
 pub use segment_analysis::{RankedSegment, SEGMENT_COLORS, find_top_segments};
@@ -172,7 +172,14 @@ mod tests {
     #[test]
     fn process_sharp_edge_produces_path() {
         let png = sharp_edge_png(40, 40);
-        let result = process(&png, &PipelineConfig::default());
+        // Use scale=0.5 to produce a large canvas (radius=40) that covers
+        // the full image.  With default scale=1.25 the canvas (radius=16)
+        // clips the 2-point simplified contour at the image top.
+        let config = PipelineConfig {
+            scale: 0.5,
+            ..PipelineConfig::default()
+        };
+        let result = process(&png, &config);
         assert!(result.is_ok(), "expected Ok, got {result:?}");
         let process_result = result.unwrap();
         assert!(
@@ -189,26 +196,29 @@ mod tests {
     }
 
     #[test]
-    fn process_with_circular_mask() {
+    fn process_with_circular_shape() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            mask_mode: MaskMode::Circle,
-            mask_scale: 0.8,
+            shape: CanvasShape::Circle,
+            scale: 0.8,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
-        assert!(result.is_ok(), "expected Ok with mask, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok with circle shape, got {result:?}"
+        );
 
-        // All points should be within the mask circle.
+        // All points should be within the canvas circle.
+        // canvas_radius = min(w, h) / (2 * scale) = 40 / (2 * 0.8) = 25.0
         let process_result = result.unwrap();
         let center = Point::new(20.0, 20.0);
-        let diagonal = (40.0_f64).hypot(40.0);
-        let radius = diagonal * 0.8 / 2.0;
+        let radius = 40.0_f64.min(40.0) / (2.0 * 0.8);
         for p in process_result.polyline.points() {
             let dist = p.distance(center);
             assert!(
                 dist <= radius + 1e-6,
-                "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
+                "point ({}, {}) is outside canvas circle (dist={dist}, radius={radius})",
                 p.x,
                 p.y,
             );
@@ -216,28 +226,29 @@ mod tests {
     }
 
     #[test]
-    fn process_with_circular_mask_nonsquare() {
-        // Non-square image: mask radius is based on the diagonal so at
-        // mask_scale=1.0 the circle circumscribes the full image.
+    fn process_with_circular_shape_nonsquare() {
+        // Non-square image: canvas radius is based on min(w, h).
         let png = sharp_edge_png(60, 40);
         let config = PipelineConfig {
-            mask_mode: MaskMode::Circle,
-            mask_scale: 1.0,
+            shape: CanvasShape::Circle,
+            scale: 1.0,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
-        assert!(result.is_ok(), "expected Ok with mask, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok with circle shape, got {result:?}"
+        );
 
-        // Radius based on diagonal: sqrt(60^2 + 40^2) / 2 ≈ 36.06
+        // canvas_radius = min(60, 40) / (2 * 1.0) = 20.0
         let process_result = result.unwrap();
         let center = Point::new(30.0, 20.0);
-        let diagonal = (60.0_f64).hypot(40.0);
-        let radius = diagonal * 1.0 / 2.0;
+        let radius = 40.0_f64.min(60.0) / (2.0 * 1.0);
         for p in process_result.polyline.points() {
             let dist = p.distance(center);
             assert!(
                 dist <= radius + 1e-6,
-                "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
+                "point ({}, {}) is outside canvas circle (dist={dist}, radius={radius})",
                 p.x,
                 p.y,
             );
@@ -245,27 +256,29 @@ mod tests {
     }
 
     #[test]
-    fn process_with_circular_mask_above_one() {
-        // mask_scale > 1.0 produces a circle larger than the diagonal,
-        // so all image content should survive clipping.
+    fn process_with_circular_shape_small_scale() {
+        // scale < 1.0 produces a larger circle.
         let png = sharp_edge_png(60, 40);
         let config = PipelineConfig {
-            mask_mode: MaskMode::Circle,
-            mask_scale: 1.3,
+            shape: CanvasShape::Circle,
+            scale: 0.5,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
-        assert!(result.is_ok(), "expected Ok with mask >1.0, got {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected Ok with scale < 1.0, got {result:?}"
+        );
 
         let process_result = result.unwrap();
         let center = Point::new(30.0, 20.0);
-        let diagonal = (60.0_f64).hypot(40.0);
-        let radius = diagonal * 1.3 / 2.0;
+        // canvas_radius = min(60, 40) / (2 * 0.5) = 40.0
+        let radius = 40.0_f64.min(60.0) / (2.0 * 0.5);
         for p in process_result.polyline.points() {
             let dist = p.distance(center);
             assert!(
                 dist <= radius + 1e-6,
-                "point ({}, {}) is outside mask circle (dist={dist}, radius={radius})",
+                "point ({}, {}) is outside canvas circle (dist={dist}, radius={radius})",
                 p.x,
                 p.y,
             );
@@ -294,7 +307,11 @@ mod tests {
     #[test]
     fn process_staged_populates_all_intermediates() {
         let png = sharp_edge_png(40, 40);
-        let staged = process_staged(&png, &PipelineConfig::default()).unwrap();
+        let config = PipelineConfig {
+            scale: 0.5,
+            ..PipelineConfig::default()
+        };
+        let staged = process_staged(&png, &config).unwrap();
 
         // Original RGBA has correct dimensions.
         assert_eq!(staged.original.width(), 40);
@@ -311,8 +328,7 @@ mod tests {
         assert!(!staged.simplified.is_empty(), "expected simplified paths");
         assert!(!staged.joined.is_empty(), "expected joined path");
 
-        // Mask enabled by default.
-        assert!(staged.masked.is_some());
+        // Canvas always produces a result.
 
         // Dimensions match source.
         assert_eq!(
@@ -325,49 +341,45 @@ mod tests {
     }
 
     #[test]
-    fn process_staged_with_mask_populates_masked() {
+    fn process_staged_with_circle_shape_populates_canvas() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            mask_mode: MaskMode::Circle,
-            mask_scale: 1.0,
+            shape: CanvasShape::Circle,
+            scale: 1.0,
             ..PipelineConfig::default()
         };
         let staged = process_staged(&png, &config).unwrap();
 
+        // With scale=1.0, canvas_radius = min(40,40) / 2 = 20, so
+        // the vertical edge at x=20 on a 40×40 image should survive.
         assert!(
-            staged.masked.is_some(),
-            "expected Some masked polylines when mask_mode=Circle"
-        );
-        // With mask_scale=1.0 (circumscribing diagonal), the vertical
-        // edge at x=20 on a 40x40 image should survive clipping.
-        assert!(
-            !staged.masked.as_ref().unwrap().clipped.is_empty(),
-            "expected non-empty masked polylines with full-extent mask"
+            !staged.canvas.clipped.is_empty(),
+            "expected non-empty canvas polylines with circle shape"
         );
     }
 
     #[test]
-    fn process_staged_final_polyline_returns_subsampled_with_mask() {
+    fn process_staged_final_polyline_returns_output_with_circle() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            mask_mode: MaskMode::Circle,
-            mask_scale: 0.8,
+            shape: CanvasShape::Circle,
+            scale: 0.8,
             ..PipelineConfig::default()
         };
         let staged = process_staged(&png, &config).unwrap();
 
         // final_polyline returns the subsampled path (the final output
         // after joining and subsampling).
-        assert_eq!(staged.final_polyline(), &staged.subsampled);
+        assert_eq!(staged.final_polyline(), &staged.output);
     }
 
     #[test]
-    fn process_staged_final_polyline_returns_subsampled_without_mask() {
+    fn process_staged_final_polyline_returns_output_with_default_config() {
         let png = sharp_edge_png(40, 40);
         let staged = process_staged(&png, &PipelineConfig::default()).unwrap();
 
-        // final_polyline should return the subsampled path.
-        assert_eq!(staged.final_polyline(), &staged.subsampled);
+        // final_polyline should return the output path.
+        assert_eq!(staged.final_polyline(), &staged.output);
     }
 
     #[test]
