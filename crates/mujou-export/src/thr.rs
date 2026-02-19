@@ -358,9 +358,9 @@ mod tests {
 
     #[test]
     fn atan2_xy_convention_theta_zero_points_up() {
-        // atan2(x, y) convention: a point directly above center
-        // (positive Y in image coords, which is below in screen but
-        // the ecosystem uses image Y as +Y) has theta = 0.
+        // atan2(x, y) convention: a point at larger Y (image-down direction)
+        // relative to center has theta = 0, because atan2(0, +dy) = 0.
+        // The ecosystem treats +Y (image down) as the theta=0 reference direction.
         //
         // Point at (100, 200) relative to center (100, 100):
         //   dx = 0, dy = 100 → atan2(0, 100) = 0.
