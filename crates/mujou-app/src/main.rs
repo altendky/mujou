@@ -743,7 +743,7 @@ fn app() -> Element {
             config_description: {
                 let cfg = committed_config();
                 format!(
-                    "blur={}, canny={}/{}, simplify={}, tracer={:?}, joiner={:?}, canvas={}, res={}",
+                    "blur={}, canny={}/{}, simplify={}, tracer={:?}, joiner={:?}, canvas={}, border_margin={:.0}%, res={}",
                     cfg.blur_sigma,
                     cfg.canny_low,
                     cfg.canny_high,
@@ -763,6 +763,7 @@ fn app() -> Element {
                             )
                         }
                     },
+                    cfg.border_margin * 100.0,
                     cfg.working_resolution,
                 )
             },
