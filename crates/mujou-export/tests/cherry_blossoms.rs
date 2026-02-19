@@ -70,7 +70,7 @@ fn cherry_blossoms_pipeline_to_svg() {
     // Export to SVG (default circle canvas).
     let mapping = mujou_export::document_mapping(&result.canvas.shape, config.border_margin);
     let svg = mujou_export::to_svg(
-        std::slice::from_ref(result.final_polyline()),
+        std::slice::from_ref(&result.joined),
         &mujou_export::SvgMetadata::default(),
         &mapping,
     );
