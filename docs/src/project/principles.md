@@ -47,6 +47,87 @@ fn trigger_download(content: &str, filename: &str, mime_type: &str) {
 | Integration | `mujou-io` | Yes | Yes |
 | Application | `mujou-app` | Yes | Yes |
 
+## Coordinate System
+
+The pipeline uses two coordinate spaces with a clear boundary between them.
+
+### Pixel space
+
+Raster stages (decode, downsample, blur, Canny, contour tracing) operate in
+**working-resolution pixel coordinates**: origin at top-left, +X right, +Y down,
+units in pixels. These stages process pixel buffers; coordinates are inherent to
+the image grid.
+
+### Normalized space
+
+All stages after contour tracing operate in **normalized coordinates**:
+
+| Property | Value |
+| -------- | ----- |
+| Origin | (0, 0) at center of the mask shape |
+| X-axis | +X right |
+| Y-axis | +Y up |
+| Unit | Mask edge = 1.0 from center (radius, or rectangle half-short-side) |
+| Circle mask | Unit circle: radius = 1, extends [-1, 1] on both axes |
+| Rectangle mask | Half-short-side = 1, half-long-side = aspect ratio |
+
+The mask defines the output frame. A mask is always required.
+
+### Why this convention
+
+1. **Unit circle alignment.** The dominant output format (THR) uses polar
+   coordinates with normalized rho in [0, 1]. In normalized space,
+   `rho = sqrt(x² + y²)` with no scaling factor — Euclidean distance IS rho
+   for a circular mask.
+
+2. **Center origin.** Polar conversion (`theta = atan2(x, y)`) requires a
+   centered origin. Mask clipping is naturally symmetric around the center.
+   Export serializers apply format-specific offsets (bottom-left for G-code,
+   top-left for SVG viewBox).
+
+3. **+Y up.** Matches math/physics convention, THR convention
+   (`y = rho * cos(theta)` increases upward), and G-code convention. The Y-flip
+   from pixel space happens exactly once at the pixel→normalized boundary.
+
+4. **Resolution independence.** Parameters like simplification tolerance and
+   subsample spacing are expressed in normalized units, so they produce
+   consistent results regardless of `working_resolution`. A tolerance of 0.005
+   means the same thing whether the source image was 500px or 5000px.
+
+5. **Viewport efficiency.** The preview SVG viewBox matches the mask bounding
+   box, so the mask shape always fills the entire preview. No screen space is
+   wasted on clipped-away content.
+
+### Zoom
+
+The `zoom` parameter controls how the source image maps into the fixed
+normalized frame. It uses the photographer's convention:
+
+- **zoom = 1.0** — the shorter image dimension fills the mask edge-to-edge
+  (shorter pixel dimension spans [-1, 1])
+- **zoom > 1.0** — magnifies the image (less content visible, more clipping)
+- **zoom < 1.0** — shrinks the image (more content visible, less clipping)
+
+Default: 1.25. Range: 0.4 – 3.0.
+
+### Pixel → normalized transform
+
+```text
+norm_x =  (pixel_x - img_center_x) × 2 × zoom / shorter_pixel_dim
+norm_y = -(pixel_y - img_center_y) × 2 × zoom / shorter_pixel_dim
+```
+
+### Normalized → export transforms
+
+| Format | Transform |
+| ------ | --------- |
+| THR | `rho = sqrt(x² + y²)`, `theta = atan2(x, y)` (Sisyphus convention) |
+| SVG (Oasis) | Scale normalized → 200mm document, 195mm circle |
+| SVG (generic) | viewBox in normalized units |
+| G-code | Scale normalized → bed dimensions (mm) |
+| DXF | Scale normalized → target units |
+| PNG | Rasterize back to pixel buffer |
+
 ## Pluggable Algorithm Strategies
 
 When a pipeline step has multiple viable algorithms, design it as a **user-selectable strategy** rather than hardcoding a single approach.

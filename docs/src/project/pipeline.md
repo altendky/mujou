@@ -1,8 +1,17 @@
 # Image Processing Pipeline
 
-The pipeline is format-agnostic.
-The internal representation is XY polylines (`Vec<Polyline>` where `Polyline = Vec<Point>` and `Point = (f64, f64)`).
-Export serializers convert this to each output format.
+The pipeline converts raster images into vector paths in two coordinate spaces.
+
+**Pixel space** (steps 1–5): raster stages operate on pixel buffers in
+working-resolution image coordinates (origin top-left, +Y down, units in pixels).
+
+**Normalized space** (steps 6–10): vector stages operate on polylines in the
+[normalized coordinate system](principles.md#coordinate-system) defined by the
+mask shape (origin center, +Y up, mask edge = 1.0 from center).
+
+The internal representation is XY polylines (`Vec<Polyline>` where
+`Polyline = Vec<Point>` and `Point = (f64, f64)`).
+Export serializers convert from normalized space to each output format.
 
 All pipeline code lives in the `mujou-pipeline` crate (core layer, pure Rust, no I/O).
 
@@ -96,7 +105,35 @@ Traces the boundary between black and white pixels, producing a single centerlin
 
 **Tradeoffs:** ~80-120 lines custom code. Cleaner single-line geometry without relying on RDP to collapse doubling. More naturally handles open vs closed paths. Not provided by `imageproc`.
 
-### 6. Path Simplification (Optional)
+### 6. Normalize
+
+Transform contour polylines from pixel coordinates to the
+[normalized coordinate system](principles.md#coordinate-system).
+
+The transform centers the origin on the image, flips Y to point upward,
+and scales so the shorter image dimension spans [-1, 1] at zoom = 1.0:
+
+```text
+norm_x =  (pixel_x - img_center_x) × 2 × zoom / shorter_pixel_dim
+norm_y = -(pixel_y - img_center_y) × 2 × zoom / shorter_pixel_dim
+```
+
+After this step, all coordinates are in the mask's reference frame:
+
+- Circle mask: the unit circle (radius 1) centered at origin
+- Rectangle mask: centered at origin, half-short-side = 1,
+  half-long-side = aspect_ratio
+
+The `zoom` parameter controls how much of the source image maps into the
+fixed mask frame:
+
+- **zoom = 1.0**: shorter image dimension fills the mask edge-to-edge
+- **zoom > 1.0**: magnifies (less content visible, more clipping)
+- **zoom < 1.0**: shrinks (more content visible, less clipping)
+
+**User parameter:** `zoom` (f64, default: 1.25, range: 0.4–3.0)
+
+### 7. Path Simplification (Optional)
 
 Reduce point count using Ramer-Douglas-Peucker (RDP) algorithm.
 This is implemented from scratch (~30 lines) to avoid pulling in the `geo` crate dependency tree.
@@ -105,49 +142,53 @@ The algorithm recursively finds the point farthest from the line between the fir
 If that distance exceeds the tolerance, the segment is split and both halves are processed.
 Otherwise, intermediate points are dropped.
 
-**User parameter:** `simplify_tolerance` (f64, default: 2.0 pixels)
+**User parameter:** `simplify_tolerance` (f64, default: TBD, normalized units)
 
-### 7. Mask (Optional)
+### 8. Mask
 
-Clip all polylines to a mask shape centered on the image.
+Clip all polylines to the mask shape in normalized space.
 Points outside the mask are removed.
 Polylines that cross the mask boundary are split at the intersection.
 Contours entirely outside the mask are discarded before joining, so the join step only connects surviving contours.
 
+A mask is always required — it defines the output frame and the
+[normalized coordinate system](principles.md#coordinate-system).
+
 Two mask shapes are supported:
 
-- **Circle** — for round sand tables (Sisyphus, Oasis Mini). `mask_scale` is a fraction of the image diagonal; at 1.0 the circle circumscribes the full image.
-- **Rectangle** — axis-aligned rectangle. `mask_scale` controls the shorter dimension relative to the image's shorter dimension. `mask_aspect_ratio` extends the longer dimension. `mask_landscape` controls orientation.
+- **Circle** — for round sand tables (Sisyphus, Oasis Mini). The unit circle
+  (radius 1) centered at origin.
+- **Rectangle** — axis-aligned rectangle centered at origin. Half-short-side = 1,
+  half-long-side = `mask_aspect_ratio`. `mask_landscape` controls orientation.
 
 The mask stage returns a `MaskResult` containing `Vec<ClippedPolyline>` with explicit per-endpoint clip metadata (`start_clipped`, `end_clipped`) identifying every point that was created by intersection with the mask boundary.
 
 #### Border path
 
-When clipping creates boundary endpoints, the joiner may connect them across open space near the edge, producing visually jarring artifacts. The `border_path` option adds a border polyline matching the mask shape (a circle sampled at ~3px arc-length spacing, or a closed 4-corner rectangle). This gives the joiner a path along the mask boundary so connections between boundary endpoints route along the edge rather than cutting across empty space.
+When clipping creates boundary endpoints, the joiner may connect them across open space near the edge, producing visually jarring artifacts. The `border_path` option adds a border polyline matching the mask shape (a circle sampled at uniform arc-length spacing, or a closed 4-corner rectangle). This gives the joiner a path along the mask boundary so connections between boundary endpoints route along the edge rather than cutting across empty space.
 
 Three modes:
 
 | Mode | Behaviour |
 | ---- | --------- |
 | `Auto` (default) | Add the border polyline only when clipping actually intersects at least one polyline endpoint |
-| `On` | Always add the border polyline when the mask is enabled |
+| `On` | Always add the border polyline |
 | `Off` | Never add a border polyline |
 
 The border shape is tied to the mask shape via the `MaskShape` enum — each shape variant implements both clipping and border generation, enforced by exhaustive `match` arms.
 
 **User parameters:**
 
-- `mask_mode` (`MaskMode`, default: `Circle`) — `Off`, `Circle`, or `Rectangle`
-- `mask_scale` (f64, 0.0-1.5, default: 0.75) — scale factor for the mask shape
-- `mask_aspect_ratio` (f64, 1.0-4.0, default: 1.0) — rectangle aspect ratio (only for Rectangle)
-- `mask_landscape` (bool, default: true) — rectangle orientation (only for Rectangle)
+- `mask_shape` (`MaskShape`, default: `Circle`) — `Circle` or `Rectangle`
+- `mask_aspect_ratio` (f64, 1.0–4.0, default: 1.0) — rectangle aspect ratio (Rectangle only)
+- `mask_landscape` (bool, default: true) — rectangle orientation (Rectangle only)
 - `border_path` (`BorderPathMode`, default: `Auto`)
 
-### 8. Path Ordering + Joining
+### 9. Path Ordering + Joining
 
 Sand tables cannot lift the ball -- every movement draws a visible line.
 The output must be a **single continuous path**, not a set of disconnected contours.
-This step receives contours from masking (if enabled) or simplification, and produces a single continuous `Polyline`. Each joining strategy handles its own ordering internally, which allows strategies like Retrace to integrate ordering decisions with backtracking capabilities.
+This step receives contours from masking and produces a single continuous `Polyline` in normalized coordinates. Each joining strategy handles its own ordering internally, which allows strategies like Retrace to integrate ordering decisions with backtracking capabilities.
 
 This is a [pluggable algorithm strategy](principles.md#pluggable-algorithm-strategies) -- the user selects which joining method to use.
 
@@ -205,7 +246,7 @@ Spirals are the natural visual language of polar sand tables.
 
 **Tradeoffs:** Only applicable to polar output formats. Requires theta-rho space path planning.
 
-### 9. Invert (Optional)
+### 10. Invert (Optional)
 
 By default, edges (high contrast boundaries) are traced.
 Inversion swaps the binary edge map so dark regions are traced instead of light-to-dark transitions.
@@ -214,22 +255,24 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 
 ## User-Tunable Parameters Summary
 
-| Parameter | Type | Default | Description |
-| --------- | ---- | ------- | ----------- |
-| `blur_sigma` | f32 | 1.4 | Gaussian blur kernel sigma |
-| `edge_channels` | `EdgeChannels` | luminance only | Which channels to use for edge detection (composable) |
-| `canny_low` | f32 | 15.0 | Canny low threshold |
-| `canny_high` | f32 | 40.0 | Canny high threshold |
-| `canny_max` | f32 | 60.0 | Upper bound for Canny threshold sliders (UI only) |
-| `contour_tracer` | `ContourTracer` | `BorderFollowing` | Contour tracing algorithm ([strategy](principles.md#pluggable-algorithm-strategies)) |
-| `simplify_tolerance` | f64 | 2.0 | RDP simplification tolerance (pixels) |
-| `path_joiner` | `PathJoiner` | `Mst` | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
-| `mask_mode` | `MaskMode` | `Circle` | Mask shape: `Off`, `Circle`, `Rectangle` |
-| `mask_scale` | f64 | 0.75 | Scale factor for mask shape (0.0-1.5) |
-| `mask_aspect_ratio` | f64 | 1.0 | Rectangle aspect ratio (1.0-4.0, Rectangle only) |
-| `mask_landscape` | bool | true | Rectangle orientation (Rectangle only) |
-| `border_path` | `BorderPathMode` | `Auto` | Add border polyline along mask edge (`Auto`/`On`/`Off`) |
-| `invert` | bool | false | Invert edge map |
+| Parameter | Type | Default | Units | Description |
+| --------- | ---- | ------- | ----- | ----------- |
+| `working_resolution` | u32 | 1000 | pixels | Max pixel dimension after downsample |
+| `downsample_filter` | `DownsampleFilter` | `Triangle` | — | Resampling filter |
+| `blur_sigma` | f32 | 1.4 | pixels | Gaussian blur kernel sigma |
+| `edge_channels` | `EdgeChannels` | luminance only | — | Which channels to use for edge detection (composable) |
+| `canny_low` | f32 | 15.0 | pixels | Canny low threshold |
+| `canny_high` | f32 | 40.0 | pixels | Canny high threshold |
+| `canny_max` | f32 | 60.0 | pixels | Upper bound for Canny threshold sliders (UI only) |
+| `contour_tracer` | `ContourTracer` | `BorderFollowing` | — | Contour tracing algorithm ([strategy](principles.md#pluggable-algorithm-strategies)) |
+| `zoom` | f64 | 1.25 | — | Image zoom factor (1.0 = shorter dim fills mask) |
+| `simplify_tolerance` | f64 | TBD | normalized | RDP simplification tolerance |
+| `mask_shape` | `MaskShape` | `Circle` | — | Mask shape: `Circle` or `Rectangle` |
+| `mask_aspect_ratio` | f64 | 1.0 | — | Rectangle aspect ratio (1.0–4.0, Rectangle only) |
+| `mask_landscape` | bool | true | — | Rectangle orientation (Rectangle only) |
+| `border_path` | `BorderPathMode` | `Auto` | — | Add border polyline along mask edge (`Auto`/`On`/`Off`) |
+| `path_joiner` | `PathJoiner` | `Mst` | — | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
+| `invert` | bool | false | — | Invert edge map |
 
 ## Performance Considerations
 
