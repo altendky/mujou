@@ -78,10 +78,15 @@ pub struct WorkerResult {
 }
 
 impl WorkerResult {
-    /// The final output polyline — the subsampled path.
+    /// The final output polyline — the subsampled (THR-optimized) path.
     ///
     /// The subsampled path is the joined path with long segments
     /// subdivided to prevent angular artifacts in polar conversion.
+    ///
+    /// **SVG and other Cartesian exporters should use [`joined`](Self::joined)
+    /// directly.** The extra interpolated points add no visual benefit in
+    /// Cartesian coordinate systems and can cause compatibility issues
+    /// with downstream tools (e.g. grounded.so).
     #[must_use]
     pub const fn final_polyline(&self) -> &Polyline {
         &self.output

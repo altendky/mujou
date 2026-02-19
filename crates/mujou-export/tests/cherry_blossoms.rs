@@ -725,3 +725,72 @@ fn cherry_blossoms_segment_diagnostics() {
         svg.len(),
     );
 }
+
+/// Verify that SVG export uses the joined (pre-subsampled) path, not the
+/// subsampled output.  Subsampling interpolates extra points for THR polar
+/// conversion that add no visual benefit to Cartesian SVG and inflate
+/// point count ~3x with tiny segments that grounded.so cannot handle.
+#[test]
+fn cherry_blossoms_svg_uses_joined_not_subsampled() {
+    let workspace_root = workspace_root();
+    let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
+    let image_bytes = std::fs::read(&image_path).unwrap();
+
+    let config = mujou_pipeline::PipelineConfig::default();
+    let result =
+        mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
+
+    // Precondition: subsampling is active, so the output (subsampled)
+    // path has more points than the joined (pre-subsampled) path.
+    assert!(
+        result.output.len() > result.joined.len(),
+        "expected subsampled output ({}) to have more points than joined ({})",
+        result.output.len(),
+        result.joined.len(),
+    );
+
+    // Generate SVG from the joined path (what SVG export should use).
+    let mapping = mujou_export::document_mapping(&result.canvas.shape, config.border_margin);
+    let joined_svg = mujou_export::to_svg(
+        std::slice::from_ref(&result.joined),
+        &mujou_export::SvgMetadata::default(),
+        &mapping,
+    );
+
+    // Generate SVG from the subsampled path (what THR export uses).
+    let subsampled_svg = mujou_export::to_svg(
+        std::slice::from_ref(result.final_polyline()),
+        &mujou_export::SvgMetadata::default(),
+        &mapping,
+    );
+
+    // The joined SVG should be strictly smaller (fewer path data points).
+    assert!(
+        joined_svg.len() < subsampled_svg.len(),
+        "joined SVG ({} bytes) should be smaller than subsampled SVG ({} bytes)",
+        joined_svg.len(),
+        subsampled_svg.len(),
+    );
+
+    // Basic structural assertions on the joined SVG.
+    assert!(
+        joined_svg.contains("<svg"),
+        "joined SVG should contain <svg"
+    );
+    assert!(
+        joined_svg.contains("<path"),
+        "joined SVG should contain <path",
+    );
+    assert!(
+        joined_svg.contains("</svg>"),
+        "joined SVG should contain </svg>",
+    );
+
+    eprintln!(
+        "Joined SVG: {} bytes ({} points), Subsampled SVG: {} bytes ({} points)",
+        joined_svg.len(),
+        result.joined.len(),
+        subsampled_svg.len(),
+        result.output.len(),
+    );
+}

@@ -107,7 +107,11 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         description: Some(&description),
                         config_json: config_json.as_deref(),
                     };
-                    let polyline = res.final_polyline();
+                    // Use the joined (pre-subsampled) path for SVG. Subsampling
+                    // interpolates extra points for THR polar conversion that add
+                    // no visual benefit to Cartesian SVG and inflate point count
+                    // ~3x, causing compatibility issues with grounded.so.
+                    let polyline = &res.joined;
                     let mapping = mujou_export::document_mapping(&res.canvas.shape, border_margin);
                     let svg =
                         mujou_export::to_svg(std::slice::from_ref(polyline), &metadata, &mapping);

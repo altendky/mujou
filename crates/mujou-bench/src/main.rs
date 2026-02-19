@@ -301,8 +301,10 @@ fn main() -> ExitCode {
                     };
                     let mapping =
                         mujou_export::document_mapping(&staged.canvas.shape, config.border_margin);
+                    // Use the joined (pre-subsampled) path for SVG —
+                    // subsampling is for THR polar conversion, not Cartesian SVG.
                     let svg = mujou_export::to_svg(
-                        &[staged.final_polyline().clone()],
+                        std::slice::from_ref(&staged.joined),
                         &metadata,
                         &mapping,
                     );
