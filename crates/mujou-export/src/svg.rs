@@ -67,6 +67,10 @@ pub struct DocumentMapping {
 /// pads the drawing area on all sides.  At 0.0 the canvas shape fills the
 /// full document; at 0.05 there is a 5 % margin on each edge.
 ///
+/// # Panics
+///
+/// Panics if `border_margin` is outside `[0.0, 0.5)`.
+///
 /// # Examples
 ///
 /// ```
@@ -83,7 +87,7 @@ pub struct DocumentMapping {
 /// ```
 #[must_use]
 pub fn document_mapping(shape: &MaskShape, border_margin: f64) -> DocumentMapping {
-    debug_assert!(
+    assert!(
         (0.0..0.5).contains(&border_margin),
         "border_margin must be in [0.0, 0.5), got {border_margin}",
     );
