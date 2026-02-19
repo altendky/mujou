@@ -30,8 +30,8 @@ pub enum StageId {
     Masked,
     /// Stage 9: join (path joining).
     Join,
-    /// Stage 10: subsampled (long segments subdivided for polar export).
-    Subsampled,
+    /// Stage 10: output (long segments subdivided for polar export).
+    Output,
 }
 
 impl StageId {
@@ -45,7 +45,7 @@ impl StageId {
         Self::Simplified,
         Self::Masked,
         Self::Join,
-        Self::Subsampled,
+        Self::Output,
     ];
 
     /// Full display label for the stage.
@@ -60,7 +60,7 @@ impl StageId {
             Self::Simplified => "Simplified",
             Self::Join => "Join",
             Self::Masked => "Masked",
-            Self::Subsampled => "Subsampled",
+            Self::Output => "Output",
         }
     }
 
@@ -84,7 +84,7 @@ impl StageId {
             6 => Some(Self::Simplified),   // Simplified
             7 => Some(Self::Masked),       // Masked
             8 => Some(Self::Join),         // Joined
-            9 => Some(Self::Subsampled),   // Subsampled
+            9 => Some(Self::Output),       // Output
             _ => None,
         }
     }
@@ -101,7 +101,7 @@ impl StageId {
             Self::Simplified => "Simp",
             Self::Masked => "Mask",
             Self::Join => "Join",
-            Self::Subsampled => "Sub",
+            Self::Output => "Out",
         }
     }
 }

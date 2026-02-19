@@ -17,7 +17,7 @@
 //!     .simplify()
 //!     .mask()
 //!     .join()
-//!     .subsample();
+//!     .output();
 //!
 //! let staged = pipeline.into_result();
 //! # Ok(())
@@ -510,11 +510,11 @@ impl Masked {
 
 /// Pipeline state after path joining.
 ///
-/// Call [`subsample`](Self::subsample) to advance to the final stage.
+/// Call [`output`](Self::output) to advance to the final stage.
 ///
 /// See the [module-level memory notes](self#memory) for the cost of
 /// retaining all prior raster intermediates.
-#[must_use = "pipeline stages are consumed by advancing — call .subsample() to continue"]
+#[must_use = "pipeline stages are consumed by advancing — call .output() to continue"]
 pub struct Joined {
     config: PipelineConfig,
     original: RgbaImage,
@@ -542,10 +542,10 @@ impl Joined {
         self.dimensions
     }
 
-    /// Advance to the subsampling stage — the final pipeline step.
-    pub fn subsample(self) -> Subsampled {
+    /// Advance to the output stage — the final pipeline step.
+    pub fn output(self) -> Output {
         let subsampled = crate::subsample::subsample(&self.path, self.config.subsample_max_length);
-        Subsampled {
+        Output {
             config: self.config,
             original: self.original,
             downsampled: self.downsampled,
@@ -562,7 +562,7 @@ impl Joined {
     }
 }
 
-// ───────────────────────── Stage 9: Subsampled ──────────────────────
+// ───────────────────────── Stage 9: Output ──────────────────────────
 
 /// Pipeline state after segment subsampling — the final stage.
 ///
@@ -578,7 +578,7 @@ impl Joined {
 /// retaining all prior raster intermediates.
 #[must_use = "call .into_result() to extract the StagedResult"]
 #[allow(clippy::struct_field_names)]
-pub struct Subsampled {
+pub struct Output {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
@@ -593,10 +593,10 @@ pub struct Subsampled {
     dimensions: Dimensions,
 }
 
-impl Subsampled {
+impl Output {
     /// The subsampled output path.
     #[must_use]
-    pub const fn subsampled(&self) -> &Polyline {
+    pub const fn output_polyline(&self) -> &Polyline {
         &self.subsampled
     }
 
@@ -621,7 +621,7 @@ impl Subsampled {
             simplified: self.simplified,
             masked: self.masked,
             joined: self.joined,
-            subsampled: self.subsampled,
+            output: self.subsampled,
             mst_edge_details,
             dimensions: self.dimensions,
         }
@@ -688,9 +688,9 @@ pub enum StageOutput<'a> {
         dimensions: Dimensions,
     },
     /// Segment subsampling result.
-    Subsampled {
+    Output {
         /// The subsampled output path.
-        subsampled: &'a Polyline,
+        output: &'a Polyline,
         /// Image dimensions.
         dimensions: Dimensions,
     },
@@ -1041,7 +1041,7 @@ impl PipelineStage for Masked {
     }
 
     fn complete(self) -> Result<StagedResult, PipelineError> {
-        Ok(self.join().subsample().into_result())
+        Ok(self.join().output().into_result())
     }
 }
 
@@ -1087,21 +1087,21 @@ impl PipelineStage for Joined {
     }
 
     fn next(self) -> Result<Option<Stage>, PipelineError> {
-        Ok(Some(Stage::Subsampled(self.subsample())))
+        Ok(Some(Stage::Output(self.output())))
     }
 
     fn complete(self) -> Result<StagedResult, PipelineError> {
-        Ok(self.subsample().into_result())
+        Ok(self.output().into_result())
     }
 }
 
-impl PipelineStage for Subsampled {
-    const NAME: &str = "subsample";
+impl PipelineStage for Output {
+    const NAME: &str = "output";
     const INDEX: usize = 9;
 
     fn output(&self) -> StageOutput<'_> {
-        StageOutput::Subsampled {
-            subsampled: &self.subsampled,
+        StageOutput::Output {
+            output: &self.subsampled,
             dimensions: self.dimensions,
         }
     }
@@ -1110,7 +1110,7 @@ impl PipelineStage for Subsampled {
     fn metrics(&self) -> Option<StageMetrics> {
         let points_before = self.joined.len();
         let points_after = self.subsampled.len();
-        Some(StageMetrics::Subsample {
+        Some(StageMetrics::Output {
             max_length: self.config.subsample_max_length,
             points_before,
             points_after,
@@ -1166,8 +1166,8 @@ pub enum Stage {
     Masked(Masked),
     /// See [`Joined`].
     Joined(Joined),
-    /// See [`Subsampled`].
-    Subsampled(Subsampled),
+    /// See [`Output`].
+    Output(Output),
 }
 
 /// Compile-time guard: if a [`Stage`] variant is added, this match becomes
@@ -1184,7 +1184,7 @@ const fn _stage_count_guard(s: &Stage) {
         | Stage::Simplified(_)
         | Stage::Masked(_)
         | Stage::Joined(_)
-        | Stage::Subsampled(_) => {}
+        | Stage::Output(_) => {}
     }
 }
 
@@ -1211,7 +1211,7 @@ macro_rules! delegate {
             Self::Simplified(s) => s.$method($($arg),*),
             Self::Masked(s) => s.$method($($arg),*),
             Self::Joined(s) => s.$method($($arg),*),
-            Self::Subsampled(s) => s.$method($($arg),*),
+            Self::Output(s) => s.$method($($arg),*),
         }
     };
 }
@@ -1253,7 +1253,7 @@ impl Stage {
     /// Whether the pipeline is at the final stage.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
-        matches!(self, Self::Subsampled(_))
+        matches!(self, Self::Output(_))
     }
 
     /// Advance to the next stage.
@@ -1392,9 +1392,9 @@ impl From<Joined> for Stage {
     }
 }
 
-impl From<Subsampled> for Stage {
-    fn from(s: Subsampled) -> Self {
-        Self::Subsampled(s)
+impl From<Output> for Stage {
+    fn from(s: Output) -> Self {
+        Self::Output(s)
     }
 }
 
@@ -1418,7 +1418,7 @@ impl From<Subsampled> for Stage {
 ///     .simplify()
 ///     .mask()
 ///     .join()
-///     .subsample()
+///     .output()
 ///     .into_result();
 /// # Ok(())
 /// # }
@@ -1592,8 +1592,8 @@ impl PipelineCache {
         let joined = masked.join();
         on_stage(Joined::INDEX, false);
 
-        let subsampled = joined.subsample();
-        on_stage(Subsampled::INDEX, false);
+        let subsampled = joined.output();
+        on_stage(Output::INDEX, false);
 
         let staged = Arc::new(subsampled.into_result());
         let cache = Self {
@@ -1724,7 +1724,7 @@ impl PipelineCache {
             simplified,
             masked,
             joined,
-            subsampled: _,
+            output: _,
             mst_edge_details,
             dimensions,
         } = staged;
@@ -2060,7 +2060,7 @@ mod tests {
             .simplify()
             .mask()
             .join()
-            .subsample()
+            .output()
             .into_result();
 
         assert_eq!(staged.original, pipeline_result.original);
@@ -2071,7 +2071,7 @@ mod tests {
         assert_eq!(staged.simplified, pipeline_result.simplified);
         assert_eq!(staged.masked, pipeline_result.masked);
         assert_eq!(staged.joined, pipeline_result.joined);
-        assert_eq!(staged.subsampled, pipeline_result.subsampled);
+        assert_eq!(staged.output, pipeline_result.output);
         assert_eq!(staged.dimensions, pipeline_result.dimensions);
     }
 
@@ -2095,7 +2095,7 @@ mod tests {
             .simplify()
             .mask()
             .join()
-            .subsample()
+            .output()
             .into_result();
 
         assert_eq!(staged.edges, pipeline_result.edges);
@@ -2123,7 +2123,7 @@ mod tests {
             .simplify()
             .mask()
             .join()
-            .subsample()
+            .output()
             .into_result();
 
         assert_eq!(staged.masked, pipeline_result.masked);
@@ -2190,7 +2190,7 @@ mod tests {
             (6, "simplify"),
             (7, "mask"),
             (8, "join"),
-            (9, "subsample"),
+            (9, "output"),
         ];
         assert_eq!(log.as_slice(), &expected);
     }
@@ -2212,7 +2212,7 @@ mod tests {
             .simplify()
             .mask()
             .join()
-            .subsample()
+            .output()
             .into_result();
 
         // Loop API.
@@ -2228,7 +2228,7 @@ mod tests {
         assert_eq!(chained.simplified, looped.simplified);
         assert_eq!(chained.masked, looped.masked);
         assert_eq!(chained.joined, looped.joined);
-        assert_eq!(chained.subsampled, looped.subsampled);
+        assert_eq!(chained.output, looped.output);
         assert_eq!(chained.dimensions, looped.dimensions);
     }
 
@@ -2281,9 +2281,9 @@ mod tests {
     }
 
     #[test]
-    fn next_on_subsampled_returns_none() {
+    fn next_on_output_returns_none() {
         let png = sharp_edge_png(40, 40);
-        let subsampled = Pipeline::new(png, PipelineConfig::default())
+        let output = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
             .downsample()
@@ -2294,8 +2294,8 @@ mod tests {
             .simplify()
             .mask()
             .join()
-            .subsample();
-        assert!(subsampled.next().unwrap().is_none());
+            .output();
+        assert!(output.next().unwrap().is_none());
     }
 
     #[test]
@@ -2327,7 +2327,7 @@ mod tests {
                 StageOutput::Simplified { .. } => 6,
                 StageOutput::Masked { .. } => 7,
                 StageOutput::Joined { .. } => 8,
-                StageOutput::Subsampled { .. } => 9,
+                StageOutput::Output { .. } => 9,
             };
             assert_eq!(idx, variant_idx, "output variant mismatch at index {idx}");
             visited += 1;
@@ -2408,7 +2408,7 @@ mod tests {
         assert_eq!(a.simplified, b.simplified, "simplified mismatch");
         assert_eq!(a.masked, b.masked, "masked mismatch");
         assert_eq!(a.joined, b.joined, "joined mismatch");
-        assert_eq!(a.subsampled, b.subsampled, "subsampled mismatch");
+        assert_eq!(a.output, b.output, "output mismatch");
         assert_eq!(a.dimensions, b.dimensions, "dimensions mismatch");
     }
 

@@ -166,9 +166,9 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             }
         }
 
-        StageId::Join | StageId::Subsampled => {
-            let polyline = if matches!(stage, StageId::Subsampled) {
-                &result.subsampled
+        StageId::Join | StageId::Output => {
+            let polyline = if matches!(stage, StageId::Output) {
+                &result.output
             } else {
                 &result.joined
             };

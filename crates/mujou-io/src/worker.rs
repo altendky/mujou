@@ -32,7 +32,7 @@ struct VectorResult {
     simplified: Vec<Polyline>,
     masked: Option<MaskResult>,
     joined: Polyline,
-    subsampled: Polyline,
+    output: Polyline,
     #[serde(default)]
     mst_edge_details: Vec<MstEdgeInfo>,
     dimensions: Dimensions,
@@ -62,12 +62,12 @@ pub struct WorkerResult {
     pub masked: Option<MaskResult>,
     /// Joined single polyline (before subsampling).
     pub joined: Polyline,
-    /// Subsampled polyline — the final output.
+    /// Output polyline — the final output.
     ///
     /// Long segments in the joined path are subdivided so no segment
     /// exceeds `config.subsample_max_length` pixels. This prevents
     /// angular artifacts in polar (THR) conversion.
-    pub subsampled: Polyline,
+    pub output: Polyline,
     /// Per-MST-edge diagnostic details from the join stage.
     ///
     /// Present only when the MST joiner is used. Enables diagnostic
@@ -84,7 +84,7 @@ impl WorkerResult {
     /// subdivided to prevent angular artifacts in polar conversion.
     #[must_use]
     pub const fn final_polyline(&self) -> &Polyline {
-        &self.subsampled
+        &self.output
     }
 
     /// Select the polylines to display for a given vector stage.
@@ -102,7 +102,7 @@ impl WorkerResult {
                 |mr| Cow::Owned(mr.all_polylines().cloned().collect()),
             ),
             // Simplified is the natural default; raster, Join, and
-            // Subsampled stages don't use this helper but are listed
+            // Output stages don't use this helper but are listed
             // explicitly so new StageId variants trigger a compiler error.
             StageId::Simplified
             | StageId::Original
@@ -110,7 +110,7 @@ impl WorkerResult {
             | StageId::Blur
             | StageId::Edges
             | StageId::Join
-            | StageId::Subsampled => Cow::Borrowed(&self.simplified),
+            | StageId::Output => Cow::Borrowed(&self.simplified),
         }
     }
 }
@@ -400,7 +400,7 @@ fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
         simplified: vector.simplified,
         masked: vector.masked,
         joined: vector.joined,
-        subsampled: vector.subsampled,
+        output: vector.output,
         mst_edge_details: vector.mst_edge_details,
         dimensions: vector.dimensions,
     })

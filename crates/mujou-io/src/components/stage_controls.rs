@@ -556,7 +556,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             }
         }
 
-        StageId::Subsampled => {
+        StageId::Output => {
             let value = config.subsample_max_length;
             let config = config.clone();
             rsx! {

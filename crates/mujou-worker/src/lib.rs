@@ -48,7 +48,7 @@ pub struct VectorResult {
     pub simplified: Vec<Polyline>,
     pub masked: Option<MaskResult>,
     pub joined: Polyline,
-    pub subsampled: Polyline,
+    pub output: Polyline,
     pub mst_edge_details: Vec<MstEdgeInfo>,
     pub dimensions: Dimensions,
 }
@@ -242,7 +242,7 @@ fn post_success_response(
         simplified: staged.simplified.clone(),
         masked: staged.masked.clone(),
         joined: staged.joined.clone(),
-        subsampled: staged.subsampled.clone(),
+        output: staged.output.clone(),
         mst_edge_details: staged.mst_edge_details.clone(),
         dimensions: staged.dimensions,
     };

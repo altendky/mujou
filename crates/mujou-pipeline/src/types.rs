@@ -851,12 +851,12 @@ pub struct StagedResult {
     /// When masking is enabled, this is the join of the masked polylines.
     /// When disabled, this is the join of the simplified polylines.
     pub joined: Polyline,
-    /// Stage 9: subsampled path (the final output).
+    /// Stage 9: output path (the final output).
     ///
     /// Long segments in the joined path are subdivided so no segment
     /// exceeds `config.subsample_max_length` pixels. This prevents
     /// angular artifacts in polar (THR) conversion.
-    pub subsampled: Polyline,
+    pub output: Polyline,
     /// Per-MST-edge diagnostic details from the join stage.
     ///
     /// Present only when the MST joiner is used. Enables diagnostic
@@ -873,7 +873,7 @@ impl StagedResult {
     /// subdivided to prevent angular artifacts in polar conversion.
     #[must_use]
     pub const fn final_polyline(&self) -> &Polyline {
-        &self.subsampled
+        &self.output
     }
 }
 
@@ -892,7 +892,7 @@ struct StagedResultProxy {
     masked: Option<MaskResult>,
     joined: Polyline,
     #[serde(default)]
-    subsampled: Option<Polyline>,
+    output: Option<Polyline>,
     #[serde(default)]
     mst_edge_details: Vec<crate::MstEdgeInfo>,
     dimensions: Dimensions,
@@ -925,7 +925,7 @@ impl Serialize for StagedResult {
             simplified: self.simplified.clone(),
             masked: self.masked.clone(),
             joined: self.joined.clone(),
-            subsampled: Some(self.subsampled.clone()),
+            output: Some(self.output.clone()),
             mst_edge_details: self.mst_edge_details.clone(),
             dimensions: self.dimensions,
         };
@@ -952,9 +952,9 @@ impl<'de> Deserialize<'de> for StagedResult {
         let edges = GrayImage::from_raw(proxy.edges.0, proxy.edges.1, proxy.edges.2)
             .ok_or_else(|| serde::de::Error::custom("invalid edges image dimensions"))?;
 
-        // Backward-compatible: if `subsampled` is absent (old data),
+        // Backward-compatible: if `output` is absent (old data),
         // fall back to a clone of `joined`.
-        let subsampled = proxy.subsampled.unwrap_or_else(|| proxy.joined.clone());
+        let output = proxy.output.unwrap_or_else(|| proxy.joined.clone());
         Ok(Self {
             original,
             downsampled,
@@ -964,7 +964,7 @@ impl<'de> Deserialize<'de> for StagedResult {
             simplified: proxy.simplified,
             masked: proxy.masked,
             joined: proxy.joined,
-            subsampled,
+            output,
             mst_edge_details: proxy.mst_edge_details,
             dimensions: proxy.dimensions,
         })
@@ -1620,7 +1620,7 @@ mod tests {
             ])],
             masked: None,
             joined: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
-            subsampled: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
+            output: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
             mst_edge_details: vec![],
             dimensions: Dimensions {
                 width: 2,
@@ -1649,7 +1649,7 @@ mod tests {
         assert_eq!(staged.simplified, deserialized.simplified);
         assert_eq!(staged.masked, deserialized.masked);
         assert_eq!(staged.joined, deserialized.joined);
-        assert_eq!(staged.subsampled, deserialized.subsampled);
+        assert_eq!(staged.output, deserialized.output);
         assert_eq!(staged.mst_edge_details, deserialized.mst_edge_details);
         assert_eq!(staged.dimensions, deserialized.dimensions);
     }
@@ -1691,7 +1691,7 @@ mod tests {
             simplified: vec![],
             masked: None,
             joined: Polyline::new(vec![]),
-            subsampled: Polyline::new(vec![]),
+            output: Polyline::new(vec![]),
             mst_edge_details: vec![],
             dimensions: Dimensions {
                 width: 1,

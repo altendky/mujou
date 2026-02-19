@@ -347,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn process_staged_final_polyline_returns_subsampled_with_mask() {
+    fn process_staged_final_polyline_returns_output_with_mask() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             mask_mode: MaskMode::Circle,
@@ -358,16 +358,16 @@ mod tests {
 
         // final_polyline returns the subsampled path (the final output
         // after joining and subsampling).
-        assert_eq!(staged.final_polyline(), &staged.subsampled);
+        assert_eq!(staged.final_polyline(), &staged.output);
     }
 
     #[test]
-    fn process_staged_final_polyline_returns_subsampled_without_mask() {
+    fn process_staged_final_polyline_returns_output_without_mask() {
         let png = sharp_edge_png(40, 40);
         let staged = process_staged(&png, &PipelineConfig::default()).unwrap();
 
-        // final_polyline should return the subsampled path.
-        assert_eq!(staged.final_polyline(), &staged.subsampled);
+        // final_polyline should return the output path.
+        assert_eq!(staged.final_polyline(), &staged.output);
     }
 
     #[test]

@@ -71,7 +71,7 @@ pub struct PipelineDiagnostics {
     /// Stage 8: path ordering + joining.
     pub join: StageDiagnostics,
     /// Stage 9: segment subsampling.
-    pub subsample: StageDiagnostics,
+    pub output: StageDiagnostics,
     /// Total wall-clock duration of the entire pipeline (seconds).
     #[serde(with = "duration_serde")]
     pub total_duration: Duration,
@@ -206,7 +206,7 @@ pub enum StageMetrics {
         quality: Option<JoinQualityMetrics>,
     },
     /// Segment subsampling metrics.
-    Subsample {
+    Output {
         /// Maximum segment length in pixels.
         max_length: f64,
         /// Points in the joined path before subsampling.
@@ -273,7 +273,7 @@ impl PipelineDiagnostics {
                 s.push(("Mask", m));
             }
             s.push(("Join", &self.join));
-            s.push(("Subsample", &self.subsample));
+            s.push(("Output", &self.output));
             s
         };
 
@@ -428,7 +428,7 @@ fn format_metrics(metrics: &StageMetrics) -> String {
                 base
             }
         }
-        StageMetrics::Subsample {
+        StageMetrics::Output {
             max_length,
             points_before,
             points_after,
@@ -524,7 +524,7 @@ pub fn process_staged_with_diagnostics<C: Clock>(
 ) -> Result<(crate::StagedResult, PipelineDiagnostics), crate::PipelineError> {
     use crate::pipeline::{
         Advance, Blurred, ContoursTraced, Decoded, Downsampled, EdgesDetected, Joined, Masked,
-        PipelineStage as _, STAGE_COUNT, Simplified, Stage, Subsampled,
+        Output, PipelineStage as _, STAGE_COUNT, Simplified, Stage,
     };
 
     let pipeline_start = clock.now();
@@ -594,9 +594,9 @@ pub fn process_staged_with_diagnostics<C: Clock>(
                     join: stage_diags[Joined::INDEX]
                         .take()
                         .ok_or_else(|| diag_missing(Joined::NAME))?,
-                    subsample: stage_diags[Subsampled::INDEX]
+                    output: stage_diags[Output::INDEX]
                         .take()
-                        .ok_or_else(|| diag_missing(Subsampled::NAME))?,
+                        .ok_or_else(|| diag_missing(Output::NAME))?,
                     total_duration,
                     summary,
                 };
@@ -750,7 +750,7 @@ mod tests {
         // mask disabled -> None
         assert!(diag.mask.is_none());
         assert_eq!(diag.join.duration, ten_ms);
-        assert_eq!(diag.subsample.duration, ten_ms);
+        assert_eq!(diag.output.duration, ten_ms);
         assert_eq!(diag.total_duration, Duration::from_millis(110));
 
         // Summary should reflect the 40x40 image.
@@ -805,7 +805,7 @@ mod tests {
         assert_eq!(mask.duration, ten_ms);
 
         assert_eq!(diag.join.duration, ten_ms);
-        assert_eq!(diag.subsample.duration, ten_ms);
+        assert_eq!(diag.output.duration, ten_ms);
         assert_eq!(diag.total_duration, Duration::from_millis(110));
 
         // Summary should reflect the 40x40 image.
@@ -885,9 +885,9 @@ mod tests {
                     quality: None,
                 },
             },
-            subsample: StageDiagnostics {
+            output: StageDiagnostics {
                 duration: Duration::from_millis(2),
-                metrics: StageMetrics::Subsample {
+                metrics: StageMetrics::Output {
                     max_length: 2.0,
                     points_before: 150,
                     points_after: 200,
@@ -981,9 +981,9 @@ mod tests {
                     quality: None,
                 },
             },
-            subsample: StageDiagnostics {
+            output: StageDiagnostics {
                 duration: Duration::from_millis(1),
-                metrics: StageMetrics::Subsample {
+                metrics: StageMetrics::Output {
                     max_length: 2.0,
                     points_before: 120,
                     points_after: 150,
