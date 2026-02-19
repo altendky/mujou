@@ -71,6 +71,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         2000.0,
                         1.0,
                         0,
+                        1.0, "",
                         move |v: f64| {
                             let mut c = config_slider.clone();
                             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -129,6 +130,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         10.0,
                         0.1,
                         1,
+                        1.0, "",
                         move |v: f64| {
                             let mut c = config.clone();
                             #[allow(clippy::cast_possible_truncation)]
@@ -167,6 +169,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         f64::from(canny_max),
                         1.0,
                         0,
+                        1.0, "",
                         move |v: f64| {
                             let mut c = config_low.clone();
                             #[allow(clippy::cast_possible_truncation)]
@@ -185,6 +188,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         f64::from(canny_max),
                         1.0,
                         0,
+                        1.0, "",
                         move |v: f64| {
                             let mut c = config_high.clone();
                             #[allow(clippy::cast_possible_truncation)]
@@ -203,6 +207,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         theoretical_max,
                         1.0,
                         0,
+                        1.0, "",
                         move |v: f64| {
                             let mut c = config_max.clone();
                             #[allow(clippy::cast_possible_truncation)]
@@ -347,6 +352,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         10.0,
                         0.1,
                         1,
+                        1.0, "",
                         move |v: f64| {
                             let mut c = config.clone();
                             c.simplify_tolerance = v;
@@ -393,12 +399,13 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "scale",
                         "Scale",
-                        desc("Scale factor for the canvas shape."),
+                        desc("Canvas size as a percentage of the image's shorter dimension."),
                         scale,
                         0.1,
                         4.0,
                         0.01,
-                        2,
+                        0,
+                        100.0, "%",
                         move |v: f64| {
                             let mut c = config_slider.clone();
                             c.scale = v;
@@ -416,6 +423,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             4.0,
                             0.01,
                             2,
+                            1.0, "",
                             move |v: f64| {
                                 let mut c = config_aspect.clone();
                                 c.aspect_ratio = v;
@@ -463,12 +471,13 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "border_margin",
                         "Border Margin",
-                        desc("Fraction of document size reserved as margin on each side."),
+                        desc("Percentage of document size reserved as margin on each side."),
                         config_margin.border_margin,
                         0.0,
                         0.15,
                         0.01,
-                        2,
+                        0,
+                        100.0, "%",
                         move |v: f64| {
                             let mut c = config_margin.clone();
                             c.border_margin = v;
@@ -538,6 +547,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             200.0,
                             1.0,
                             0,
+                            1.0, "",
                             move |v: f64| {
                                 let mut c = config_slider.clone();
                                 #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -582,6 +592,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                         20.0,
                         0.1,
                         1,
+                        1.0, "",
                         move |v: f64| {
                             let mut c = config.clone();
                             c.subsample_max_length = v;
@@ -618,9 +629,12 @@ fn render_slider(
     max: f64,
     step: f64,
     decimals: usize,
+    display_factor: f64,
+    suffix: &str,
     on_input: impl Fn(f64) + 'static,
 ) -> Element {
-    let display = format!("{value:.decimals$}");
+    let display_value = value * display_factor;
+    let display = format!("{display_value:.decimals$}{suffix}");
     let id = id.to_string();
     let label = label.to_string();
     let description = description.to_string();
