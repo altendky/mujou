@@ -389,15 +389,13 @@ pub struct PipelineConfig {
 
     /// Border margin as a fraction of the document size (0.0–0.15).
     ///
-    /// Controls the inset from the SVG document edge to the drawing
-    /// area. At 0.0 (default) the drawing fills the entire document.
-    /// At 0.05, 5% of the document width/height is reserved on each
-    /// side.
+    /// Controls the inset from the canvas edge to the drawing area by
+    /// shrinking the canvas mask.  At 0.0 (default) the drawing fills
+    /// the entire canvas.  At 0.05, 5% of the canvas width/height is
+    /// reserved on each side, so the mask dimensions are scaled by
+    /// `1 − 2 × border_margin`.
     ///
-    /// This is an output-only parameter — it does not affect pipeline
-    /// computation (only SVG export layout), so it is excluded from
-    /// [`pipeline_eq`](Self::pipeline_eq) and
-    /// [`earliest_changed_stage`](Self::earliest_changed_stage).
+    /// Affects the Canvas stage (stage 7) and the SVG export layout.
     #[serde(default)]
     pub border_margin: f64,
 
@@ -689,7 +687,7 @@ impl PipelineConfig {
             aspect_ratio,
             landscape,
             border_path,
-            border_margin: _,
+            border_margin,
             invert,
             working_resolution,
             downsample_filter,
@@ -711,6 +709,7 @@ impl PipelineConfig {
             && (*shape != CanvasShape::Rectangle
                 || (*aspect_ratio == other.aspect_ratio && *landscape == other.landscape))
             && *border_path == other.border_path
+            && *border_margin == other.border_margin
             && *invert == other.invert
             && *working_resolution == other.working_resolution
             && *downsample_filter == other.downsample_filter
@@ -754,7 +753,7 @@ impl PipelineConfig {
             aspect_ratio,
             landscape,
             border_path,
-            border_margin: _,
+            border_margin,
             invert,
             working_resolution,
             downsample_filter,
@@ -796,7 +795,7 @@ impl PipelineConfig {
             return 6;
         }
 
-        // Stage 7 — canvas: shape, scale, aspect_ratio, landscape, border_path
+        // Stage 7 — canvas: shape, scale, aspect_ratio, landscape, border_path, border_margin
         // aspect_ratio and landscape only affect output in Rectangle mode.
         let rect_relevant =
             *shape == CanvasShape::Rectangle || other.shape == CanvasShape::Rectangle;
@@ -805,6 +804,7 @@ impl PipelineConfig {
             || (rect_relevant
                 && (*aspect_ratio != other.aspect_ratio || *landscape != other.landscape))
             || *border_path != other.border_path
+            || *border_margin != other.border_margin
         {
             return 7;
         }

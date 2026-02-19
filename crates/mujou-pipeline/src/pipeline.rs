@@ -403,9 +403,11 @@ impl Simplified {
             f64::from(self.dimensions.height) / 2.0,
         );
 
+        let margin_factor = 2.0f64.mul_add(-self.config.border_margin, 1.0);
+
         let canvas_result = match self.config.shape {
             CanvasShape::Circle => {
-                let radius = self.dimensions.canvas_radius(self.config.scale);
+                let radius = self.dimensions.canvas_radius(self.config.scale) * margin_factor;
                 let shape = MaskShape::Circle { center, radius };
                 Self::clip_and_border(&self.reduced, shape, self.config.border_path)
             }
@@ -415,6 +417,8 @@ impl Simplified {
                     self.config.aspect_ratio,
                     self.config.landscape,
                 );
+                let half_width = half_width * margin_factor;
+                let half_height = half_height * margin_factor;
                 let shape = MaskShape::Rectangle {
                     center,
                     half_width,
