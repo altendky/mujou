@@ -13,7 +13,8 @@
 //! ## Coordinate Convention
 //!
 //! The Sisyphus ecosystem uses `atan2(x, y)` — **not** the standard
-//! math `atan2(y, x)`.  This means theta=0 points **up** (along +Y).
+//! math `atan2(y, x)`.  This means theta=0 corresponds to the **+Y**
+//! direction (image-downward / physical-table upward), i.e., `atan2(0, +dy) = 0`.
 //! Confirmed by both [Sandify](https://github.com/jeffeb3/sandify)
 //! and [jsisyphus](https://github.com/markyland/SisyphusForTheRestOfUs).
 //!
