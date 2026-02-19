@@ -615,6 +615,8 @@ mod tests {
     fn end_to_end_image_to_thr() {
         use mujou_pipeline::{PipelineConfig, process_staged};
 
+        // Use scale=0.5 so the canvas (radius=40) covers the full
+        // 40×40 test image.
         let img = image::RgbaImage::from_fn(40, 40, |x, _y| {
             if x < 20 {
                 image::Rgba([0, 0, 0, 255])
@@ -633,8 +635,12 @@ mod tests {
         )
         .unwrap();
 
-        let result = process_staged(&buf, &PipelineConfig::default()).unwrap();
-        let mask_shape = result.canvas.as_ref().map(|mr| &mr.shape);
+        let config = PipelineConfig {
+            scale: 0.5,
+            ..PipelineConfig::default()
+        };
+        let result = process_staged(&buf, &config).unwrap();
+        let mask_shape = Some(&result.canvas.shape);
         let thr = to_thr(
             std::slice::from_ref(result.final_polyline()),
             result.dimensions,

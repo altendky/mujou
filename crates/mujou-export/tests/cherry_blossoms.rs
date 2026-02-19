@@ -51,28 +51,28 @@ fn cherry_blossoms_pipeline_to_svg() {
         canny_low: 50.0,
         canny_high: 150.0,
         path_joiner: mujou_pipeline::PathJoinerKind::StraightLine,
-        mask_mode: mujou_pipeline::MaskMode::Off,
         ..mujou_pipeline::PipelineConfig::default()
     };
-    let result = mujou_pipeline::process(&image_bytes, &config).expect("pipeline should succeed");
+    let result =
+        mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
 
     eprintln!(
         "Pipeline produced {} points, image {}x{}",
-        result.polyline.len(),
+        result.final_polyline().len(),
         result.dimensions.width,
         result.dimensions.height,
     );
     assert!(
-        !result.polyline.is_empty(),
+        !result.final_polyline().is_empty(),
         "expected non-empty polyline from cherry blossoms image"
     );
 
-    // Export to SVG (no mask — mask_mode=Off in this test config).
+    // Export to SVG (default circle canvas).
+    let mapping = mujou_export::document_mapping(&result.canvas.shape, config.border_margin);
     let svg = mujou_export::to_svg(
-        &[result.polyline],
-        result.dimensions,
+        std::slice::from_ref(result.final_polyline()),
         &mujou_export::SvgMetadata::default(),
-        None,
+        &mapping,
     );
 
     // Basic structural assertions.
@@ -87,7 +87,7 @@ fn cherry_blossoms_pipeline_to_svg() {
 }
 
 /// Verify the app's default config (`low=15`, `high=40`, Mst,
-/// `mask_mode=Circle`) can process the cherry blossoms image without OOM.
+/// `shape=Circle`) can process the cherry blossoms image without OOM.
 /// Lower thresholds produce many more edges that can exhaust WASM memory.
 #[test]
 fn cherry_blossoms_default_config() {
@@ -129,7 +129,6 @@ fn cherry_blossoms_parity_strategy_comparison() {
         canny_low: 50.0,
         canny_high: 150.0,
         path_joiner: mujou_pipeline::PathJoinerKind::Mst,
-        mask_mode: mujou_pipeline::MaskMode::Off,
         ..mujou_pipeline::PipelineConfig::default()
     };
 
@@ -251,9 +250,9 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     eprintln!("Loaded cherry-blossoms.png: {} bytes", image_bytes.len());
 
     // Match the exact config used to produce the image with the visible
-    // long diagonal: mask_scale=0.6, mst_neighbours=200, Optimal parity.
+    // long diagonal: scale=0.6, mst_neighbours=200, Optimal parity.
     let config = mujou_pipeline::PipelineConfig {
-        mask_scale: 0.6,
+        scale: 0.6,
         mst_neighbours: 200,
         parity_strategy: mujou_pipeline::ParityStrategy::Optimal,
         ..mujou_pipeline::PipelineConfig::default()
@@ -280,13 +279,12 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     let h = f64::from(result.dimensions.height);
     let center_x = w / 2.0;
     let center_y = h / 2.0;
-    let diagonal = w.hypot(h);
-    let radius = diagonal * config.mask_scale / 2.0;
+    let radius = w.min(h) / (2.0 * config.scale);
 
     eprintln!("\n=== MST Edge Diagnostics ===");
     eprintln!(
-        "Mask: center=({:.1}, {:.1}) radius={:.1}px mask_scale={:.2}",
-        center_x, center_y, radius, config.mask_scale,
+        "Mask: center=({:.1}, {:.1}) radius={:.1}px scale={:.2}",
+        center_x, center_y, radius, config.scale,
     );
     eprintln!("Total MST edges: {}", quality.mst_edge_details.len());
     eprintln!();
@@ -359,12 +357,7 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     // Scan the polylines that were fed into the joiner for long segments.
     // This identifies contour segments that survived simplification + clipping.
     {
-        let join_input: Vec<&mujou_pipeline::Polyline> = result
-            .canvas
-            .as_ref()
-            .expect("mask should be enabled")
-            .all_polylines()
-            .collect();
+        let join_input: Vec<&mujou_pipeline::Polyline> = result.canvas.all_polylines().collect();
 
         eprintln!("\n=== Longest Segments in Join Input Polylines ===");
         eprintln!("Join input: {} polylines", join_input.len());
@@ -531,13 +524,12 @@ fn cherry_blossoms_pipeline_to_thr() {
         canny_low: 50.0,
         canny_high: 150.0,
         path_joiner: mujou_pipeline::PathJoinerKind::StraightLine,
-        mask_mode: mujou_pipeline::MaskMode::Off,
         ..mujou_pipeline::PipelineConfig::default()
     };
     let result =
         mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
 
-    let mask_shape = result.canvas.as_ref().map(|mr| &mr.shape);
+    let mask_shape = Some(&result.canvas.shape);
     let thr = mujou_export::to_thr(
         std::slice::from_ref(result.final_polyline()),
         result.dimensions,
@@ -615,7 +607,7 @@ fn cherry_blossoms_pipeline_to_thr_with_mask() {
     let result =
         mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
 
-    let mask_shape = result.canvas.as_ref().map(|mr| &mr.shape);
+    let mask_shape = Some(&result.canvas.shape);
     let thr = mujou_export::to_thr(
         std::slice::from_ref(result.final_polyline()),
         result.dimensions,

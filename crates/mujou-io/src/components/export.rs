@@ -22,6 +22,11 @@ pub struct ExportPanelProps {
     /// Embedded in a `<metadata>` element for machine-parseable reproducibility.
     /// `None` if serialization failed — the `<metadata>` block is omitted.
     config_json: Option<String>,
+    /// Border margin fraction (0.0–0.15) for SVG document layout.
+    ///
+    /// Passed through to [`mujou_export::document_mapping`] so the SVG
+    /// drawing area is inset from the document edges.
+    border_margin: f64,
     /// Controls visibility of the export popup.
     show: Signal<bool>,
 }
@@ -37,6 +42,7 @@ impl PartialEq for ExportPanelProps {
             && self.filename == other.filename
             && self.config_description == other.config_description
             && self.config_json == other.config_json
+            && self.border_margin == other.border_margin
             && self.show == other.show
     }
 }
@@ -84,12 +90,12 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
     if !show() {
         return rsx! {};
     }
-
     let handle_download = {
         let result = props.result.clone();
         let filename = props.filename;
         let config_description = props.config_description;
         let config_json = props.config_json;
+        let border_margin = props.border_margin;
         move |_| {
             if let Some(ref res) = result {
                 let timestamp = now_timestamp();
@@ -102,13 +108,9 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         config_json: config_json.as_deref(),
                     };
                     let polyline = res.final_polyline();
-                    let mask_shape = res.canvas.as_ref().map(|mr| &mr.shape);
-                    let svg = mujou_export::to_svg(
-                        std::slice::from_ref(polyline),
-                        res.dimensions,
-                        &metadata,
-                        mask_shape,
-                    );
+                    let mapping = mujou_export::document_mapping(&res.canvas.shape, border_margin);
+                    let svg =
+                        mujou_export::to_svg(std::slice::from_ref(polyline), &metadata, &mapping);
                     let download_name = format!("{filename}_{timestamp}.svg");
                     if let Err(e) =
                         download::trigger_download(&svg, &download_name, "image/svg+xml")
@@ -127,7 +129,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         config_json: config_json.as_deref(),
                     };
                     let polyline = res.final_polyline();
-                    let mask_shape = res.canvas.as_ref().map(|mr| &mr.shape);
+                    let mask_shape = Some(&res.canvas.shape);
                     let thr = mujou_export::to_thr(
                         std::slice::from_ref(polyline),
                         res.dimensions,

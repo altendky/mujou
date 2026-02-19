@@ -743,24 +743,23 @@ fn app() -> Element {
             config_description: {
                 let cfg = committed_config();
                 format!(
-                    "blur={}, canny={}/{}, simplify={}, tracer={:?}, joiner={:?}, mask={}, res={}",
+                    "blur={}, canny={}/{}, simplify={}, tracer={:?}, joiner={:?}, canvas={}, res={}",
                     cfg.blur_sigma,
                     cfg.canny_low,
                     cfg.canny_high,
                     cfg.simplify_tolerance,
                     cfg.contour_tracer,
                     cfg.path_joiner,
-                    match cfg.mask_mode {
-                        mujou_pipeline::MaskMode::Off => "off".to_owned(),
-                        mujou_pipeline::MaskMode::Circle => {
-                            format!("circle {:.0}%", cfg.mask_scale * 100.0)
+                    match cfg.shape {
+                        mujou_pipeline::CanvasShape::Circle => {
+                            format!("circle s={:.2}", cfg.scale)
                         }
-                        mujou_pipeline::MaskMode::Rectangle => {
+                        mujou_pipeline::CanvasShape::Rectangle => {
                             format!(
-                                "rect {:.0}% ar={:.2} {}",
-                                cfg.mask_scale * 100.0,
-                                cfg.mask_aspect_ratio,
-                                if cfg.mask_landscape { "land" } else { "port" },
+                                "rect s={:.2} ar={:.2} {}",
+                                cfg.scale,
+                                cfg.aspect_ratio,
+                                if cfg.landscape { "land" } else { "port" },
                             )
                         }
                     },
@@ -768,6 +767,7 @@ fn app() -> Element {
                 )
             },
             config_json: serde_json::to_string(&committed_config()).ok(),
+            border_margin: committed_config().border_margin,
             show: show_export,
         }
     }

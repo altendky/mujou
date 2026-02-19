@@ -7,8 +7,8 @@
 
 use dioxus::prelude::*;
 use mujou_pipeline::{
-    BorderPathMode, ContourTracerKind, DownsampleFilter, MaskMode, ParityStrategy, PathJoinerKind,
-    PipelineConfig, StartPointStrategy, max_gradient_magnitude,
+    BorderPathMode, CanvasShape, ContourTracerKind, DownsampleFilter, ParityStrategy,
+    PathJoinerKind, PipelineConfig, StartPointStrategy, max_gradient_magnitude,
 };
 
 use crate::stage::StageId;
@@ -358,111 +358,123 @@ pub fn StageControls(props: StageControlsProps) -> Element {
         }
 
         StageId::Canvas => {
-            let mask_mode = config.mask_mode;
-            let scale = config.mask_scale;
-            let aspect_ratio = config.mask_aspect_ratio;
-            let landscape = config.mask_landscape;
-            let mask_active = !matches!(mask_mode, MaskMode::Off);
-            let is_rectangle = matches!(mask_mode, MaskMode::Rectangle);
-            let config_mode = config.clone();
+            let shape = config.shape;
+            let scale = config.scale;
+            let aspect_ratio = config.aspect_ratio;
+            let landscape = config.landscape;
+            let is_rectangle = matches!(shape, CanvasShape::Rectangle);
+            let config_shape = config.clone();
             let config_slider = config.clone();
             let config_aspect = config.clone();
             let config_orient = config.clone();
             let config_border = config.clone();
+            let config_margin = config.clone();
             rsx! {
                 div { class: "space-y-2",
                     {render_select(
-                        "mask_mode",
-                        "Mask Mode",
-                        desc("Choose mask shape: Off, Circle, or Rectangle."),
-                        &[("Off", "Off"), ("Circle", "Circle"), ("Rectangle", "Rectangle")],
-                        match mask_mode {
-                            MaskMode::Off => "Off",
-                            MaskMode::Circle => "Circle",
-                            MaskMode::Rectangle => "Rectangle",
+                        "shape",
+                        "Shape",
+                        desc("Canvas shape: Circle or Rectangle."),
+                        &[("Circle", "Circle"), ("Rectangle", "Rectangle")],
+                        match shape {
+                            CanvasShape::Circle => "Circle",
+                            CanvasShape::Rectangle => "Rectangle",
                         },
                         move |v: String| {
-                            let mut c = config_mode.clone();
-                            c.mask_mode = match v.as_str() {
-                                "Circle" => MaskMode::Circle,
-                                "Rectangle" => MaskMode::Rectangle,
-                                _ => MaskMode::Off,
+                            let mut c = config_shape.clone();
+                            c.shape = match v.as_str() {
+                                "Rectangle" => CanvasShape::Rectangle,
+                                _ => CanvasShape::Circle,
                             };
                             on_change.call(c);
                         },
                     )}
 
-                    if mask_active {
+                    {render_slider(
+                        "scale",
+                        "Scale",
+                        desc("Scale factor for the canvas shape."),
+                        scale,
+                        0.1,
+                        4.0,
+                        0.01,
+                        2,
+                        move |v: f64| {
+                            let mut c = config_slider.clone();
+                            c.scale = v;
+                            on_change.call(c);
+                        },
+                    )}
+
+                    if is_rectangle {
                         {render_slider(
-                            "mask_scale",
-                            "Mask Scale",
-                            desc("Scale factor for the mask shape."),
-                            scale,
-                            0.1,
-                            1.5,
+                            "aspect_ratio",
+                            "Aspect Ratio",
+                            desc("Rectangle longer-to-shorter side ratio (1.0 = square)."),
+                            aspect_ratio,
+                            1.0,
+                            4.0,
                             0.01,
                             2,
                             move |v: f64| {
-                                let mut c = config_slider.clone();
-                                c.mask_scale = v;
+                                let mut c = config_aspect.clone();
+                                c.aspect_ratio = v;
                                 on_change.call(c);
                             },
                         )}
 
-                        if is_rectangle {
-                            {render_slider(
-                                "mask_aspect_ratio",
-                                "Aspect Ratio",
-                                desc("Rectangle longer-to-shorter side ratio (1.0 = square)."),
-                                aspect_ratio,
-                                1.0,
-                                4.0,
-                                0.01,
-                                2,
-                                move |v: f64| {
-                                    let mut c = config_aspect.clone();
-                                    c.mask_aspect_ratio = v;
+                        if aspect_ratio > 1.0 {
+                            {render_select(
+                                "orientation",
+                                "Orientation",
+                                desc("Landscape: longer side is horizontal. Portrait: longer side is vertical."),
+                                &[("Landscape", "Landscape"), ("Portrait", "Portrait")],
+                                if landscape { "Landscape" } else { "Portrait" },
+                                move |v: String| {
+                                    let mut c = config_orient.clone();
+                                    c.landscape = v == "Landscape";
                                     on_change.call(c);
                                 },
                             )}
-
-                            if aspect_ratio > 1.0 {
-                                {render_select(
-                                    "mask_orientation",
-                                    "Orientation",
-                                    desc("Landscape: longer side is horizontal. Portrait: longer side is vertical."),
-                                    &[("Landscape", "Landscape"), ("Portrait", "Portrait")],
-                                    if landscape { "Landscape" } else { "Portrait" },
-                                    move |v: String| {
-                                        let mut c = config_orient.clone();
-                                        c.mask_landscape = v == "Landscape";
-                                        on_change.call(c);
-                                    },
-                                )}
-                            }
                         }
-
-                        {render_select(
-                            "border_path",
-                            "Border Path",
-                            desc("Add a border polyline along the mask edge to route connections along the boundary."),
-                            &[("Auto", "Auto"), ("On", "On"), ("Off", "Off")],
-                            match config_border.border_path {
-                                BorderPathMode::Auto => "Auto",
-                                BorderPathMode::On => "On",
-                                BorderPathMode::Off => "Off",
-                            },
-                            move |v: String| {
-                                let mut c = config_border.clone();
-                                c.border_path = match v.as_str() {
-                                    "On" => BorderPathMode::On,
-                                    "Off" => BorderPathMode::Off,
-                                    _ => BorderPathMode::Auto,
-                                };
-                                on_change.call(c);
-                            },
-                        )}
                     }
+
+                    {render_select(
+                        "border_path",
+                        "Border Path",
+                        desc("Add a border polyline along the canvas edge to route connections along the boundary."),
+                        &[("Auto", "Auto"), ("On", "On"), ("Off", "Off")],
+                        match config_border.border_path {
+                            BorderPathMode::Auto => "Auto",
+                            BorderPathMode::On => "On",
+                            BorderPathMode::Off => "Off",
+                        },
+                        move |v: String| {
+                            let mut c = config_border.clone();
+                            c.border_path = match v.as_str() {
+                                "On" => BorderPathMode::On,
+                                "Off" => BorderPathMode::Off,
+                                _ => BorderPathMode::Auto,
+                            };
+                            on_change.call(c);
+                        },
+                    )}
+
+                    {render_slider(
+                        "border_margin",
+                        "Border Margin",
+                        desc("Fraction of document size reserved as margin on each side."),
+                        config_margin.border_margin,
+                        0.0,
+                        0.15,
+                        0.01,
+                        2,
+                        move |v: f64| {
+                            let mut c = config_margin.clone();
+                            c.border_margin = v;
+                            on_change.call(c);
+                        },
+                    )}
                 }
             }
         }

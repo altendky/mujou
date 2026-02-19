@@ -46,7 +46,7 @@ thread_local! {
 pub struct VectorResult {
     pub contours: Vec<Polyline>,
     pub simplified: Vec<Polyline>,
-    pub canvas: Option<MaskResult>,
+    pub canvas: MaskResult,
     pub joined: Polyline,
     pub output: Polyline,
     pub mst_edge_details: Vec<MstEdgeInfo>,

@@ -49,7 +49,7 @@ use image::DynamicImage;
 use crate::contour::ContourTracer;
 use crate::diagnostics::StageMetrics;
 use crate::join::PathJoiner;
-use crate::mask::{BorderPathMode, MaskMode, MaskResult, MaskShape};
+use crate::mask::{BorderPathMode, CanvasShape, MaskResult, MaskShape};
 use crate::mst_join::JoinQualityMetrics;
 use crate::types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, RgbaImage, StagedResult,
@@ -394,43 +394,33 @@ impl Simplified {
 
     /// Advance to the canvas stage.
     ///
-    /// When `config.mask_mode` is `Circle` or `Rectangle`, polylines are
-    /// clipped to the corresponding boundary and an optional border
-    /// polyline is generated based on [`BorderPathMode`]. When `Off`,
-    /// this is a no-op pass-through.
+    /// Polylines are clipped to the canvas boundary (circle or
+    /// rectangle) and an optional border polyline is generated based
+    /// on [`BorderPathMode`].
     pub fn canvas(self) -> Canvas {
         let center = Point::new(
             f64::from(self.dimensions.width) / 2.0,
             f64::from(self.dimensions.height) / 2.0,
         );
 
-        let mask_result = match self.config.mask_mode {
-            MaskMode::Off => None,
-            MaskMode::Circle => {
-                let radius = self.dimensions.mask_radius(self.config.mask_scale);
+        let canvas_result = match self.config.shape {
+            CanvasShape::Circle => {
+                let radius = self.dimensions.canvas_radius(self.config.scale);
                 let shape = MaskShape::Circle { center, radius };
-                Some(Self::clip_and_border(
-                    &self.reduced,
-                    shape,
-                    self.config.border_path,
-                ))
+                Self::clip_and_border(&self.reduced, shape, self.config.border_path)
             }
-            MaskMode::Rectangle => {
-                let (half_width, half_height) = self.dimensions.mask_rect_half_dims(
-                    self.config.mask_scale,
-                    self.config.mask_aspect_ratio,
-                    self.config.mask_landscape,
+            CanvasShape::Rectangle => {
+                let (half_width, half_height) = self.dimensions.canvas_rect_half_dims(
+                    self.config.scale,
+                    self.config.aspect_ratio,
+                    self.config.landscape,
                 );
                 let shape = MaskShape::Rectangle {
                     center,
                     half_width,
                     half_height,
                 };
-                Some(Self::clip_and_border(
-                    &self.reduced,
-                    shape,
-                    self.config.border_path,
-                ))
+                Self::clip_and_border(&self.reduced, shape, self.config.border_path)
             }
         };
         Canvas {
@@ -441,7 +431,7 @@ impl Simplified {
             edges: self.edges,
             contours: self.contours,
             simplified: self.reduced,
-            canvas_result: mask_result,
+            canvas_result,
             dimensions: self.dimensions,
         }
     }
@@ -465,28 +455,20 @@ pub struct Canvas {
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    canvas_result: Option<MaskResult>,
+    canvas_result: MaskResult,
     dimensions: Dimensions,
 }
 
 impl Canvas {
-    /// The mask result, or `None` if masking was disabled.
+    /// The canvas result.
     #[must_use]
-    pub const fn canvas(&self) -> Option<&MaskResult> {
-        self.canvas_result.as_ref()
+    pub const fn canvas(&self) -> &MaskResult {
+        &self.canvas_result
     }
 
     /// Advance to the joining stage — the final pipeline step.
     pub fn join(self) -> Joined {
-        let join_input: Vec<Polyline> = if let Some(ref mr) = self.canvas_result {
-            mr.all_polylines().cloned().collect()
-        } else {
-            // No mask — use simplified polylines directly. We need an
-            // owned Vec because the joiner borrows a slice, and we move
-            // `self.simplified` into `Joined` below. Clone to keep
-            // both the join input and the stored simplified set.
-            self.simplified.clone()
-        };
+        let join_input: Vec<Polyline> = self.canvas_result.all_polylines().cloned().collect();
         let output = self
             .config
             .path_joiner
@@ -524,7 +506,7 @@ pub struct Joined {
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    canvas: Option<MaskResult>,
+    canvas: MaskResult,
     path: Polyline,
     quality_metrics: Option<JoinQualityMetrics>,
     dimensions: Dimensions,
@@ -587,7 +569,7 @@ pub struct Output {
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    canvas: Option<MaskResult>,
+    canvas: MaskResult,
     joined: Polyline,
     subsampled: Polyline,
     quality_metrics: Option<JoinQualityMetrics>,
@@ -678,8 +660,8 @@ pub enum StageOutput<'a> {
     },
     /// Canvas mask result.
     Canvas {
-        /// The mask result, or `None` if masking was disabled.
-        canvas: Option<&'a MaskResult>,
+        /// The canvas result.
+        canvas: &'a MaskResult,
     },
     /// Path joining result.
     Joined {
@@ -992,29 +974,27 @@ impl PipelineStage for Canvas {
 
     fn output(&self) -> StageOutput<'_> {
         StageOutput::Canvas {
-            canvas: self.canvas_result.as_ref(),
+            canvas: &self.canvas_result,
         }
     }
 
     fn metrics(&self) -> Option<StageMetrics> {
-        let mr = self.canvas_result.as_ref()?;
-        let shape_info = match self.config.mask_mode {
-            MaskMode::Off => "off".to_owned(),
-            MaskMode::Circle => {
-                let radius_px = self.dimensions.mask_radius(self.config.mask_scale);
-                format!("d={:.2} r={radius_px:.1}px", self.config.mask_scale)
+        let shape_info = match self.config.shape {
+            CanvasShape::Circle => {
+                let radius_px = self.dimensions.canvas_radius(self.config.scale);
+                format!("d={:.2} r={radius_px:.1}px", self.config.scale)
             }
-            MaskMode::Rectangle => {
-                let (hw, hh) = self.dimensions.mask_rect_half_dims(
-                    self.config.mask_scale,
-                    self.config.mask_aspect_ratio,
-                    self.config.mask_landscape,
+            CanvasShape::Rectangle => {
+                let (hw, hh) = self.dimensions.canvas_rect_half_dims(
+                    self.config.scale,
+                    self.config.aspect_ratio,
+                    self.config.landscape,
                 );
                 format!(
                     "scale={:.2} ar={:.2} {} {:.1}\u{00d7}{:.1}px",
-                    self.config.mask_scale,
-                    self.config.mask_aspect_ratio,
-                    if self.config.mask_landscape {
+                    self.config.scale,
+                    self.config.aspect_ratio,
+                    if self.config.landscape {
                         "land"
                     } else {
                         "port"
@@ -1031,9 +1011,14 @@ impl PipelineStage for Canvas {
         Some(StageMetrics::Canvas {
             shape_info,
             polylines_before: self.simplified.len(),
-            polylines_after: mr.clipped.len(),
+            polylines_after: self.canvas_result.clipped.len(),
             points_before: self.simplified.iter().map(Polyline::len).sum(),
-            points_after: mr.clipped.iter().map(|c| c.polyline.len()).sum(),
+            points_after: self
+                .canvas_result
+                .clipped
+                .iter()
+                .map(|c| c.polyline.len())
+                .sum(),
         })
     }
 
@@ -1059,18 +1044,9 @@ impl PipelineStage for Joined {
 
     #[allow(clippy::cast_precision_loss)]
     fn metrics(&self) -> Option<StageMetrics> {
-        let (input_polyline_count, input_point_count) = self.canvas.as_ref().map_or_else(
-            || {
-                let count = self.simplified.len();
-                let points: usize = self.simplified.iter().map(Polyline::len).sum();
-                (count, points)
-            },
-            |mr| {
-                let count: usize = mr.all_polylines().count();
-                let points: usize = mr.all_polylines().map(Polyline::len).sum();
-                (count, points)
-            },
-        );
+        let count: usize = self.canvas.all_polylines().count();
+        let points: usize = self.canvas.all_polylines().map(Polyline::len).sum();
+        let (input_polyline_count, input_point_count) = (count, points);
         let output_point_count = self.path.len();
         let expansion_ratio = if input_point_count > 0 {
             output_point_count as f64 / input_point_count as f64
@@ -1237,8 +1213,7 @@ impl Stage {
 
     /// Stage-specific metrics for diagnostics.
     ///
-    /// Returns `None` for the initial `Pending` stage and for optional
-    /// stages that were not executed (e.g. mask when disabled).
+    /// Returns `None` for the initial `Pending` stage.
     #[must_use]
     pub fn metrics(&self) -> Option<StageMetrics> {
         delegate!(self, metrics)
@@ -1863,6 +1838,18 @@ mod tests {
         buf
     }
 
+    /// Config with `scale = 0.5` so the canvas covers the full 40×40
+    /// test image.  Default `scale = 1.25` produces a tight canvas
+    /// (radius = 16 px) that clips the 2-point simplified contour from
+    /// [`sharp_edge_png`] because RDP collapses the collinear edge to
+    /// two adjacent points near the image top.
+    fn wide_canvas_config() -> PipelineConfig {
+        PipelineConfig {
+            scale: 0.5,
+            ..PipelineConfig::default()
+        }
+    }
+
     // ─────────── Typed API tests ─────────────────────────────────
 
     #[test]
@@ -1987,11 +1974,11 @@ mod tests {
     }
 
     #[test]
-    fn canvas_with_circular_mask_enabled() {
+    fn canvas_with_circular_shape() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            mask_mode: crate::mask::MaskMode::Circle,
-            mask_scale: 0.8,
+            shape: crate::mask::CanvasShape::Circle,
+            scale: 0.8,
             ..PipelineConfig::default()
         };
         let canvas_stage = Pipeline::new(png, config)
@@ -2004,33 +1991,14 @@ mod tests {
             .unwrap()
             .simplify()
             .canvas();
-        assert!(canvas_stage.canvas().is_some());
-    }
-
-    #[test]
-    fn canvas_with_mask_disabled() {
-        let png = sharp_edge_png(40, 40);
-        let config = PipelineConfig {
-            mask_mode: crate::mask::MaskMode::Off,
-            ..PipelineConfig::default()
-        };
-        let canvas_stage = Pipeline::new(png, config)
-            .decode()
-            .unwrap()
-            .downsample()
-            .blur()
-            .detect_edges()
-            .trace_contours()
-            .unwrap()
-            .simplify()
-            .canvas();
-        assert!(canvas_stage.canvas().is_none());
+        // Canvas always produces a result; verify it's accessible.
+        let _result = canvas_stage.canvas();
     }
 
     #[test]
     fn joined_exposes_joined() {
         let png = sharp_edge_png(40, 40);
-        let joined = Pipeline::new(png, PipelineConfig::default())
+        let joined = Pipeline::new(png, wide_canvas_config())
             .decode()
             .unwrap()
             .downsample()
@@ -2107,8 +2075,8 @@ mod tests {
     fn full_pipeline_with_mask() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            mask_mode: crate::mask::MaskMode::Circle,
-            mask_scale: 0.8,
+            shape: crate::mask::CanvasShape::Circle,
+            scale: 0.8,
             ..PipelineConfig::default()
         };
 
@@ -2236,7 +2204,7 @@ mod tests {
     #[test]
     fn complete_from_pending() {
         let png = sharp_edge_png(40, 40);
-        let pending = Pipeline::new(png, PipelineConfig::default());
+        let pending = Pipeline::new(png, wide_canvas_config());
         let result = pending.complete().unwrap();
         assert!(!result.joined.is_empty());
     }
@@ -2244,9 +2212,7 @@ mod tests {
     #[test]
     fn complete_from_decoded() {
         let png = sharp_edge_png(40, 40);
-        let decoded = Pipeline::new(png, PipelineConfig::default())
-            .decode()
-            .unwrap();
+        let decoded = Pipeline::new(png, wide_canvas_config()).decode().unwrap();
         let result = decoded.complete().unwrap();
         assert!(!result.joined.is_empty());
     }
@@ -2254,7 +2220,7 @@ mod tests {
     #[test]
     fn complete_from_mid_stage() {
         let png = sharp_edge_png(40, 40);
-        let blurred = Pipeline::new(png, PipelineConfig::default())
+        let blurred = Pipeline::new(png, wide_canvas_config())
             .decode()
             .unwrap()
             .downsample()
@@ -2266,7 +2232,7 @@ mod tests {
     #[test]
     fn complete_from_joined_is_into_result() {
         let png = sharp_edge_png(40, 40);
-        let joined = Pipeline::new(png, PipelineConfig::default())
+        let joined = Pipeline::new(png, wide_canvas_config())
             .decode()
             .unwrap()
             .downsample()
@@ -2372,7 +2338,7 @@ mod tests {
     #[test]
     fn stage_complete_from_enum() {
         let png = sharp_edge_png(40, 40);
-        let stage: Stage = Pipeline::new(png, PipelineConfig::default()).into();
+        let stage: Stage = Pipeline::new(png, wide_canvas_config()).into();
         let result = stage.complete().unwrap();
         assert!(!result.joined.is_empty());
     }
@@ -2437,12 +2403,12 @@ mod tests {
 
     #[test]
     fn cache_changed_late_stage_produces_correct_result() {
-        // Change mask_scale (stage 7) — stages 0-6 should be cached,
+        // Change scale (stage 7) — stages 0-6 should be cached,
         // only stages 7-8 re-run.
         let png = sharp_edge_png(40, 40);
         let config1 = PipelineConfig::default();
         let config2 = PipelineConfig {
-            mask_scale: 1.0,
+            scale: 1.0,
             ..PipelineConfig::default()
         };
 
@@ -2615,7 +2581,7 @@ mod tests {
         };
         let config3 = PipelineConfig {
             blur_sigma: 2.0,
-            mask_scale: 1.0,
+            scale: 1.0,
             ..PipelineConfig::default()
         };
 

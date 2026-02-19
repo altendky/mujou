@@ -30,7 +30,7 @@ use crate::raster;
 struct VectorResult {
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    canvas: Option<MaskResult>,
+    canvas: MaskResult,
     joined: Polyline,
     output: Polyline,
     #[serde(default)]
@@ -58,8 +58,8 @@ pub struct WorkerResult {
     pub contours: Vec<Polyline>,
     /// Simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Canvas result (if masking was applied, before joining).
-    pub canvas: Option<MaskResult>,
+    /// Canvas result (clipped polylines and optional border, before joining).
+    pub canvas: MaskResult,
     /// Joined single polyline (before subsampling).
     pub joined: Polyline,
     /// Output polyline — the final output.
@@ -97,10 +97,7 @@ impl WorkerResult {
     pub fn polylines_for_stage(&self, stage: StageId) -> Cow<'_, [Polyline]> {
         match stage {
             StageId::Contours => Cow::Borrowed(&self.contours),
-            StageId::Canvas => self.canvas.as_ref().map_or_else(
-                || Cow::Borrowed(self.simplified.as_slice()),
-                |mr| Cow::Owned(mr.all_polylines().cloned().collect()),
-            ),
+            StageId::Canvas => Cow::Owned(self.canvas.all_polylines().cloned().collect()),
             // Simplified is the natural default; raster, Join, and
             // Output stages don't use this helper but are listed
             // explicitly so new StageId variants trigger a compiler error.
