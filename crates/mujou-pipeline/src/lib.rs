@@ -22,6 +22,7 @@ pub mod optimize;
 pub mod pipeline;
 pub mod segment_analysis;
 pub mod simplify;
+pub mod subsample;
 pub mod types;
 
 pub use contour::{ContourTracer, ContourTracerKind};
@@ -346,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn process_staged_final_polyline_returns_joined_with_mask() {
+    fn process_staged_final_polyline_returns_subsampled_with_mask() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             mask_mode: MaskMode::Circle,
@@ -355,18 +356,18 @@ mod tests {
         };
         let staged = process_staged(&png, &config).unwrap();
 
-        // final_polyline always returns the joined path (mask is applied
-        // before joining, so joined is always the final result).
-        assert_eq!(staged.final_polyline(), &staged.joined);
+        // final_polyline returns the subsampled path (the final output
+        // after joining and subsampling).
+        assert_eq!(staged.final_polyline(), &staged.subsampled);
     }
 
     #[test]
-    fn process_staged_final_polyline_returns_joined_without_mask() {
+    fn process_staged_final_polyline_returns_subsampled_without_mask() {
         let png = sharp_edge_png(40, 40);
         let staged = process_staged(&png, &PipelineConfig::default()).unwrap();
 
-        // final_polyline should return the joined path when no mask.
-        assert_eq!(staged.final_polyline(), &staged.joined);
+        // final_polyline should return the subsampled path.
+        assert_eq!(staged.final_polyline(), &staged.subsampled);
     }
 
     #[test]

@@ -357,95 +357,6 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             }
         }
 
-        StageId::Join => {
-            let config_select = config.clone();
-            let config_start = config.clone();
-            let config_slider = config.clone();
-            let config_parity = config.clone();
-            let is_mst = matches!(config.path_joiner, PathJoinerKind::Mst);
-            rsx! {
-                div { class: "space-y-2",
-                    {render_select(
-                        "path_joiner",
-                        "Path Joiner",
-                        desc("Strategy for connecting contours into a continuous path."),
-                        &[("Mst", "MST"), ("Retrace", "Retrace"), ("StraightLine", "Straight Line")],
-                        match config_select.path_joiner {
-                            PathJoinerKind::Mst => "Mst",
-                            PathJoinerKind::StraightLine => "StraightLine",
-                            PathJoinerKind::Retrace => "Retrace",
-                        },
-                        move |v: String| {
-                            let mut c = config_select.clone();
-                            c.path_joiner = match v.as_str() {
-                                "Retrace" => PathJoinerKind::Retrace,
-                                "StraightLine" => PathJoinerKind::StraightLine,
-                                _ => PathJoinerKind::Mst,
-                            };
-                            on_change.call(c);
-                        },
-                    )}
-
-                    {render_select(
-                        "start_point",
-                        "Start Point",
-                        desc("Where to begin the path. Outside starts near the edge (for perimeter-homing machines). Inside starts near the center (for polar sand tables)."),
-                        &[("Outside", "Outside"), ("Inside", "Inside")],
-                        match config_start.start_point {
-                            StartPointStrategy::Outside => "Outside",
-                            StartPointStrategy::Inside => "Inside",
-                        },
-                        move |v: String| {
-                            let mut c = config_start.clone();
-                            c.start_point = match v.as_str() {
-                                "Inside" => StartPointStrategy::Inside,
-                                _ => StartPointStrategy::Outside,
-                            };
-                            on_change.call(c);
-                        },
-                    )}
-
-                    if is_mst {
-                        {render_slider(
-                            "mst_neighbours",
-                            "MST Neighbours",
-                            desc("Nearest neighbours considered when building the spanning tree."),
-                            #[allow(clippy::cast_precision_loss)]
-                            { config_slider.mst_neighbours as f64 },
-                            1.0,
-                            200.0,
-                            1.0,
-                            0,
-                            move |v: f64| {
-                                let mut c = config_slider.clone();
-                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                                { c.mst_neighbours = v as usize; }
-                                on_change.call(c);
-                            },
-                        )}
-                        {render_select(
-                            "parity_strategy",
-                            "Parity Strategy",
-                            desc("Algorithm for pairing odd-degree vertices during MST joining."),
-                            &[("Greedy", "Greedy"), ("Optimal", "Optimal")],
-                            match config_parity.parity_strategy {
-                                ParityStrategy::Greedy => "Greedy",
-                                ParityStrategy::Optimal => "Optimal",
-                            },
-                            move |v: String| {
-                                let mut c = config_parity.clone();
-                                c.parity_strategy = match v.as_str() {
-                                    "Optimal" => ParityStrategy::Optimal,
-                                    _ => ParityStrategy::Greedy,
-                                };
-                                on_change.call(c);
-                            },
-                        )}
-                    }
-                }
-            }
-        }
-
         StageId::Masked => {
             let mask_mode = config.mask_mode;
             let scale = config.mask_scale;
@@ -552,6 +463,119 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                             },
                         )}
                     }
+                }
+            }
+        }
+
+        StageId::Join => {
+            let config_select = config.clone();
+            let config_start = config.clone();
+            let config_slider = config.clone();
+            let config_parity = config.clone();
+            let is_mst = matches!(config.path_joiner, PathJoinerKind::Mst);
+            rsx! {
+                div { class: "space-y-2",
+                    {render_select(
+                        "path_joiner",
+                        "Path Joiner",
+                        desc("Strategy for connecting contours into a continuous path."),
+                        &[("Mst", "MST"), ("Retrace", "Retrace"), ("StraightLine", "Straight Line")],
+                        match config_select.path_joiner {
+                            PathJoinerKind::Mst => "Mst",
+                            PathJoinerKind::StraightLine => "StraightLine",
+                            PathJoinerKind::Retrace => "Retrace",
+                        },
+                        move |v: String| {
+                            let mut c = config_select.clone();
+                            c.path_joiner = match v.as_str() {
+                                "Retrace" => PathJoinerKind::Retrace,
+                                "StraightLine" => PathJoinerKind::StraightLine,
+                                _ => PathJoinerKind::Mst,
+                            };
+                            on_change.call(c);
+                        },
+                    )}
+
+                    {render_select(
+                        "start_point",
+                        "Start Point",
+                        desc("Where to begin the path. Outside starts near the edge (for perimeter-homing machines). Inside starts near the center (for polar sand tables)."),
+                        &[("Outside", "Outside"), ("Inside", "Inside")],
+                        match config_start.start_point {
+                            StartPointStrategy::Outside => "Outside",
+                            StartPointStrategy::Inside => "Inside",
+                        },
+                        move |v: String| {
+                            let mut c = config_start.clone();
+                            c.start_point = match v.as_str() {
+                                "Inside" => StartPointStrategy::Inside,
+                                _ => StartPointStrategy::Outside,
+                            };
+                            on_change.call(c);
+                        },
+                    )}
+
+                    if is_mst {
+                        {render_slider(
+                            "mst_neighbours",
+                            "MST Neighbours",
+                            desc("Nearest neighbours considered when building the spanning tree."),
+                            #[allow(clippy::cast_precision_loss)]
+                            { config_slider.mst_neighbours as f64 },
+                            1.0,
+                            200.0,
+                            1.0,
+                            0,
+                            move |v: f64| {
+                                let mut c = config_slider.clone();
+                                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                                { c.mst_neighbours = v as usize; }
+                                on_change.call(c);
+                            },
+                        )}
+                        {render_select(
+                            "parity_strategy",
+                            "Parity Strategy",
+                            desc("Algorithm for pairing odd-degree vertices during MST joining."),
+                            &[("Greedy", "Greedy"), ("Optimal", "Optimal")],
+                            match config_parity.parity_strategy {
+                                ParityStrategy::Greedy => "Greedy",
+                                ParityStrategy::Optimal => "Optimal",
+                            },
+                            move |v: String| {
+                                let mut c = config_parity.clone();
+                                c.parity_strategy = match v.as_str() {
+                                    "Optimal" => ParityStrategy::Optimal,
+                                    _ => ParityStrategy::Greedy,
+                                };
+                                on_change.call(c);
+                            },
+                        )}
+                    }
+                }
+            }
+        }
+
+        StageId::Subsampled => {
+            let value = config.subsample_max_length;
+            let config = config.clone();
+            rsx! {
+                div { class: "space-y-2",
+                    {render_slider(
+                        "subsample_max_length",
+                        "Max Segment Length",
+                        desc("Maximum segment length in pixels. Longer segments are subdivided for smooth polar (THR) conversion."),
+                        value,
+                        0.5,
+                        20.0,
+                        0.1,
+                        1,
+                        move |v: f64| {
+                            let mut c = config.clone();
+                            c.subsample_max_length = v;
+                            on_change.call(c);
+                        },
+                    )}
                 }
             }
         }

@@ -30,11 +30,13 @@ pub enum StageId {
     Masked,
     /// Stage 9: join (path joining).
     Join,
+    /// Stage 10: subsampled (long segments subdivided for polar export).
+    Subsampled,
 }
 
 impl StageId {
     /// All stages in pipeline order, for iterating the filmstrip.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
         Self::Original,
         Self::Downsampled,
         Self::Blur,
@@ -43,6 +45,7 @@ impl StageId {
         Self::Simplified,
         Self::Masked,
         Self::Join,
+        Self::Subsampled,
     ];
 
     /// Full display label for the stage.
@@ -57,16 +60,16 @@ impl StageId {
             Self::Simplified => "Simplified",
             Self::Join => "Join",
             Self::Masked => "Masked",
+            Self::Subsampled => "Subsampled",
         }
     }
 
     /// Map a pipeline-internal stage index to the corresponding UI stage.
     ///
-    /// The pipeline has 9 internal stages (indices 0–8) while the UI
-    /// presents 8 stages. Backend stages 0 (`Pending`/source) and 1
+    /// The pipeline has 10 internal stages (indices 0–9) while the UI
+    /// presents 9 stages. Backend stages 0 (`Pending`/source) and 1
     /// (`Decoded`/decode) both map to [`StageId::Original`] because
     /// decode is the operation that produces the original preview image.
-    ///
     /// Returns `None` for out-of-range indices.
     ///
     /// See also: <https://github.com/altendky/mujou/issues/122>
@@ -81,6 +84,7 @@ impl StageId {
             6 => Some(Self::Simplified),   // Simplified
             7 => Some(Self::Masked),       // Masked
             8 => Some(Self::Join),         // Joined
+            9 => Some(Self::Subsampled),   // Subsampled
             _ => None,
         }
     }
@@ -97,6 +101,7 @@ impl StageId {
             Self::Simplified => "Simp",
             Self::Masked => "Mask",
             Self::Join => "Join",
+            Self::Subsampled => "Sub",
         }
     }
 }
@@ -116,7 +121,7 @@ mod tests {
         // If you add a variant to StageId, update ALL and this count.
         assert_eq!(
             StageId::ALL.len(),
-            8,
+            9,
             "StageId::ALL length must match variant count"
         );
         // Verify no duplicates.
@@ -128,15 +133,15 @@ mod tests {
 
     #[test]
     fn from_pipeline_index_maps_all_backend_stages() {
-        // Backend indices 0-8 should all map to a valid StageId.
-        for i in 0..=8 {
+        // Backend indices 0-9 should all map to a valid StageId.
+        for i in 0..=9 {
             assert!(
                 StageId::from_pipeline_index(i).is_some(),
                 "pipeline index {i} should map to a StageId"
             );
         }
         // Out-of-range returns None.
-        assert_eq!(StageId::from_pipeline_index(9), None);
+        assert_eq!(StageId::from_pipeline_index(10), None);
         assert_eq!(StageId::from_pipeline_index(usize::MAX), None);
     }
 
@@ -167,7 +172,7 @@ mod tests {
     fn from_pipeline_index_covers_all_ui_stages() {
         // Every StageId variant should be reachable from some pipeline index.
         let mut reachable = std::collections::HashSet::new();
-        for i in 0..=8 {
+        for i in 0..=9 {
             if let Some(stage) = StageId::from_pipeline_index(i) {
                 reachable.insert(stage);
             }

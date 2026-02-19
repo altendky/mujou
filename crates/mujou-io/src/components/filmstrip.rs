@@ -166,8 +166,12 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             }
         }
 
-        StageId::Join => {
-            let polyline = &result.joined;
+        StageId::Join | StageId::Subsampled => {
+            let polyline = if matches!(stage, StageId::Subsampled) {
+                &result.subsampled
+            } else {
+                &result.joined
+            };
             let w = result.dimensions.width;
             let h = result.dimensions.height;
             let view_box = super::compute_view_box(std::slice::from_ref(polyline), w, h);

@@ -1,8 +1,10 @@
 //! mujou-export: Pure format serializers (sans-IO)
 //!
-//! Converts polylines into output formats. Currently supports SVG.
-//! Future formats: THR, G-code, DXF, PNG.
+//! Converts polylines into output formats. Currently supports SVG and THR.
+//! Future formats: G-code, DXF, PNG.
 
 pub mod svg;
+pub mod thr;
 
 pub use svg::{SvgMetadata, build_path_data, to_diagnostic_svg, to_segment_diagnostic_svg, to_svg};
+pub use thr::{ThrMetadata, to_thr};
