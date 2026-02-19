@@ -736,7 +736,12 @@ fn cherry_blossoms_svg_uses_joined_not_subsampled() {
     let image_path = workspace_root.join("assets/examples/cherry-blossoms.png");
     let image_bytes = std::fs::read(&image_path).unwrap();
 
-    let config = mujou_pipeline::PipelineConfig::default();
+    let config = mujou_pipeline::PipelineConfig {
+        // Force subsampling to insert points so the precondition
+        // (output has more points than joined) is deterministic.
+        subsample_max_length: 1.0,
+        ..mujou_pipeline::PipelineConfig::default()
+    };
     let result =
         mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
 
