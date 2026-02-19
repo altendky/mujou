@@ -357,7 +357,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
             }
         }
 
-        StageId::Masked => {
+        StageId::Canvas => {
             let mask_mode = config.mask_mode;
             let scale = config.mask_scale;
             let aspect_ratio = config.mask_aspect_ratio;

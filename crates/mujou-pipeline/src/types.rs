@@ -840,15 +840,15 @@ pub struct StagedResult {
     pub contours: Vec<Polyline>,
     /// Stage 6: RDP-simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Stage 7: mask result (`Some` only when `mask_mode` is not `Off`).
+    /// Stage 7: canvas result (`Some` only when `mask_mode` is not `Off`).
     ///
     /// Contains the simplified polylines after clipping to the mask
     /// boundary (with explicit per-endpoint clip metadata) and an
     /// optional border polyline matching the mask shape.
-    pub masked: Option<MaskResult>,
+    pub canvas: Option<MaskResult>,
     /// Stage 8: joined single continuous path.
     ///
-    /// When masking is enabled, this is the join of the masked polylines.
+    /// When masking is enabled, this is the join of the canvas polylines.
     /// When disabled, this is the join of the simplified polylines.
     pub joined: Polyline,
     /// Stage 9: output path (the final output).
@@ -889,7 +889,7 @@ struct StagedResultProxy {
     edges: (u32, u32, Vec<u8>),
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<MaskResult>,
+    canvas: Option<MaskResult>,
     joined: Polyline,
     #[serde(default)]
     output: Option<Polyline>,
@@ -923,7 +923,7 @@ impl Serialize for StagedResult {
             ),
             contours: self.contours.clone(),
             simplified: self.simplified.clone(),
-            masked: self.masked.clone(),
+            canvas: self.canvas.clone(),
             joined: self.joined.clone(),
             output: Some(self.output.clone()),
             mst_edge_details: self.mst_edge_details.clone(),
@@ -962,7 +962,7 @@ impl<'de> Deserialize<'de> for StagedResult {
             edges,
             contours: proxy.contours,
             simplified: proxy.simplified,
-            masked: proxy.masked,
+            canvas: proxy.canvas,
             joined: proxy.joined,
             output,
             mst_edge_details: proxy.mst_edge_details,
@@ -1618,7 +1618,7 @@ mod tests {
                 Point::new(0.0, 0.0),
                 Point::new(1.0, 1.0),
             ])],
-            masked: None,
+            canvas: None,
             joined: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
             output: Polyline::new(vec![Point::new(0.0, 0.0), Point::new(1.0, 1.0)]),
             mst_edge_details: vec![],
@@ -1647,7 +1647,7 @@ mod tests {
         // Verify vector data survived.
         assert_eq!(staged.contours, deserialized.contours);
         assert_eq!(staged.simplified, deserialized.simplified);
-        assert_eq!(staged.masked, deserialized.masked);
+        assert_eq!(staged.canvas, deserialized.canvas);
         assert_eq!(staged.joined, deserialized.joined);
         assert_eq!(staged.output, deserialized.output);
         assert_eq!(staged.mst_edge_details, deserialized.mst_edge_details);
@@ -1689,7 +1689,7 @@ mod tests {
             edges: GrayImage::from_pixel(1, 1, image::Luma([0])),
             contours: vec![],
             simplified: vec![],
-            masked: None,
+            canvas: None,
             joined: Polyline::new(vec![]),
             output: Polyline::new(vec![]),
             mst_edge_details: vec![],

@@ -30,7 +30,7 @@ use crate::raster;
 struct VectorResult {
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<MaskResult>,
+    canvas: Option<MaskResult>,
     joined: Polyline,
     output: Polyline,
     #[serde(default)]
@@ -58,8 +58,8 @@ pub struct WorkerResult {
     pub contours: Vec<Polyline>,
     /// Simplified polylines.
     pub simplified: Vec<Polyline>,
-    /// Mask result (if circular mask was applied, before joining).
-    pub masked: Option<MaskResult>,
+    /// Canvas result (if masking was applied, before joining).
+    pub canvas: Option<MaskResult>,
     /// Joined single polyline (before subsampling).
     pub joined: Polyline,
     /// Output polyline — the final output.
@@ -97,7 +97,7 @@ impl WorkerResult {
     pub fn polylines_for_stage(&self, stage: StageId) -> Cow<'_, [Polyline]> {
         match stage {
             StageId::Contours => Cow::Borrowed(&self.contours),
-            StageId::Masked => self.masked.as_ref().map_or_else(
+            StageId::Canvas => self.canvas.as_ref().map_or_else(
                 || Cow::Borrowed(self.simplified.as_slice()),
                 |mr| Cow::Owned(mr.all_polylines().cloned().collect()),
             ),
@@ -398,7 +398,7 @@ fn decode_response(data: &JsValue) -> Result<WorkerResult, PipelineError> {
         edges_dark_url,
         contours: vector.contours,
         simplified: vector.simplified,
-        masked: vector.masked,
+        canvas: vector.canvas,
         joined: vector.joined,
         output: vector.output,
         mst_edge_details: vector.mst_edge_details,

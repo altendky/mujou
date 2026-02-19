@@ -111,7 +111,7 @@ fn app() -> Element {
     let mut error = use_signal(|| Option::<String>::None);
     let mut generation = use_signal(|| 0u64);
     let mut debounce_generation = use_signal(|| 0u64);
-    let mut selected_stage = use_signal(|| StageId::Masked);
+    let mut selected_stage = use_signal(|| StageId::Canvas);
 
     // Elapsed time tracking for the processing indicator.
     let mut elapsed_ms = use_signal(|| 0.0_f64);

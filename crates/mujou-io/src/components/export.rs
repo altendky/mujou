@@ -102,7 +102,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         config_json: config_json.as_deref(),
                     };
                     let polyline = res.final_polyline();
-                    let mask_shape = res.masked.as_ref().map(|mr| &mr.shape);
+                    let mask_shape = res.canvas.as_ref().map(|mr| &mr.shape);
                     let svg = mujou_export::to_svg(
                         std::slice::from_ref(polyline),
                         res.dimensions,
@@ -127,7 +127,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         config_json: config_json.as_deref(),
                     };
                     let polyline = res.final_polyline();
-                    let mask_shape = res.masked.as_ref().map(|mr| &mr.shape);
+                    let mask_shape = res.canvas.as_ref().map(|mr| &mr.shape);
                     let thr = mujou_export::to_thr(
                         std::slice::from_ref(polyline),
                         res.dimensions,

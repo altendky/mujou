@@ -46,7 +46,7 @@ thread_local! {
 pub struct VectorResult {
     pub contours: Vec<Polyline>,
     pub simplified: Vec<Polyline>,
-    pub masked: Option<MaskResult>,
+    pub canvas: Option<MaskResult>,
     pub joined: Polyline,
     pub output: Polyline,
     pub mst_edge_details: Vec<MstEdgeInfo>,
@@ -240,7 +240,7 @@ fn post_success_response(
     let vector = VectorResult {
         contours: staged.contours.clone(),
         simplified: staged.simplified.clone(),
-        masked: staged.masked.clone(),
+        canvas: staged.canvas.clone(),
         joined: staged.joined.clone(),
         output: staged.output.clone(),
         mst_edge_details: staged.mst_edge_details.clone(),

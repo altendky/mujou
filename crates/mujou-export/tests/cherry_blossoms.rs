@@ -360,7 +360,7 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     // This identifies contour segments that survived simplification + clipping.
     {
         let join_input: Vec<&mujou_pipeline::Polyline> = result
-            .masked
+            .canvas
             .as_ref()
             .expect("mask should be enabled")
             .all_polylines()
@@ -537,7 +537,7 @@ fn cherry_blossoms_pipeline_to_thr() {
     let result =
         mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
 
-    let mask_shape = result.masked.as_ref().map(|mr| &mr.shape);
+    let mask_shape = result.canvas.as_ref().map(|mr| &mr.shape);
     let thr = mujou_export::to_thr(
         std::slice::from_ref(result.final_polyline()),
         result.dimensions,
@@ -615,7 +615,7 @@ fn cherry_blossoms_pipeline_to_thr_with_mask() {
     let result =
         mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
 
-    let mask_shape = result.masked.as_ref().map(|mr| &mr.shape);
+    let mask_shape = result.canvas.as_ref().map(|mr| &mr.shape);
     let thr = mujou_export::to_thr(
         std::slice::from_ref(result.final_polyline()),
         result.dimensions,

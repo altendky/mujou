@@ -145,7 +145,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             render_img_thumb(url, "Edges thumbnail")
         }
 
-        StageId::Contours | StageId::Simplified | StageId::Masked => {
+        StageId::Contours | StageId::Simplified | StageId::Canvas => {
             let polylines = result.polylines_for_stage(stage);
             let w = result.dimensions.width;
             let h = result.dimensions.height;

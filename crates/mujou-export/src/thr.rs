@@ -634,7 +634,7 @@ mod tests {
         .unwrap();
 
         let result = process_staged(&buf, &PipelineConfig::default()).unwrap();
-        let mask_shape = result.masked.as_ref().map(|mr| &mr.shape);
+        let mask_shape = result.canvas.as_ref().map(|mr| &mr.shape);
         let thr = to_thr(
             std::slice::from_ref(result.final_polyline()),
             result.dimensions,

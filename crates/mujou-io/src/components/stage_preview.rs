@@ -137,7 +137,7 @@ fn render_vector_preview(
     show_diagnostics: bool,
 ) -> Element {
     match selected {
-        StageId::Contours | StageId::Simplified | StageId::Masked => {
+        StageId::Contours | StageId::Simplified | StageId::Canvas => {
             let polylines = result.polylines_for_stage(selected);
             let view_box = compute_view_box(&polylines, w, h);
             let path_data = build_multi_path_data(&polylines);

@@ -26,8 +26,8 @@ pub enum StageId {
     Contours,
     /// Stage 7: RDP simplification.
     Simplified,
-    /// Stage 8: circular mask.
-    Masked,
+    /// Stage 8: canvas (mask + border).
+    Canvas,
     /// Stage 9: join (path joining).
     Join,
     /// Stage 10: output (long segments subdivided for polar export).
@@ -43,7 +43,7 @@ impl StageId {
         Self::Edges,
         Self::Contours,
         Self::Simplified,
-        Self::Masked,
+        Self::Canvas,
         Self::Join,
         Self::Output,
     ];
@@ -59,7 +59,7 @@ impl StageId {
             Self::Contours => "Contours",
             Self::Simplified => "Simplified",
             Self::Join => "Join",
-            Self::Masked => "Masked",
+            Self::Canvas => "Canvas",
             Self::Output => "Output",
         }
     }
@@ -82,7 +82,7 @@ impl StageId {
             4 => Some(Self::Edges),        // EdgesDetected
             5 => Some(Self::Contours),     // ContoursTraced
             6 => Some(Self::Simplified),   // Simplified
-            7 => Some(Self::Masked),       // Masked
+            7 => Some(Self::Canvas),       // Canvas
             8 => Some(Self::Join),         // Joined
             9 => Some(Self::Output),       // Output
             _ => None,
@@ -99,7 +99,7 @@ impl StageId {
             Self::Edges => "Edge",
             Self::Contours => "Cont",
             Self::Simplified => "Simp",
-            Self::Masked => "Mask",
+            Self::Canvas => "Canv",
             Self::Join => "Join",
             Self::Output => "Out",
         }

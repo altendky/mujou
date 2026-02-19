@@ -303,7 +303,7 @@ fn main() -> ExitCode {
                         description: Some(&desc),
                         config_json: config_json.as_deref(),
                     };
-                    let mask_shape = staged.masked.as_ref().map(|mr| &mr.shape);
+                    let mask_shape = staged.canvas.as_ref().map(|mr| &mr.shape);
                     let svg = mujou_export::to_svg(
                         &[staged.final_polyline().clone()],
                         staged.dimensions,
@@ -404,7 +404,7 @@ fn print_multi_run_summary(all_diagnostics: &[PipelineDiagnostics]) {
         ("Invert", |d| d.invert.as_ref().map(|s| s.duration)),
         ("Contour Tracing", |d| Some(d.contour_tracing.duration)),
         ("Simplification", |d| Some(d.simplification.duration)),
-        ("Mask", |d| d.mask.as_ref().map(|s| s.duration)),
+        ("Canvas", |d| d.canvas.as_ref().map(|s| s.duration)),
         ("Join", |d| Some(d.join.duration)),
     ];
 

@@ -312,7 +312,7 @@ mod tests {
         assert!(!staged.joined.is_empty(), "expected joined path");
 
         // Mask enabled by default.
-        assert!(staged.masked.is_some());
+        assert!(staged.canvas.is_some());
 
         // Dimensions match source.
         assert_eq!(
@@ -335,14 +335,14 @@ mod tests {
         let staged = process_staged(&png, &config).unwrap();
 
         assert!(
-            staged.masked.is_some(),
-            "expected Some masked polylines when mask_mode=Circle"
+            staged.canvas.is_some(),
+            "expected Some canvas polylines when mask_mode=Circle"
         );
         // With mask_scale=1.0 (circumscribing diagonal), the vertical
         // edge at x=20 on a 40x40 image should survive clipping.
         assert!(
-            !staged.masked.as_ref().unwrap().clipped.is_empty(),
-            "expected non-empty masked polylines with full-extent mask"
+            !staged.canvas.as_ref().unwrap().clipped.is_empty(),
+            "expected non-empty canvas polylines with full-extent mask"
         );
     }
 

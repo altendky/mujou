@@ -66,8 +66,8 @@ pub struct PipelineDiagnostics {
     pub contour_tracing: StageDiagnostics,
     /// Stage 6: RDP path simplification.
     pub simplification: StageDiagnostics,
-    /// Stage 7: mask (only when `config.mask_mode` is not `Off`).
-    pub mask: Option<StageDiagnostics>,
+    /// Stage 7: canvas (only when `config.mask_mode` is not `Off`).
+    pub canvas: Option<StageDiagnostics>,
     /// Stage 8: path ordering + joining.
     pub join: StageDiagnostics,
     /// Stage 9: segment subsampling.
@@ -172,8 +172,8 @@ pub enum StageMetrics {
         /// Reduction ratio: `1.0 - (after / before)`.
         reduction_ratio: f64,
     },
-    /// Mask metrics (circle or rectangle).
-    Mask {
+    /// Canvas metrics (circle or rectangle).
+    Canvas {
         /// Human-readable description of the mask geometry.
         ///
         /// For circles: `"d=0.75 r=123.4px"`.
@@ -269,8 +269,8 @@ impl PipelineDiagnostics {
             }
             s.push(("Contour Tracing", &self.contour_tracing));
             s.push(("Simplification", &self.simplification));
-            if let Some(ref m) = self.mask {
-                s.push(("Mask", m));
+            if let Some(ref c) = self.canvas {
+                s.push(("Canvas", c));
             }
             s.push(("Join", &self.join));
             s.push(("Output", &self.output));
@@ -376,7 +376,7 @@ fn format_metrics(metrics: &StageMetrics) -> String {
                 reduction_ratio * 100.0,
             )
         }
-        StageMetrics::Mask {
+        StageMetrics::Canvas {
             shape_info,
             polylines_before,
             polylines_after,
@@ -523,7 +523,7 @@ pub fn process_staged_with_diagnostics<C: Clock>(
     clock: &C,
 ) -> Result<(crate::StagedResult, PipelineDiagnostics), crate::PipelineError> {
     use crate::pipeline::{
-        Advance, Blurred, ContoursTraced, Decoded, Downsampled, EdgesDetected, Joined, Masked,
+        Advance, Blurred, Canvas, ContoursTraced, Decoded, Downsampled, EdgesDetected, Joined,
         Output, PipelineStage as _, STAGE_COUNT, Simplified, Stage,
     };
 
@@ -590,7 +590,7 @@ pub fn process_staged_with_diagnostics<C: Clock>(
                     simplification: stage_diags[Simplified::INDEX]
                         .take()
                         .ok_or_else(|| diag_missing(Simplified::NAME))?,
-                    mask: stage_diags[Masked::INDEX].take(),
+                    canvas: stage_diags[Canvas::INDEX].take(),
                     join: stage_diags[Joined::INDEX]
                         .take()
                         .ok_or_else(|| diag_missing(Joined::NAME))?,
@@ -747,8 +747,8 @@ mod tests {
         assert!(diag.invert.is_none());
         assert_eq!(diag.contour_tracing.duration, ten_ms);
         assert_eq!(diag.simplification.duration, ten_ms);
-        // mask disabled -> None
-        assert!(diag.mask.is_none());
+        // canvas disabled -> None
+        assert!(diag.canvas.is_none());
         assert_eq!(diag.join.duration, ten_ms);
         assert_eq!(diag.output.duration, ten_ms);
         assert_eq!(diag.total_duration, Duration::from_millis(110));
@@ -800,9 +800,12 @@ mod tests {
         assert_eq!(diag.contour_tracing.duration, ten_ms);
         assert_eq!(diag.simplification.duration, ten_ms);
 
-        // Mask enabled -> Some with timing.
-        let mask = diag.mask.as_ref().expect("mask diagnostics should be Some");
-        assert_eq!(mask.duration, ten_ms);
+        // Canvas enabled -> Some with timing.
+        let canvas = diag
+            .canvas
+            .as_ref()
+            .expect("canvas diagnostics should be Some");
+        assert_eq!(canvas.duration, ten_ms);
 
         assert_eq!(diag.join.duration, ten_ms);
         assert_eq!(diag.output.duration, ten_ms);
@@ -873,7 +876,7 @@ mod tests {
                     reduction_ratio: 0.5,
                 },
             },
-            mask: None,
+            canvas: None,
             join: StageDiagnostics {
                 duration: Duration::from_millis(25),
                 metrics: StageMetrics::Join {
@@ -969,7 +972,7 @@ mod tests {
                     reduction_ratio: 0.467,
                 },
             },
-            mask: None,
+            canvas: None,
             join: StageDiagnostics {
                 duration: Duration::from_millis(15),
                 metrics: StageMetrics::Join {
