@@ -374,7 +374,7 @@ mod tests {
     }
 
     #[test]
-    fn process_staged_final_polyline_returns_output_without_mask() {
+    fn process_staged_final_polyline_returns_output_with_default_config() {
         let png = sharp_edge_png(40, 40);
         let staged = process_staged(&png, &PipelineConfig::default()).unwrap();
 
