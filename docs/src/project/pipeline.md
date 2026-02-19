@@ -142,7 +142,7 @@ The border shape is tied to the canvas shape via the `MaskShape` enum — each s
 - `aspect_ratio` (f64, 1.0-4.0, default: 1.0) — rectangle aspect ratio (only for Rectangle)
 - `landscape` (bool, default: true) — rectangle orientation (only for Rectangle)
 - `border_path` (`BorderPathMode`, default: `Auto`)
-- `border_margin` (f64, 0.0-0.15, default: 0.0) — fraction of canvas size reserved as margin on each side; shrinks the canvas mask by `1 − 2 × border_margin`
+- `border_margin` (f64, 0.0-0.15, default: 0.0) — fraction of canvas size reserved as margin on each side; shrinks the canvas by `1 − 2 × border_margin`
 
 ### 8. Path Ordering + Joining
 
@@ -230,7 +230,7 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `aspect_ratio` | f64 | 1.0 | Rectangle aspect ratio (1.0-4.0, Rectangle only) |
 | `landscape` | bool | true | Rectangle orientation (Rectangle only) |
 | `border_path` | `BorderPathMode` | `Auto` | Add border polyline along canvas edge (`Auto`/`On`/`Off`) |
-| `border_margin` | f64 | 0.0 | Canvas margin fraction (0.0-0.15), shrinks mask by `1 − 2 × value` |
+| `border_margin` | f64 | 0.0 | Canvas margin fraction (0.0-0.15), shrinks canvas by `1 − 2 × value` |
 | `invert` | bool | false | Invert edge map |
 
 ## Performance Considerations

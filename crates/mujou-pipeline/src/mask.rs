@@ -143,23 +143,24 @@ impl MaskResult {
     }
 }
 
-/// Controls whether a border polyline matching the mask shape is added
+/// Controls whether a border polyline matching the canvas shape is added
 /// to the output.
 ///
-/// The border polyline lets the joiner route connections along the mask
+/// The border polyline lets the joiner route connections along the canvas
 /// boundary rather than across open space, reducing visible artifacts
 /// near the edge.
 ///
-/// Only takes effect when a mask is enabled.
+/// Canvas clipping always runs; this mode controls whether a border
+/// polyline is additionally generated alongside the clipped output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum BorderPathMode {
     /// Never add a border path.
     Off,
-    /// Add a border path only when the mask clips at least one polyline
+    /// Add a border path only when the canvas clips at least one polyline
     /// endpoint.
     #[default]
     Auto,
-    /// Always add a border path when a mask is enabled.
+    /// Always add a border path.
     On,
 }
 
