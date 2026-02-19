@@ -265,7 +265,7 @@ mod tests {
             ..ThrMetadata::default()
         };
         let thr = to_thr(&[], dims(100, 100), &meta, None);
-        assert!(thr.contains(r#"# Config: {"blur_sigma":1.4}"#));
+        assert!(thr.contains("# Config: {\"blur_sigma\":1.4}\n"));
     }
 
     #[test]
