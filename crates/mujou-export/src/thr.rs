@@ -155,16 +155,15 @@ pub fn to_thr(
                 // the same image-space Y direction.
                 let raw_theta = dx.atan2(dy);
 
-                #[allow(clippy::while_float)]
                 prev_theta.map_or(raw_theta, |prev| {
                     // Continuous unwinding: choose the equivalent angle
                     // closest to the previous theta.
-                    let mut delta = raw_theta - prev;
-                    while delta > PI {
-                        delta -= 2.0 * PI;
-                    }
-                    while delta < -PI {
-                        delta += 2.0 * PI;
+                    let two_pi = 2.0 * PI;
+                    let mut delta = (raw_theta - prev) % two_pi;
+                    if delta > PI {
+                        delta -= two_pi;
+                    } else if delta < -PI {
+                        delta += two_pi;
                     }
                     prev + delta
                 })
