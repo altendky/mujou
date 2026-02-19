@@ -399,7 +399,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "scale",
                         "Scale",
-                        desc("Canvas size as a percentage of the image's shorter dimension."),
+                        desc("Scale divisor — larger values produce a smaller canvas. radius = min(w,h) / (2 × scale)."),
                         scale,
                         0.1,
                         4.0,
