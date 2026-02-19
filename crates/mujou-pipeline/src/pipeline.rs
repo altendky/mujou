@@ -986,7 +986,7 @@ impl PipelineStage for Canvas {
         let shape_info = match self.config.shape {
             CanvasShape::Circle => {
                 let radius_px = self.dimensions.canvas_radius(self.config.scale);
-                format!("d={:.2} r={radius_px:.1}px", self.config.scale)
+                format!("scale={:.2} r={radius_px:.1}px", self.config.scale)
             }
             CanvasShape::Rectangle => {
                 let (hw, hh) = self.dimensions.canvas_rect_half_dims(
