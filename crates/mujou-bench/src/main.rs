@@ -61,7 +61,7 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = CLI_DEFAULT_SHAPE)]
     shape: CliCanvasShape,
 
-    /// Canvas scale as fraction of image dimension (0.01-1.5).
+    /// Canvas scale divisor (0.1-4.0); radius = min(w,h) / (2 × scale).
     #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_SCALE)]
     scale: f64,
 
