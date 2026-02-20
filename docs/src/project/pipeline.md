@@ -275,9 +275,9 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `downsample_filter` | `DownsampleFilter` | `Triangle` | — | Resampling filter |
 | `blur_sigma` | f32 | 1.4 | pixels | Gaussian blur kernel sigma |
 | `edge_channels` | `EdgeChannels` | luminance only | — | Which channels to use for edge detection (composable) |
-| `canny_low` | f32 | 15.0 | pixels | Canny low threshold |
-| `canny_high` | f32 | 40.0 | pixels | Canny high threshold |
-| `canny_max` | f32 | 60.0 | pixels | Upper bound for Canny threshold sliders (UI only) |
+| `canny_low` | f32 | 15.0 | gradient magnitude | Canny low threshold |
+| `canny_high` | f32 | 40.0 | gradient magnitude | Canny high threshold |
+| `canny_max` | f32 | 60.0 | gradient magnitude | Upper bound for Canny threshold sliders (UI only) |
 | `contour_tracer` | `ContourTracer` | `BorderFollowing` | — | Contour tracing algorithm ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `zoom` | f64 | 1.25 | — | Image zoom factor (1.0 = shorter dim fills canvas) |
 | `simplify_tolerance` | f64 | TBD | normalized | RDP simplification tolerance |
