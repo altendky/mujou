@@ -144,28 +144,28 @@ Otherwise, intermediate points are dropped.
 
 **User parameter:** `simplify_tolerance` (f64, default: TBD, normalized units)
 
-### 8. Mask
+### 8. Canvas
 
-Clip all polylines to the mask shape in normalized space.
-Points outside the mask are removed.
-Polylines that cross the mask boundary are split at the intersection.
-Contours entirely outside the mask are discarded before joining, so the join step only connects surviving contours.
+Clip all polylines to the canvas shape in normalized space.
+Points outside the canvas are removed.
+Polylines that cross the canvas boundary are split at the intersection.
+Contours entirely outside the canvas are discarded before joining, so the join step only connects surviving contours.
 
-A mask is always required — it defines the output frame and the
+A canvas is always required — it defines the output frame and the
 [normalized coordinate system](principles.md#coordinate-system).
 
-Two mask shapes are supported:
+Two canvas shapes are supported:
 
 - **Circle** — for round sand tables (Sisyphus, Oasis Mini). The unit circle
   (radius 1) centered at origin.
 - **Rectangle** — axis-aligned rectangle centered at origin. Half-short-side = 1,
-  half-long-side = `mask_aspect_ratio`. `mask_landscape` controls orientation.
+  half-long-side = `aspect_ratio`. `landscape` controls orientation.
 
-The mask stage returns a `MaskResult` containing `Vec<ClippedPolyline>` with explicit per-endpoint clip metadata (`start_clipped`, `end_clipped`) identifying every point that was created by intersection with the mask boundary.
+The canvas stage returns a `MaskResult` containing `Vec<ClippedPolyline>` with explicit per-endpoint clip metadata (`start_clipped`, `end_clipped`) identifying every point that was created by intersection with the canvas boundary.
 
 #### Border path
 
-When clipping creates boundary endpoints, the joiner may connect them across open space near the edge, producing visually jarring artifacts. The `border_path` option adds a border polyline matching the mask shape (a circle sampled at uniform arc-length spacing, or a closed 4-corner rectangle). This gives the joiner a path along the mask boundary so connections between boundary endpoints route along the edge rather than cutting across empty space.
+When clipping creates boundary endpoints, the joiner may connect them across open space near the edge, producing visually jarring artifacts. The `border_path` option adds a border polyline matching the canvas shape (a circle sampled at uniform arc-length spacing, or a closed 4-corner rectangle). This gives the joiner a path along the canvas boundary so connections between boundary endpoints route along the edge rather than crossing open space.
 
 Three modes:
 
@@ -175,14 +175,15 @@ Three modes:
 | `On` | Always add the border polyline |
 | `Off` | Never add a border polyline |
 
-The border shape is tied to the mask shape via the `MaskShape` enum — each shape variant implements both clipping and border generation, enforced by exhaustive `match` arms.
+The border shape is tied to the canvas shape via the `CanvasShape` enum — each shape variant implements both clipping and border generation, enforced by exhaustive `match` arms.
 
 **User parameters:**
 
-- `mask_shape` (`MaskShape`, default: `Circle`) — `Circle` or `Rectangle`
-- `mask_aspect_ratio` (f64, 1.0–4.0, default: 1.0) — rectangle aspect ratio (Rectangle only)
-- `mask_landscape` (bool, default: true) — rectangle orientation (Rectangle only)
+- `shape` (`CanvasShape`, default: `Circle`) — `Circle` or `Rectangle`
+- `aspect_ratio` (f64, 1.0–4.0, default: 1.0) — rectangle aspect ratio (Rectangle only)
+- `landscape` (bool, default: true) — rectangle orientation (Rectangle only)
 - `border_path` (`BorderPathMode`, default: `Auto`)
+- `border_margin` (f64, 0.0-0.15, default: 0.0) — fraction of canvas size reserved as margin on each side; shrinks the canvas by `1 − 2 × border_margin`
 
 ### 9. Path Ordering + Joining
 
@@ -265,12 +266,13 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `canny_high` | f32 | 40.0 | pixels | Canny high threshold |
 | `canny_max` | f32 | 60.0 | pixels | Upper bound for Canny threshold sliders (UI only) |
 | `contour_tracer` | `ContourTracer` | `BorderFollowing` | — | Contour tracing algorithm ([strategy](principles.md#pluggable-algorithm-strategies)) |
-| `zoom` | f64 | 1.25 | — | Image zoom factor (1.0 = shorter dim fills mask) |
+| `zoom` | f64 | 1.25 | — | Image zoom factor (1.0 = shorter dim fills canvas) |
 | `simplify_tolerance` | f64 | TBD | normalized | RDP simplification tolerance |
-| `mask_shape` | `MaskShape` | `Circle` | — | Mask shape: `Circle` or `Rectangle` |
-| `mask_aspect_ratio` | f64 | 1.0 | — | Rectangle aspect ratio (1.0–4.0, Rectangle only) |
-| `mask_landscape` | bool | true | — | Rectangle orientation (Rectangle only) |
-| `border_path` | `BorderPathMode` | `Auto` | — | Add border polyline along mask edge (`Auto`/`On`/`Off`) |
+| `shape` | `CanvasShape` | `Circle` | — | Canvas shape: `Circle` or `Rectangle` |
+| `aspect_ratio` | f64 | 1.0 | — | Rectangle aspect ratio (1.0–4.0, Rectangle only) |
+| `landscape` | bool | true | — | Rectangle orientation (Rectangle only) |
+| `border_path` | `BorderPathMode` | `Auto` | — | Add border polyline along canvas edge (`Auto`/`On`/`Off`) |
+| `border_margin` | f64 | 0.0 | — | Canvas margin fraction (0.0–0.15), shrinks canvas by `1 − 2 × value` |
 | `path_joiner` | `PathJoiner` | `Mst` | — | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `invert` | bool | false | — | Invert edge map |
 

@@ -15,9 +15,9 @@
 //!     .detect_edges()
 //!     .trace_contours()?
 //!     .simplify()
-//!     .mask()
+//!     .canvas()
 //!     .join()
-//!     .subsample();
+//!     .output();
 //!
 //! let staged = pipeline.into_result();
 //! # Ok(())
@@ -49,7 +49,7 @@ use image::DynamicImage;
 use crate::contour::ContourTracer;
 use crate::diagnostics::StageMetrics;
 use crate::join::PathJoiner;
-use crate::mask::{BorderPathMode, MaskMode, MaskResult, MaskShape};
+use crate::mask::{BorderPathMode, CanvasShape, MaskResult, MaskShape};
 use crate::mst_join::JoinQualityMetrics;
 use crate::types::{
     Dimensions, GrayImage, PipelineConfig, PipelineError, Point, Polyline, RgbaImage, StagedResult,
@@ -344,7 +344,7 @@ impl ContoursTraced {
 ///
 /// See the [module-level memory notes](self#memory) for the cost of
 /// retaining all prior raster intermediates.
-#[must_use = "pipeline stages are consumed by advancing — call .mask() to continue"]
+#[must_use = "pipeline stages are consumed by advancing — call .canvas() to continue"]
 pub struct Simplified {
     config: PipelineConfig,
     original: RgbaImage,
@@ -392,48 +392,42 @@ impl Simplified {
         }
     }
 
-    /// Advance to the masking stage.
+    /// Advance to the canvas stage.
     ///
-    /// When `config.mask_mode` is `Circle` or `Rectangle`, polylines are
-    /// clipped to the corresponding boundary and an optional border
-    /// polyline is generated based on [`BorderPathMode`]. When `Off`,
-    /// this is a no-op pass-through.
-    pub fn mask(self) -> Masked {
+    /// Polylines are clipped to the canvas boundary (circle or
+    /// rectangle) and an optional border polyline is generated based
+    /// on [`BorderPathMode`].
+    pub fn canvas(self) -> Canvas {
         let center = Point::new(
             f64::from(self.dimensions.width) / 2.0,
             f64::from(self.dimensions.height) / 2.0,
         );
 
-        let mask_result = match self.config.mask_mode {
-            MaskMode::Off => None,
-            MaskMode::Circle => {
-                let radius = self.dimensions.mask_radius(self.config.mask_scale);
+        let margin_factor = 2.0f64.mul_add(-self.config.border_margin, 1.0);
+
+        let canvas_result = match self.config.shape {
+            CanvasShape::Circle => {
+                let radius = self.dimensions.canvas_radius(self.config.scale) * margin_factor;
                 let shape = MaskShape::Circle { center, radius };
-                Some(Self::clip_and_border(
-                    &self.reduced,
-                    shape,
-                    self.config.border_path,
-                ))
+                Self::clip_and_border(&self.reduced, shape, self.config.border_path)
             }
-            MaskMode::Rectangle => {
-                let (half_width, half_height) = self.dimensions.mask_rect_half_dims(
-                    self.config.mask_scale,
-                    self.config.mask_aspect_ratio,
-                    self.config.mask_landscape,
+            CanvasShape::Rectangle => {
+                let (half_width, half_height) = self.dimensions.canvas_rect_half_dims(
+                    self.config.scale,
+                    self.config.aspect_ratio,
+                    self.config.landscape,
                 );
+                let half_width = half_width * margin_factor;
+                let half_height = half_height * margin_factor;
                 let shape = MaskShape::Rectangle {
                     center,
                     half_width,
                     half_height,
                 };
-                Some(Self::clip_and_border(
-                    &self.reduced,
-                    shape,
-                    self.config.border_path,
-                ))
+                Self::clip_and_border(&self.reduced, shape, self.config.border_path)
             }
         };
-        Masked {
+        Canvas {
             config: self.config,
             original: self.original,
             downsampled: self.downsampled,
@@ -441,13 +435,13 @@ impl Simplified {
             edges: self.edges,
             contours: self.contours,
             simplified: self.reduced,
-            mask_result,
+            canvas_result,
             dimensions: self.dimensions,
         }
     }
 }
 
-// ───────────────────────── Stage 7: Masked ───────────────────────────
+// ───────────────────────── Stage 7: Canvas ───────────────────────────
 
 /// Pipeline state after optional masking (circle or rectangle).
 ///
@@ -456,7 +450,8 @@ impl Simplified {
 /// See the [module-level memory notes](self#memory) for the cost of
 /// retaining all prior raster intermediates.
 #[must_use = "pipeline stages are consumed by advancing — call .join() to continue"]
-pub struct Masked {
+#[allow(clippy::struct_field_names)]
+pub struct Canvas {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
@@ -464,28 +459,20 @@ pub struct Masked {
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    mask_result: Option<MaskResult>,
+    canvas_result: MaskResult,
     dimensions: Dimensions,
 }
 
-impl Masked {
-    /// The mask result, or `None` if masking was disabled.
+impl Canvas {
+    /// The canvas result.
     #[must_use]
-    pub const fn masked(&self) -> Option<&MaskResult> {
-        self.mask_result.as_ref()
+    pub const fn canvas(&self) -> &MaskResult {
+        &self.canvas_result
     }
 
     /// Advance to the joining stage — the final pipeline step.
     pub fn join(self) -> Joined {
-        let join_input: Vec<Polyline> = if let Some(ref mr) = self.mask_result {
-            mr.all_polylines().cloned().collect()
-        } else {
-            // No mask — use simplified polylines directly. We need an
-            // owned Vec because the joiner borrows a slice, and we move
-            // `self.simplified` into `Joined` below. Clone to keep
-            // both the join input and the stored simplified set.
-            self.simplified.clone()
-        };
+        let join_input: Vec<Polyline> = self.canvas_result.all_polylines().cloned().collect();
         let output = self
             .config
             .path_joiner
@@ -498,7 +485,7 @@ impl Masked {
             edges: self.edges,
             contours: self.contours,
             simplified: self.simplified,
-            masked: self.mask_result,
+            canvas: self.canvas_result,
             path: output.path,
             quality_metrics: output.quality_metrics,
             dimensions: self.dimensions,
@@ -510,11 +497,11 @@ impl Masked {
 
 /// Pipeline state after path joining.
 ///
-/// Call [`subsample`](Self::subsample) to advance to the final stage.
+/// Call [`output`](Self::output) to advance to the final stage.
 ///
 /// See the [module-level memory notes](self#memory) for the cost of
 /// retaining all prior raster intermediates.
-#[must_use = "pipeline stages are consumed by advancing — call .subsample() to continue"]
+#[must_use = "pipeline stages are consumed by advancing — call .output() to continue"]
 pub struct Joined {
     config: PipelineConfig,
     original: RgbaImage,
@@ -523,7 +510,7 @@ pub struct Joined {
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<MaskResult>,
+    canvas: MaskResult,
     path: Polyline,
     quality_metrics: Option<JoinQualityMetrics>,
     dimensions: Dimensions,
@@ -542,10 +529,10 @@ impl Joined {
         self.dimensions
     }
 
-    /// Advance to the subsampling stage — the final pipeline step.
-    pub fn subsample(self) -> Subsampled {
+    /// Advance to the output stage — the final pipeline step.
+    pub fn output(self) -> Output {
         let subsampled = crate::subsample::subsample(&self.path, self.config.subsample_max_length);
-        Subsampled {
+        Output {
             config: self.config,
             original: self.original,
             downsampled: self.downsampled,
@@ -553,7 +540,7 @@ impl Joined {
             edges: self.edges,
             contours: self.contours,
             simplified: self.simplified,
-            masked: self.masked,
+            canvas: self.canvas,
             joined: self.path,
             subsampled,
             quality_metrics: self.quality_metrics,
@@ -562,7 +549,7 @@ impl Joined {
     }
 }
 
-// ───────────────────────── Stage 9: Subsampled ──────────────────────
+// ───────────────────────── Stage 9: Output ──────────────────────────
 
 /// Pipeline state after segment subsampling — the final stage.
 ///
@@ -578,7 +565,7 @@ impl Joined {
 /// retaining all prior raster intermediates.
 #[must_use = "call .into_result() to extract the StagedResult"]
 #[allow(clippy::struct_field_names)]
-pub struct Subsampled {
+pub struct Output {
     config: PipelineConfig,
     original: RgbaImage,
     downsampled: RgbaImage,
@@ -586,17 +573,17 @@ pub struct Subsampled {
     edges: GrayImage,
     contours: Vec<Polyline>,
     simplified: Vec<Polyline>,
-    masked: Option<MaskResult>,
+    canvas: MaskResult,
     joined: Polyline,
     subsampled: Polyline,
     quality_metrics: Option<JoinQualityMetrics>,
     dimensions: Dimensions,
 }
 
-impl Subsampled {
+impl Output {
     /// The subsampled output path.
     #[must_use]
-    pub const fn subsampled(&self) -> &Polyline {
+    pub const fn output_polyline(&self) -> &Polyline {
         &self.subsampled
     }
 
@@ -619,9 +606,9 @@ impl Subsampled {
             edges: self.edges,
             contours: self.contours,
             simplified: self.simplified,
-            masked: self.masked,
+            canvas: self.canvas,
             joined: self.joined,
-            subsampled: self.subsampled,
+            output: self.subsampled,
             mst_edge_details,
             dimensions: self.dimensions,
         }
@@ -675,10 +662,10 @@ pub enum StageOutput<'a> {
         /// The simplified polylines.
         simplified: &'a [Polyline],
     },
-    /// Circular mask result.
-    Masked {
-        /// The mask result, or `None` if masking was disabled.
-        masked: Option<&'a MaskResult>,
+    /// Canvas mask result.
+    Canvas {
+        /// The canvas result.
+        canvas: &'a MaskResult,
     },
     /// Path joining result.
     Joined {
@@ -688,9 +675,9 @@ pub enum StageOutput<'a> {
         dimensions: Dimensions,
     },
     /// Segment subsampling result.
-    Subsampled {
+    Output {
         /// The subsampled output path.
-        subsampled: &'a Polyline,
+        output: &'a Polyline,
         /// Image dimensions.
         dimensions: Dimensions,
     },
@@ -977,43 +964,41 @@ impl PipelineStage for Simplified {
     }
 
     fn next(self) -> Result<Option<Stage>, PipelineError> {
-        Ok(Some(Stage::Masked(self.mask())))
+        Ok(Some(Stage::Canvas(self.canvas())))
     }
 
     fn complete(self) -> Result<StagedResult, PipelineError> {
-        self.mask().complete()
+        self.canvas().complete()
     }
 }
 
-impl PipelineStage for Masked {
-    const NAME: &str = "mask";
+impl PipelineStage for Canvas {
+    const NAME: &str = "canvas";
     const INDEX: usize = 7;
 
     fn output(&self) -> StageOutput<'_> {
-        StageOutput::Masked {
-            masked: self.mask_result.as_ref(),
+        StageOutput::Canvas {
+            canvas: &self.canvas_result,
         }
     }
 
     fn metrics(&self) -> Option<StageMetrics> {
-        let mr = self.mask_result.as_ref()?;
-        let shape_info = match self.config.mask_mode {
-            MaskMode::Off => "off".to_owned(),
-            MaskMode::Circle => {
-                let radius_px = self.dimensions.mask_radius(self.config.mask_scale);
-                format!("d={:.2} r={radius_px:.1}px", self.config.mask_scale)
+        let shape_info = match self.config.shape {
+            CanvasShape::Circle => {
+                let radius_px = self.dimensions.canvas_radius(self.config.scale);
+                format!("scale={:.2} r={radius_px:.1}px", self.config.scale)
             }
-            MaskMode::Rectangle => {
-                let (hw, hh) = self.dimensions.mask_rect_half_dims(
-                    self.config.mask_scale,
-                    self.config.mask_aspect_ratio,
-                    self.config.mask_landscape,
+            CanvasShape::Rectangle => {
+                let (hw, hh) = self.dimensions.canvas_rect_half_dims(
+                    self.config.scale,
+                    self.config.aspect_ratio,
+                    self.config.landscape,
                 );
                 format!(
                     "scale={:.2} ar={:.2} {} {:.1}\u{00d7}{:.1}px",
-                    self.config.mask_scale,
-                    self.config.mask_aspect_ratio,
-                    if self.config.mask_landscape {
+                    self.config.scale,
+                    self.config.aspect_ratio,
+                    if self.config.landscape {
                         "land"
                     } else {
                         "port"
@@ -1027,12 +1012,17 @@ impl PipelineStage for Masked {
         // polyline, which is an addition rather than a clipping result).
         // The subsequent Joined stage uses `all_polylines()` which
         // includes the border, so its input count may differ.
-        Some(StageMetrics::Mask {
+        Some(StageMetrics::Canvas {
             shape_info,
             polylines_before: self.simplified.len(),
-            polylines_after: mr.clipped.len(),
+            polylines_after: self.canvas_result.clipped.len(),
             points_before: self.simplified.iter().map(Polyline::len).sum(),
-            points_after: mr.clipped.iter().map(|c| c.polyline.len()).sum(),
+            points_after: self
+                .canvas_result
+                .clipped
+                .iter()
+                .map(|c| c.polyline.len())
+                .sum(),
         })
     }
 
@@ -1041,7 +1031,7 @@ impl PipelineStage for Masked {
     }
 
     fn complete(self) -> Result<StagedResult, PipelineError> {
-        Ok(self.join().subsample().into_result())
+        Ok(self.join().output().into_result())
     }
 }
 
@@ -1058,18 +1048,9 @@ impl PipelineStage for Joined {
 
     #[allow(clippy::cast_precision_loss)]
     fn metrics(&self) -> Option<StageMetrics> {
-        let (input_polyline_count, input_point_count) = self.masked.as_ref().map_or_else(
-            || {
-                let count = self.simplified.len();
-                let points: usize = self.simplified.iter().map(Polyline::len).sum();
-                (count, points)
-            },
-            |mr| {
-                let count: usize = mr.all_polylines().count();
-                let points: usize = mr.all_polylines().map(Polyline::len).sum();
-                (count, points)
-            },
-        );
+        let count: usize = self.canvas.all_polylines().count();
+        let points: usize = self.canvas.all_polylines().map(Polyline::len).sum();
+        let (input_polyline_count, input_point_count) = (count, points);
         let output_point_count = self.path.len();
         let expansion_ratio = if input_point_count > 0 {
             output_point_count as f64 / input_point_count as f64
@@ -1087,21 +1068,21 @@ impl PipelineStage for Joined {
     }
 
     fn next(self) -> Result<Option<Stage>, PipelineError> {
-        Ok(Some(Stage::Subsampled(self.subsample())))
+        Ok(Some(Stage::Output(self.output())))
     }
 
     fn complete(self) -> Result<StagedResult, PipelineError> {
-        Ok(self.subsample().into_result())
+        Ok(self.output().into_result())
     }
 }
 
-impl PipelineStage for Subsampled {
-    const NAME: &str = "subsample";
+impl PipelineStage for Output {
+    const NAME: &str = "output";
     const INDEX: usize = 9;
 
     fn output(&self) -> StageOutput<'_> {
-        StageOutput::Subsampled {
-            subsampled: &self.subsampled,
+        StageOutput::Output {
+            output: &self.subsampled,
             dimensions: self.dimensions,
         }
     }
@@ -1110,7 +1091,7 @@ impl PipelineStage for Subsampled {
     fn metrics(&self) -> Option<StageMetrics> {
         let points_before = self.joined.len();
         let points_after = self.subsampled.len();
-        Some(StageMetrics::Subsample {
+        Some(StageMetrics::Output {
             max_length: self.config.subsample_max_length,
             points_before,
             points_after,
@@ -1162,12 +1143,12 @@ pub enum Stage {
     ContoursTraced(ContoursTraced),
     /// See [`Simplified`].
     Simplified(Simplified),
-    /// See [`Masked`].
-    Masked(Masked),
+    /// See [`Canvas`].
+    Canvas(Canvas),
     /// See [`Joined`].
     Joined(Joined),
-    /// See [`Subsampled`].
-    Subsampled(Subsampled),
+    /// See [`Output`].
+    Output(Output),
 }
 
 /// Compile-time guard: if a [`Stage`] variant is added, this match becomes
@@ -1182,9 +1163,9 @@ const fn _stage_count_guard(s: &Stage) {
         | Stage::EdgesDetected(_)
         | Stage::ContoursTraced(_)
         | Stage::Simplified(_)
-        | Stage::Masked(_)
+        | Stage::Canvas(_)
         | Stage::Joined(_)
-        | Stage::Subsampled(_) => {}
+        | Stage::Output(_) => {}
     }
 }
 
@@ -1209,9 +1190,9 @@ macro_rules! delegate {
             Self::EdgesDetected(s) => s.$method($($arg),*),
             Self::ContoursTraced(s) => s.$method($($arg),*),
             Self::Simplified(s) => s.$method($($arg),*),
-            Self::Masked(s) => s.$method($($arg),*),
+            Self::Canvas(s) => s.$method($($arg),*),
             Self::Joined(s) => s.$method($($arg),*),
-            Self::Subsampled(s) => s.$method($($arg),*),
+            Self::Output(s) => s.$method($($arg),*),
         }
     };
 }
@@ -1236,8 +1217,7 @@ impl Stage {
 
     /// Stage-specific metrics for diagnostics.
     ///
-    /// Returns `None` for the initial `Pending` stage and for optional
-    /// stages that were not executed (e.g. mask when disabled).
+    /// Returns `None` for the initial `Pending` stage.
     #[must_use]
     pub fn metrics(&self) -> Option<StageMetrics> {
         delegate!(self, metrics)
@@ -1253,7 +1233,7 @@ impl Stage {
     /// Whether the pipeline is at the final stage.
     #[must_use]
     pub const fn is_complete(&self) -> bool {
-        matches!(self, Self::Subsampled(_))
+        matches!(self, Self::Output(_))
     }
 
     /// Advance to the next stage.
@@ -1380,9 +1360,9 @@ impl From<Simplified> for Stage {
     }
 }
 
-impl From<Masked> for Stage {
-    fn from(s: Masked) -> Self {
-        Self::Masked(s)
+impl From<Canvas> for Stage {
+    fn from(s: Canvas) -> Self {
+        Self::Canvas(s)
     }
 }
 
@@ -1392,9 +1372,9 @@ impl From<Joined> for Stage {
     }
 }
 
-impl From<Subsampled> for Stage {
-    fn from(s: Subsampled) -> Self {
-        Self::Subsampled(s)
+impl From<Output> for Stage {
+    fn from(s: Output) -> Self {
+        Self::Output(s)
     }
 }
 
@@ -1416,9 +1396,9 @@ impl From<Subsampled> for Stage {
 ///     .detect_edges()
 ///     .trace_contours()?
 ///     .simplify()
-///     .mask()
+///     .canvas()
 ///     .join()
-///     .subsample()
+///     .output()
 ///     .into_result();
 /// # Ok(())
 /// # }
@@ -1586,14 +1566,14 @@ impl PipelineCache {
         let simplified = contours.simplify();
         on_stage(Simplified::INDEX, false);
 
-        let masked = simplified.mask();
-        on_stage(Masked::INDEX, false);
+        let canvas = simplified.canvas();
+        on_stage(Canvas::INDEX, false);
 
-        let joined = masked.join();
+        let joined = canvas.join();
         on_stage(Joined::INDEX, false);
 
-        let subsampled = joined.subsample();
-        on_stage(Subsampled::INDEX, false);
+        let subsampled = joined.output();
+        on_stage(Output::INDEX, false);
 
         let staged = Arc::new(subsampled.into_result());
         let cache = Self {
@@ -1722,9 +1702,9 @@ impl PipelineCache {
             edges,
             contours,
             simplified,
-            masked,
+            canvas,
             joined,
-            subsampled: _,
+            output: _,
             mst_edge_details,
             dimensions,
         } = staged;
@@ -1777,7 +1757,7 @@ impl PipelineCache {
                 dimensions,
             }),
 
-            // Stage 7 changed (mask) — resume from Simplified (index 6).
+            // Stage 7 changed (canvas) — resume from Simplified (index 6).
             7 => Stage::Simplified(Simplified {
                 config: new_config.clone(),
                 original,
@@ -1789,8 +1769,8 @@ impl PipelineCache {
                 dimensions,
             }),
 
-            // Stage 8 changed (join) — resume from Masked (index 7).
-            8 => Stage::Masked(Masked {
+            // Stage 8 changed (join) — resume from Canvas (index 7).
+            8 => Stage::Canvas(Canvas {
                 config: new_config.clone(),
                 original,
                 downsampled,
@@ -1798,7 +1778,7 @@ impl PipelineCache {
                 edges,
                 contours,
                 simplified,
-                mask_result: masked,
+                canvas_result: canvas,
                 dimensions,
             }),
 
@@ -1820,7 +1800,7 @@ impl PipelineCache {
                     edges,
                     contours,
                     simplified,
-                    masked,
+                    canvas,
                     path: joined,
                     quality_metrics,
                     dimensions,
@@ -1860,6 +1840,18 @@ mod tests {
         )
         .unwrap();
         buf
+    }
+
+    /// Config with `scale = 0.5` so the canvas covers the full 40×40
+    /// test image.  Default `scale = 1.25` produces a tight canvas
+    /// (radius = 16 px) that clips the 2-point simplified contour from
+    /// [`sharp_edge_png`] because RDP collapses the collinear edge to
+    /// two adjacent points near the image top.
+    fn wide_canvas_config() -> PipelineConfig {
+        PipelineConfig {
+            scale: 0.5,
+            ..PipelineConfig::default()
+        }
     }
 
     // ─────────── Typed API tests ─────────────────────────────────
@@ -1986,14 +1978,14 @@ mod tests {
     }
 
     #[test]
-    fn masked_with_circular_mask_enabled() {
+    fn canvas_with_circular_shape() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            mask_mode: crate::mask::MaskMode::Circle,
-            mask_scale: 0.8,
+            shape: crate::mask::CanvasShape::Circle,
+            scale: 0.8,
             ..PipelineConfig::default()
         };
-        let masked = Pipeline::new(png, config)
+        let canvas_stage = Pipeline::new(png, config)
             .decode()
             .unwrap()
             .downsample()
@@ -2002,34 +1994,15 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask();
-        assert!(masked.masked().is_some());
-    }
-
-    #[test]
-    fn masked_with_mask_disabled() {
-        let png = sharp_edge_png(40, 40);
-        let config = PipelineConfig {
-            mask_mode: crate::mask::MaskMode::Off,
-            ..PipelineConfig::default()
-        };
-        let masked = Pipeline::new(png, config)
-            .decode()
-            .unwrap()
-            .downsample()
-            .blur()
-            .detect_edges()
-            .trace_contours()
-            .unwrap()
-            .simplify()
-            .mask();
-        assert!(masked.masked().is_none());
+            .canvas();
+        // Canvas always produces a result; verify it's accessible.
+        let _result = canvas_stage.canvas();
     }
 
     #[test]
     fn joined_exposes_joined() {
         let png = sharp_edge_png(40, 40);
-        let joined = Pipeline::new(png, PipelineConfig::default())
+        let joined = Pipeline::new(png, wide_canvas_config())
             .decode()
             .unwrap()
             .downsample()
@@ -2038,7 +2011,7 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask()
+            .canvas()
             .join();
         assert!(!joined.joined().is_empty());
     }
@@ -2058,9 +2031,9 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask()
+            .canvas()
             .join()
-            .subsample()
+            .output()
             .into_result();
 
         assert_eq!(staged.original, pipeline_result.original);
@@ -2069,9 +2042,9 @@ mod tests {
         assert_eq!(staged.edges, pipeline_result.edges);
         assert_eq!(staged.contours, pipeline_result.contours);
         assert_eq!(staged.simplified, pipeline_result.simplified);
-        assert_eq!(staged.masked, pipeline_result.masked);
+        assert_eq!(staged.canvas, pipeline_result.canvas);
         assert_eq!(staged.joined, pipeline_result.joined);
-        assert_eq!(staged.subsampled, pipeline_result.subsampled);
+        assert_eq!(staged.output, pipeline_result.output);
         assert_eq!(staged.dimensions, pipeline_result.dimensions);
     }
 
@@ -2093,9 +2066,9 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask()
+            .canvas()
             .join()
-            .subsample()
+            .output()
             .into_result();
 
         assert_eq!(staged.edges, pipeline_result.edges);
@@ -2106,8 +2079,8 @@ mod tests {
     fn full_pipeline_with_mask() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            mask_mode: crate::mask::MaskMode::Circle,
-            mask_scale: 0.8,
+            shape: crate::mask::CanvasShape::Circle,
+            scale: 0.8,
             ..PipelineConfig::default()
         };
 
@@ -2121,12 +2094,12 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask()
+            .canvas()
             .join()
-            .subsample()
+            .output()
             .into_result();
 
-        assert_eq!(staged.masked, pipeline_result.masked);
+        assert_eq!(staged.canvas, pipeline_result.canvas);
         assert_eq!(staged.joined, pipeline_result.joined);
     }
 
@@ -2142,7 +2115,7 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask()
+            .canvas()
             .join();
         assert_eq!(
             joined.dimensions(),
@@ -2188,9 +2161,9 @@ mod tests {
             (4, "edges"),
             (5, "contours"),
             (6, "simplify"),
-            (7, "mask"),
+            (7, "canvas"),
             (8, "join"),
-            (9, "subsample"),
+            (9, "output"),
         ];
         assert_eq!(log.as_slice(), &expected);
     }
@@ -2210,9 +2183,9 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask()
+            .canvas()
             .join()
-            .subsample()
+            .output()
             .into_result();
 
         // Loop API.
@@ -2226,16 +2199,16 @@ mod tests {
         assert_eq!(chained.edges, looped.edges);
         assert_eq!(chained.contours, looped.contours);
         assert_eq!(chained.simplified, looped.simplified);
-        assert_eq!(chained.masked, looped.masked);
+        assert_eq!(chained.canvas, looped.canvas);
         assert_eq!(chained.joined, looped.joined);
-        assert_eq!(chained.subsampled, looped.subsampled);
+        assert_eq!(chained.output, looped.output);
         assert_eq!(chained.dimensions, looped.dimensions);
     }
 
     #[test]
     fn complete_from_pending() {
         let png = sharp_edge_png(40, 40);
-        let pending = Pipeline::new(png, PipelineConfig::default());
+        let pending = Pipeline::new(png, wide_canvas_config());
         let result = pending.complete().unwrap();
         assert!(!result.joined.is_empty());
     }
@@ -2243,9 +2216,7 @@ mod tests {
     #[test]
     fn complete_from_decoded() {
         let png = sharp_edge_png(40, 40);
-        let decoded = Pipeline::new(png, PipelineConfig::default())
-            .decode()
-            .unwrap();
+        let decoded = Pipeline::new(png, wide_canvas_config()).decode().unwrap();
         let result = decoded.complete().unwrap();
         assert!(!result.joined.is_empty());
     }
@@ -2253,7 +2224,7 @@ mod tests {
     #[test]
     fn complete_from_mid_stage() {
         let png = sharp_edge_png(40, 40);
-        let blurred = Pipeline::new(png, PipelineConfig::default())
+        let blurred = Pipeline::new(png, wide_canvas_config())
             .decode()
             .unwrap()
             .downsample()
@@ -2265,7 +2236,7 @@ mod tests {
     #[test]
     fn complete_from_joined_is_into_result() {
         let png = sharp_edge_png(40, 40);
-        let joined = Pipeline::new(png, PipelineConfig::default())
+        let joined = Pipeline::new(png, wide_canvas_config())
             .decode()
             .unwrap()
             .downsample()
@@ -2274,16 +2245,16 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask()
+            .canvas()
             .join();
         let result = joined.complete().unwrap();
         assert!(!result.joined.is_empty());
     }
 
     #[test]
-    fn next_on_subsampled_returns_none() {
+    fn next_on_output_returns_none() {
         let png = sharp_edge_png(40, 40);
-        let subsampled = Pipeline::new(png, PipelineConfig::default())
+        let output = Pipeline::new(png, PipelineConfig::default())
             .decode()
             .unwrap()
             .downsample()
@@ -2292,10 +2263,10 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify()
-            .mask()
+            .canvas()
             .join()
-            .subsample();
-        assert!(subsampled.next().unwrap().is_none());
+            .output();
+        assert!(output.next().unwrap().is_none());
     }
 
     #[test]
@@ -2325,9 +2296,9 @@ mod tests {
                 StageOutput::EdgesDetected { .. } => 4,
                 StageOutput::ContoursTraced { .. } => 5,
                 StageOutput::Simplified { .. } => 6,
-                StageOutput::Masked { .. } => 7,
+                StageOutput::Canvas { .. } => 7,
                 StageOutput::Joined { .. } => 8,
-                StageOutput::Subsampled { .. } => 9,
+                StageOutput::Output { .. } => 9,
             };
             assert_eq!(idx, variant_idx, "output variant mismatch at index {idx}");
             visited += 1;
@@ -2371,7 +2342,7 @@ mod tests {
     #[test]
     fn stage_complete_from_enum() {
         let png = sharp_edge_png(40, 40);
-        let stage: Stage = Pipeline::new(png, PipelineConfig::default()).into();
+        let stage: Stage = Pipeline::new(png, wide_canvas_config()).into();
         let result = stage.complete().unwrap();
         assert!(!result.joined.is_empty());
     }
@@ -2406,9 +2377,9 @@ mod tests {
         assert_eq!(a.edges, b.edges, "edges mismatch");
         assert_eq!(a.contours, b.contours, "contours mismatch");
         assert_eq!(a.simplified, b.simplified, "simplified mismatch");
-        assert_eq!(a.masked, b.masked, "masked mismatch");
+        assert_eq!(a.canvas, b.canvas, "canvas mismatch");
         assert_eq!(a.joined, b.joined, "joined mismatch");
-        assert_eq!(a.subsampled, b.subsampled, "subsampled mismatch");
+        assert_eq!(a.output, b.output, "output mismatch");
         assert_eq!(a.dimensions, b.dimensions, "dimensions mismatch");
     }
 
@@ -2436,12 +2407,12 @@ mod tests {
 
     #[test]
     fn cache_changed_late_stage_produces_correct_result() {
-        // Change mask_scale (stage 7) — stages 0-6 should be cached,
+        // Change scale (stage 7) — stages 0-6 should be cached,
         // only stages 7-8 re-run.
         let png = sharp_edge_png(40, 40);
         let config1 = PipelineConfig::default();
         let config2 = PipelineConfig {
-            mask_scale: 1.0,
+            scale: 1.0,
             ..PipelineConfig::default()
         };
 
@@ -2614,7 +2585,7 @@ mod tests {
         };
         let config3 = PipelineConfig {
             blur_sigma: 2.0,
-            mask_scale: 1.0,
+            scale: 1.0,
             ..PipelineConfig::default()
         };
 

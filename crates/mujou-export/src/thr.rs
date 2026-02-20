@@ -14,9 +14,18 @@
 //!
 //! The Sisyphus ecosystem uses `atan2(x, y)` — **not** the standard
 //! math `atan2(y, x)`.  This means theta=0 corresponds to the **+Y**
-//! direction (image-downward / physical-table upward), i.e., `atan2(0, +dy) = 0`.
+//! direction (Cartesian upward / physical-table upward).
+//!
+//! Because internal pipeline coordinates use image-space Y (increasing
+//! downward), the converter flips Y (`dy = center_y - point.y`) before
+//! computing `atan2(dx, dy)`.  Sandify works in a mathematical Y-up
+//! coordinate system natively, so no flip is needed there.
+//!
 //! Confirmed by both [Sandify](https://github.com/jeffeb3/sandify)
-//! and [jsisyphus](https://github.com/markyland/SisyphusForTheRestOfUs).
+//! (`geometry.js`, `toThetaRho`) and
+//! [jsisyphus](https://github.com/markyland/SisyphusForTheRestOfUs)
+//! (`Point.java`: *"The zero radial is coincident with the positive y
+//! axis"*).
 //!
 //! ## Polar Origin
 //!
@@ -133,7 +142,9 @@ pub fn to_thr(
         let points = polyline.points();
         for point in points {
             let dx = point.x - center_x;
-            let dy = point.y - center_y;
+            // Flip Y: image coordinates have Y increasing downward,
+            // but the ecosystem's Cartesian convention has +Y up.
+            let dy = center_y - point.y;
 
             // Rho: normalized distance from center, clamped to [0, 1].
             let dist = dx.hypot(dy);
@@ -150,10 +161,9 @@ pub fn to_thr(
                 prev_theta.unwrap_or(0.0)
             } else {
                 // Theta: atan2(x, y) convention (theta=0 points up / +Y).
-                // Note: image Y increases downward, but the atan2(dx, dy)
-                // convention combined with the ecosystem's coordinate system
-                // produces the correct result — Sandify and jsisyphus use
-                // the same image-space Y direction.
+                // dy was already flipped above (center_y - point.y) so
+                // that +dy corresponds to Cartesian +Y (upward), matching
+                // the convention used by Sandify and jsisyphus.
                 let raw_theta = dx.atan2(dy);
 
                 prev_theta.map_or(raw_theta, |prev| {
@@ -359,13 +369,13 @@ mod tests {
 
     #[test]
     fn atan2_xy_convention_theta_zero_points_up() {
-        // atan2(x, y) convention: a point at larger Y (image-down direction)
-        // relative to center has theta = 0, because atan2(0, +dy) = 0.
-        // The ecosystem treats +Y (image down) as the theta=0 reference direction.
+        // atan2(x, y) convention: theta=0 points along Cartesian +Y (up).
+        // A point *above* center in image coordinates (smaller Y) maps
+        // to positive Cartesian dy, so atan2(0, +dy) = 0.
         //
-        // Point at (100, 200) relative to center (100, 100):
-        //   dx = 0, dy = 100 → atan2(0, 100) = 0.
-        let polylines = vec![Polyline::new(vec![Point::new(100.0, 200.0)])];
+        // Point at (100, 0) relative to center (100, 100):
+        //   dx = 0, dy = center_y - point.y = 100 → atan2(0, 100) = 0.
+        let polylines = vec![Polyline::new(vec![Point::new(100.0, 0.0)])];
         let shape = MaskShape::Circle {
             center: Point::new(100.0, 100.0),
             radius: 100.0,
@@ -374,7 +384,7 @@ mod tests {
         let pairs = parse_pairs(&thr);
         assert!(
             pairs[0].0.abs() < 1e-4,
-            "theta for point directly below center should be ~0, got {}",
+            "theta for point directly above center should be ~0, got {}",
             pairs[0].0,
         );
     }
@@ -401,21 +411,21 @@ mod tests {
 
     #[test]
     fn theta_accumulates_counterclockwise() {
-        // Trace a counterclockwise spiral: points at 0, π/2, π, 3π/2, 2π.
-        // In atan2(x,y) convention with center (0,0), radius 1:
-        //   (0, 1) → theta=0
-        //   (1, 0) → theta=π/2
-        //   (0, -1) → theta=π
-        //   (-1, 0) → theta=3π/2
-        //   (0, 1) → theta=2π (unwound from 0)
+        // Trace a counterclockwise path in Cartesian space.
+        // In the atan2(x, y) convention, counterclockwise goes:
+        //   theta=0 (+Y up), π/2 (+X right), π (-Y down), 3π/2 (-X left), 2π.
+        //
+        // Image-coordinate points (Y flipped relative to Cartesian):
+        //   Cartesian +Y (up)    = image -Y (above center)
+        //   Cartesian -Y (down)  = image +Y (below center)
         let center = Point::new(0.0, 0.0);
         let r = 100.0;
         let polylines = vec![Polyline::new(vec![
-            Point::new(0.0, r),  // theta=0
-            Point::new(r, 0.0),  // theta=π/2
-            Point::new(0.0, -r), // theta=π
-            Point::new(-r, 0.0), // theta=3π/2
-            Point::new(0.0, r),  // theta=2π (same position, unwound)
+            Point::new(0.0, -r), // Cartesian (0, +r)  → theta=0
+            Point::new(r, 0.0),  // Cartesian (+r, 0)  → theta=π/2
+            Point::new(0.0, r),  // Cartesian (0, -r)  → theta=π
+            Point::new(-r, 0.0), // Cartesian (-r, 0)  → theta=3π/2
+            Point::new(0.0, -r), // Cartesian (0, +r)  → theta=2π (unwound)
         ])];
         let shape = MaskShape::Circle { center, radius: r };
         let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
@@ -460,15 +470,18 @@ mod tests {
 
     #[test]
     fn theta_accumulates_clockwise() {
-        // Trace a clockwise spiral: theta should decrease.
+        // Trace a clockwise path in Cartesian space: theta should decrease.
+        // Clockwise from +Y: +Y → -X → -Y → +X → +Y.
+        //
+        // Image-coordinate points (Y flipped relative to Cartesian):
         let center = Point::new(0.0, 0.0);
         let r = 100.0;
         let polylines = vec![Polyline::new(vec![
-            Point::new(0.0, r),  // theta=0
-            Point::new(-r, 0.0), // theta=-π/2 (clockwise)
-            Point::new(0.0, -r), // theta=-π
-            Point::new(r, 0.0),  // theta=-3π/2
-            Point::new(0.0, r),  // theta=-2π (same position, unwound)
+            Point::new(0.0, -r), // Cartesian (0, +r)  → theta=0
+            Point::new(-r, 0.0), // Cartesian (-r, 0)  → theta=-π/2 (clockwise)
+            Point::new(0.0, r),  // Cartesian (0, -r)  → theta=-π
+            Point::new(r, 0.0),  // Cartesian (+r, 0)  → theta=-3π/2
+            Point::new(0.0, -r), // Cartesian (0, +r)  → theta=-2π (unwound)
         ])];
         let shape = MaskShape::Circle { center, radius: r };
         let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
@@ -580,16 +593,17 @@ mod tests {
     #[test]
     fn theta_continues_across_polylines() {
         // Theta unwinding should continue across polyline boundaries.
+        // Counterclockwise in Cartesian: +Y → +X → -Y → -X.
         let center = Point::new(0.0, 0.0);
         let r = 100.0;
         let polylines = vec![
             Polyline::new(vec![
-                Point::new(0.0, r), // theta=0
-                Point::new(r, 0.0), // theta=π/2
+                Point::new(0.0, -r), // Cartesian (0, +r)  → theta=0
+                Point::new(r, 0.0),  // Cartesian (+r, 0)  → theta=π/2
             ]),
             Polyline::new(vec![
-                Point::new(0.0, -r), // theta=π (continues from π/2)
-                Point::new(-r, 0.0), // theta=3π/2
+                Point::new(0.0, r),  // Cartesian (0, -r)  → theta=π
+                Point::new(-r, 0.0), // Cartesian (-r, 0)  → theta=3π/2
             ]),
         ];
         let shape = MaskShape::Circle { center, radius: r };
@@ -615,6 +629,8 @@ mod tests {
     fn end_to_end_image_to_thr() {
         use mujou_pipeline::{PipelineConfig, process_staged};
 
+        // Use scale=0.5 so the canvas (radius=40) covers the full
+        // 40×40 test image.
         let img = image::RgbaImage::from_fn(40, 40, |x, _y| {
             if x < 20 {
                 image::Rgba([0, 0, 0, 255])
@@ -633,8 +649,12 @@ mod tests {
         )
         .unwrap();
 
-        let result = process_staged(&buf, &PipelineConfig::default()).unwrap();
-        let mask_shape = result.masked.as_ref().map(|mr| &mr.shape);
+        let config = PipelineConfig {
+            scale: 0.5,
+            ..PipelineConfig::default()
+        };
+        let result = process_staged(&buf, &config).unwrap();
+        let mask_shape = Some(&result.canvas.shape);
         let thr = to_thr(
             std::slice::from_ref(result.final_polyline()),
             result.dimensions,

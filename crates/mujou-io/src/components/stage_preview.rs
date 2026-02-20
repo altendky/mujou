@@ -137,7 +137,7 @@ fn render_vector_preview(
     show_diagnostics: bool,
 ) -> Element {
     match selected {
-        StageId::Contours | StageId::Simplified | StageId::Masked => {
+        StageId::Contours | StageId::Simplified | StageId::Canvas => {
             let polylines = result.polylines_for_stage(selected);
             let view_box = compute_view_box(&polylines, w, h);
             let path_data = build_multi_path_data(&polylines);
@@ -165,8 +165,8 @@ fn render_vector_preview(
             }
         }
 
-        StageId::Subsampled => {
-            let polyline = &result.subsampled;
+        StageId::Output => {
+            let polyline = &result.output;
             let view_box = compute_view_box(std::slice::from_ref(polyline), w, h);
             let d = build_path_data(polyline);
 
@@ -177,7 +177,7 @@ fn render_vector_preview(
                     class: "w-full h-full bg-[var(--preview-bg)] rounded",
                     "preserveAspectRatio": "xMidYMid meet",
                     role: "img",
-                    "aria-label": "Subsampled stage preview",
+                    "aria-label": "Output stage preview",
 
                     if !d.is_empty() {
                         path {

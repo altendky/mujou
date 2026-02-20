@@ -66,12 +66,12 @@ pub struct PipelineDiagnostics {
     pub contour_tracing: StageDiagnostics,
     /// Stage 6: RDP path simplification.
     pub simplification: StageDiagnostics,
-    /// Stage 7: mask (only when `config.mask_mode` is not `Off`).
-    pub mask: Option<StageDiagnostics>,
+    /// Stage 7: canvas clipping and border generation.
+    pub canvas: StageDiagnostics,
     /// Stage 8: path ordering + joining.
     pub join: StageDiagnostics,
     /// Stage 9: segment subsampling.
-    pub subsample: StageDiagnostics,
+    pub output: StageDiagnostics,
     /// Total wall-clock duration of the entire pipeline (seconds).
     #[serde(with = "duration_serde")]
     pub total_duration: Duration,
@@ -172,8 +172,8 @@ pub enum StageMetrics {
         /// Reduction ratio: `1.0 - (after / before)`.
         reduction_ratio: f64,
     },
-    /// Mask metrics (circle or rectangle).
-    Mask {
+    /// Canvas metrics (circle or rectangle).
+    Canvas {
         /// Human-readable description of the mask geometry.
         ///
         /// For circles: `"d=0.75 r=123.4px"`.
@@ -206,7 +206,7 @@ pub enum StageMetrics {
         quality: Option<JoinQualityMetrics>,
     },
     /// Segment subsampling metrics.
-    Subsample {
+    Output {
         /// Maximum segment length in pixels.
         max_length: f64,
         /// Points in the joined path before subsampling.
@@ -269,11 +269,9 @@ impl PipelineDiagnostics {
             }
             s.push(("Contour Tracing", &self.contour_tracing));
             s.push(("Simplification", &self.simplification));
-            if let Some(ref m) = self.mask {
-                s.push(("Mask", m));
-            }
+            s.push(("Canvas", &self.canvas));
             s.push(("Join", &self.join));
-            s.push(("Subsample", &self.subsample));
+            s.push(("Output", &self.output));
             s
         };
 
@@ -376,7 +374,7 @@ fn format_metrics(metrics: &StageMetrics) -> String {
                 reduction_ratio * 100.0,
             )
         }
-        StageMetrics::Mask {
+        StageMetrics::Canvas {
             shape_info,
             polylines_before,
             polylines_after,
@@ -428,7 +426,7 @@ fn format_metrics(metrics: &StageMetrics) -> String {
                 base
             }
         }
-        StageMetrics::Subsample {
+        StageMetrics::Output {
             max_length,
             points_before,
             points_after,
@@ -523,8 +521,8 @@ pub fn process_staged_with_diagnostics<C: Clock>(
     clock: &C,
 ) -> Result<(crate::StagedResult, PipelineDiagnostics), crate::PipelineError> {
     use crate::pipeline::{
-        Advance, Blurred, ContoursTraced, Decoded, Downsampled, EdgesDetected, Joined, Masked,
-        PipelineStage as _, STAGE_COUNT, Simplified, Stage, Subsampled,
+        Advance, Blurred, Canvas, ContoursTraced, Decoded, Downsampled, EdgesDetected, Joined,
+        Output, PipelineStage as _, STAGE_COUNT, Simplified, Stage,
     };
 
     let pipeline_start = clock.now();
@@ -590,13 +588,15 @@ pub fn process_staged_with_diagnostics<C: Clock>(
                     simplification: stage_diags[Simplified::INDEX]
                         .take()
                         .ok_or_else(|| diag_missing(Simplified::NAME))?,
-                    mask: stage_diags[Masked::INDEX].take(),
+                    canvas: stage_diags[Canvas::INDEX]
+                        .take()
+                        .ok_or_else(|| diag_missing(Canvas::NAME))?,
                     join: stage_diags[Joined::INDEX]
                         .take()
                         .ok_or_else(|| diag_missing(Joined::NAME))?,
-                    subsample: stage_diags[Subsampled::INDEX]
+                    output: stage_diags[Output::INDEX]
                         .take()
-                        .ok_or_else(|| diag_missing(Subsampled::NAME))?,
+                        .ok_or_else(|| diag_missing(Output::NAME))?,
                     total_duration,
                     summary,
                 };
@@ -721,22 +721,14 @@ mod tests {
     fn fake_clock_diagnostics_without_invert() {
         let png = sharp_edge_png(40, 40);
         let config = crate::PipelineConfig {
-            mask_mode: crate::mask::MaskMode::Off,
             invert: false,
+            scale: 0.5,
             ..crate::PipelineConfig::default()
         };
         let clock = FakeClock::new();
 
         let (_result, diag) = process_staged_with_diagnostics(&png, &config, &clock)
             .expect("pipeline should succeed");
-
-        // Call pattern (no invert, no mask):
-        //   now#0: pipeline_start=0, tick→1
-        //   now#1: t=1, tick→2; advance Pending->Decoded; elapsed(&1) at tick 2 => 10ms
-        //   now#2: t=2, tick→3; advance Decoded->Downsampled; elapsed(&2) at tick 3 => 10ms
-        //   ...each stage gets 10ms...
-        //   now#7: t=7, tick→8; advance Masked->Joined; elapsed(&7) at tick 8 => 10ms
-        //   now#8: t=8, tick→9; advance Joined->Complete; elapsed(&0) at tick 9 => 90ms
 
         let ten_ms = Duration::from_millis(10);
 
@@ -747,10 +739,10 @@ mod tests {
         assert!(diag.invert.is_none());
         assert_eq!(diag.contour_tracing.duration, ten_ms);
         assert_eq!(diag.simplification.duration, ten_ms);
-        // mask disabled -> None
-        assert!(diag.mask.is_none());
+        // Canvas always runs.
+        assert_eq!(diag.canvas.duration, ten_ms);
         assert_eq!(diag.join.duration, ten_ms);
-        assert_eq!(diag.subsample.duration, ten_ms);
+        assert_eq!(diag.output.duration, ten_ms);
         assert_eq!(diag.total_duration, Duration::from_millis(110));
 
         // Summary should reflect the 40x40 image.
@@ -767,10 +759,11 @@ mod tests {
     }
 
     #[test]
-    fn fake_clock_diagnostics_with_invert_and_mask() {
+    fn fake_clock_diagnostics_with_invert_and_canvas() {
         let png = sharp_edge_png(40, 40);
         let config = crate::PipelineConfig {
-            mask_mode: crate::mask::MaskMode::Circle,
+            shape: crate::mask::CanvasShape::Circle,
+            scale: 0.5,
             invert: true,
             ..crate::PipelineConfig::default()
         };
@@ -800,12 +793,11 @@ mod tests {
         assert_eq!(diag.contour_tracing.duration, ten_ms);
         assert_eq!(diag.simplification.duration, ten_ms);
 
-        // Mask enabled -> Some with timing.
-        let mask = diag.mask.as_ref().expect("mask diagnostics should be Some");
-        assert_eq!(mask.duration, ten_ms);
+        // Canvas always runs.
+        assert_eq!(diag.canvas.duration, ten_ms);
 
         assert_eq!(diag.join.duration, ten_ms);
-        assert_eq!(diag.subsample.duration, ten_ms);
+        assert_eq!(diag.output.duration, ten_ms);
         assert_eq!(diag.total_duration, Duration::from_millis(110));
 
         // Summary should reflect the 40x40 image.
@@ -873,7 +865,16 @@ mod tests {
                     reduction_ratio: 0.5,
                 },
             },
-            mask: None,
+            canvas: StageDiagnostics {
+                duration: Duration::from_millis(5),
+                metrics: StageMetrics::Canvas {
+                    shape_info: "d=1.25 r=50.0px".to_string(),
+                    polylines_before: 10,
+                    polylines_after: 10,
+                    points_before: 100,
+                    points_after: 95,
+                },
+            },
             join: StageDiagnostics {
                 duration: Duration::from_millis(25),
                 metrics: StageMetrics::Join {
@@ -885,9 +886,9 @@ mod tests {
                     quality: None,
                 },
             },
-            subsample: StageDiagnostics {
+            output: StageDiagnostics {
                 duration: Duration::from_millis(2),
-                metrics: StageMetrics::Subsample {
+                metrics: StageMetrics::Output {
                     max_length: 2.0,
                     points_before: 150,
                     points_after: 200,
@@ -911,6 +912,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn report_downsample_applied_true() {
         let diag = PipelineDiagnostics {
             decode: StageDiagnostics {
@@ -969,7 +971,16 @@ mod tests {
                     reduction_ratio: 0.467,
                 },
             },
-            mask: None,
+            canvas: StageDiagnostics {
+                duration: Duration::from_millis(3),
+                metrics: StageMetrics::Canvas {
+                    shape_info: "d=1.25 r=96.0px".to_string(),
+                    polylines_before: 8,
+                    polylines_after: 8,
+                    points_before: 80,
+                    points_after: 78,
+                },
+            },
             join: StageDiagnostics {
                 duration: Duration::from_millis(15),
                 metrics: StageMetrics::Join {
@@ -981,9 +992,9 @@ mod tests {
                     quality: None,
                 },
             },
-            subsample: StageDiagnostics {
+            output: StageDiagnostics {
                 duration: Duration::from_millis(1),
-                metrics: StageMetrics::Subsample {
+                metrics: StageMetrics::Output {
                     max_length: 2.0,
                     points_before: 120,
                     points_after: 150,
