@@ -60,7 +60,7 @@ the exact same output.
 This is the most complex export step.
 
 1. **Center**: Image center = polar origin
-2. **Axes**: Cartesian +X points right, +Y points up (invert image Y if your source is image coordinates)
+2. **Axes**: Cartesian +X points right, +Y points up (the pipeline's normalized space is already +Y up)
 3. **Rho**: `rho = sqrt(x^2 + y^2) / max_radius`, normalized to [0.0, 1.0]
 4. **Theta**: `theta = atan2(x, y)`, with continuous accumulation
 

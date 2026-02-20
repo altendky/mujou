@@ -44,12 +44,12 @@ const DOCUMENT_SIZE_MM: f64 = 200.0;
 /// dimensions.  Normalized coordinates are transformed via:
 ///
 /// ```text
-/// mm_x = norm_x × scale_factor + offset_x
-/// mm_y = norm_y × scale_factor + offset_y
+/// mm_x =   norm_x  × scale_factor + offset_x
+/// mm_y = (-norm_y) × scale_factor + offset_y
 /// ```
 ///
-/// No Y-flip is needed because normalized space preserves the image
-/// convention of +Y pointing downward, matching SVG.
+/// Y is negated because normalized space is +Y up (mathematical
+/// convention), while SVG is +Y down.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DocumentMapping {
     /// SVG document width in millimetres.
@@ -220,13 +220,12 @@ pub fn build_path_data(polyline: &Polyline) -> String {
 ///
 /// The transform is:
 /// ```text
-/// mm_x = norm_x × scale_factor + offset_x
-/// mm_y = norm_y × scale_factor + offset_y
+/// mm_x =   norm_x  × scale_factor + offset_x
+/// mm_y = (-norm_y) × scale_factor + offset_y
 /// ```
 ///
-/// No Y-flip is needed because normalized space preserves the image
-/// convention of +Y pointing downward, which matches SVG's coordinate
-/// system.
+/// Y is negated because normalized space is +Y up (mathematical
+/// convention), while SVG is +Y down.
 fn build_path_data_transformed(polyline: &Polyline, mapping: &DocumentMapping) -> String {
     let points = polyline.points();
     if points.len() < 2 {
@@ -236,7 +235,7 @@ fn build_path_data_transformed(polyline: &Polyline, mapping: &DocumentMapping) -
     let tx = |p: &mujou_pipeline::Point| {
         (
             p.x.mul_add(mapping.scale_factor, mapping.offset_x),
-            p.y.mul_add(mapping.scale_factor, mapping.offset_y),
+            (-p.y).mul_add(mapping.scale_factor, mapping.offset_y),
         )
     };
 
@@ -334,7 +333,7 @@ fn polyline_to_path_d(polyline: &Polyline) -> Option<String> {
             .enumerate()
             .map(|(i, p)| {
                 let cmd = if i == 0 { "M" } else { "L" };
-                format!("{cmd} {:.4} {:.4}", p.x, p.y)
+                format!("{cmd} {:.4} {:.4}", p.x, -p.y)
             })
             .collect::<Vec<_>>()
             .join(" "),
@@ -480,18 +479,20 @@ fn compute_diagnostic_view_box(
 
     for poly in polylines {
         for p in poly.points() {
+            let svg_y = -p.y;
             min_x = min_x.min(p.x);
-            min_y = min_y.min(p.y);
+            min_y = min_y.min(svg_y);
             max_x = max_x.max(p.x);
-            max_y = max_y.max(p.y);
+            max_y = max_y.max(svg_y);
         }
     }
 
     for &(x, y) in extra_points {
+        let svg_y = -y;
         min_x = min_x.min(x);
-        min_y = min_y.min(y);
+        min_y = min_y.min(svg_y);
         max_x = max_x.max(x);
-        max_y = max_y.max(y);
+        max_y = max_y.max(svg_y);
     }
 
     // Default to unit circle extent if no data.
@@ -531,7 +532,8 @@ fn format_view_box(vb: (f64, f64, f64, f64)) -> String {
 /// geometry.
 ///
 /// The viewBox is computed automatically from the polyline and MST edge
-/// data.  All coordinates are in normalized space (center-origin, +Y up).
+/// data.  Data coordinates are in normalized space (center-origin, +Y up);
+/// Y is negated for SVG output (+Y down).
 ///
 /// Each MST edge line element includes a `data-weight` attribute with
 /// the edge weight and a `data-polys` attribute identifying the
@@ -597,9 +599,9 @@ pub fn to_diagnostic_svg(
                 out,
                 r#"    <line x1="{:.4}" y1="{:.4}" x2="{:.4}" y2="{:.4}" data-weight="{:.4}" data-polys="{},{}" data-index="{}"/>"#,
                 edge.point_a.0,
-                edge.point_a.1,
+                -edge.point_a.1,
                 edge.point_b.0,
-                edge.point_b.1,
+                -edge.point_b.1,
                 edge.weight,
                 edge.poly_a,
                 edge.poly_b,
@@ -628,7 +630,8 @@ pub fn to_diagnostic_svg(
 /// contour segments, or algorithmic bugs.
 ///
 /// The viewBox is computed automatically from the polyline data.
-/// All coordinates are in normalized space (center-origin, +Y up).
+/// Data coordinates are in normalized space (center-origin, +Y up);
+/// Y is negated for SVG output (+Y down).
 ///
 /// Each highlighted segment `<line>` element includes `data-rank`,
 /// `data-length`, `data-from`, and `data-to` attributes for
@@ -697,16 +700,16 @@ pub fn to_segment_diagnostic_svg(
                 out,
                 r#"    <line x1="{:.4}" y1="{:.4}" x2="{:.4}" y2="{:.4}" stroke="{}" data-rank="{}" data-length="{:.4}" data-from="{:.4},{:.4}" data-to="{:.4},{:.4}"/>"#,
                 seg.from.0,
-                seg.from.1,
+                -seg.from.1,
                 seg.to.0,
-                seg.to.1,
+                -seg.to.1,
                 color,
                 rank + 1,
                 seg.length,
                 seg.from.0,
-                seg.from.1,
+                -seg.from.1,
                 seg.to.0,
-                seg.to.1,
+                -seg.to.1,
             );
         }
         let _ = writeln!(out, "  </g>");
@@ -810,7 +813,7 @@ mod tests {
     /// Standard normalized mapping: unit circle at origin, no margin.
     /// Gives `scale_factor`=100.0, offset=(100,100), 200×200 mm.
     ///
-    /// Transform: `mm_x` = `norm_x`*100+100, `mm_y` = -`norm_y`*100+100
+    /// Transform: `mm_x` = `norm_x`*100+100, `mm_y` = (-`norm_y`)*100+100
     fn test_mapping() -> DocumentMapping {
         document_mapping(
             &MaskShape::Circle {
@@ -893,7 +896,7 @@ mod tests {
     #[test]
     fn single_polyline_with_two_points() {
         // test_mapping: sf=100, ox=100, oy=100.
-        // No Y-flip: (0.5, 0.3) → mm(150, 130), (−0.5, −0.3) → mm(50, 70)
+        // Y-flip: (0.5, 0.3) → mm(150, 70), (−0.5, −0.3) → mm(50, 130)
         let polylines = vec![Polyline::new(vec![
             Point::new(0.5, 0.3),
             Point::new(-0.5, -0.3),
@@ -903,7 +906,7 @@ mod tests {
         assert!(svg.contains(r#"width="200mm""#));
         assert!(svg.contains(r#"height="200mm""#));
         assert!(svg.contains(r#"viewBox="0 0 200 200""#));
-        assert!(svg.contains("M150,130 L50,70"));
+        assert!(svg.contains("M150,70 L50,130"));
         assert!(svg.contains(r#"fill="none""#));
         assert!(svg.contains(r#"stroke="black""#));
         assert!(svg.contains(r#"stroke-width="1""#));
@@ -1248,7 +1251,7 @@ mod tests {
         // Normalized circle: radius=1.0 at origin, border_margin=0.
         // scale_factor = 200/2 = 100, offset = (100, 100).
         let mapping = test_mapping();
-        // No Y-flip: (0.5, 0.5) → mm(150, 150), (-0.5, -0.5) → mm(50, 50)
+        // Y-flip: (0.5, 0.5) → mm(150, 50), (-0.5, -0.5) → mm(50, 150)
         let polylines = vec![Polyline::new(vec![
             Point::new(0.5, 0.5),
             Point::new(-0.5, -0.5),
@@ -1263,7 +1266,7 @@ mod tests {
         );
         assert!(svg.contains(r#"preserveAspectRatio="xMidYMid meet""#));
         assert!(
-            svg.contains("M150,150 L50,50"),
+            svg.contains("M150,50 L50,150"),
             "path coordinates should be in mm, got:\n{svg}",
         );
     }
@@ -1286,9 +1289,9 @@ mod tests {
         assert!((mapping.offset_x - 100.0).abs() < 1e-9);
         assert!((mapping.offset_y - 100.0).abs() < 1e-9);
 
-        // No Y-flip:
-        // norm (-1.0, 0.0) → mm(-1*80+100, 0*80+100) = (20, 100)
-        // norm (1.0, 0.0) → mm(1*80+100, 0*80+100) = (180, 100)
+        // Y-flip (y=0 is unchanged):
+        // norm (-1.0, 0.0) → mm(-1*80+100, -0*80+100) = (20, 100)
+        // norm (1.0, 0.0) → mm(1*80+100, -0*80+100) = (180, 100)
         let polylines = vec![Polyline::new(vec![
             Point::new(-1.0, 0.0),
             Point::new(1.0, 0.0),
@@ -1315,7 +1318,7 @@ mod tests {
     #[test]
     fn circle_mapping_still_renders_paths() {
         // test_mapping: sf=100, ox=100, oy=100.
-        // No Y-flip: (-0.5, 0.5) → mm(50, 150), (0.5, -0.5) → mm(150, 50)
+        // Y-flip: (-0.5, 0.5) → mm(50, 50), (0.5, -0.5) → mm(150, 150)
         let mapping = test_mapping();
         let polylines = vec![Polyline::new(vec![
             Point::new(-0.5, 0.5),
@@ -1324,7 +1327,7 @@ mod tests {
         let svg = to_svg(&polylines, &no_meta(), &mapping);
         assert!(svg.contains("<path"));
         assert!(
-            svg.contains(r#"d="M50,150 L150,50""#),
+            svg.contains(r#"d="M50,50 L150,150""#),
             "path coordinates should be in mm, got:\n{svg}",
         );
         assert!(svg.contains(r#"viewBox="0 0 200 200""#));

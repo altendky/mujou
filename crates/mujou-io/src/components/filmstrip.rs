@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use mujou_export::build_path_data;
+use super::stage_preview::build_path_data_normalized;
 
 use crate::stage::StageId;
 use crate::worker::WorkerResult;
@@ -158,7 +158,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
                     "aria-hidden": "true",
 
                     for polyline in polylines.iter() {
-                        {render_thumbnail_path(polyline)}
+                        {render_thumbnail_path_normalized(polyline)}
                     }
                 }
             }
@@ -177,7 +177,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
                     "aria-hidden": "true",
 
                     for polyline in polylines.iter() {
-                        {render_thumbnail_path(polyline)}
+                        {render_thumbnail_path_normalized(polyline)}
                     }
                 }
             }
@@ -190,7 +190,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
                 &result.joined
             };
             let view_box = super::canvas_view_box(&result.canvas.shape);
-            let d = build_path_data(polyline);
+            let d = build_path_data_normalized(polyline);
 
             rsx! {
                 svg {
@@ -234,9 +234,10 @@ fn render_img_thumb(url: &str, alt: &str) -> Element {
 /// resolution image downscaled by the browser).
 const THUMBNAIL_STROKE_WIDTH: &str = "0.5";
 
-/// Render a single polyline as an SVG path for a thumbnail.
-fn render_thumbnail_path(polyline: &mujou_pipeline::Polyline) -> Element {
-    let d = build_path_data(polyline);
+/// Render a single normalized-space polyline as an SVG path for a
+/// thumbnail, negating Y for SVG.
+fn render_thumbnail_path_normalized(polyline: &mujou_pipeline::Polyline) -> Element {
+    let d = build_path_data_normalized(polyline);
     if d.is_empty() {
         return rsx! {};
     }

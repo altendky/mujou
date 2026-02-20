@@ -22,7 +22,6 @@ use dioxus::prelude::*;
 
 use crate::stage::StageId;
 use crate::worker::WorkerResult;
-use mujou_export::build_path_data;
 use mujou_pipeline::segment_analysis::find_top_segments;
 use mujou_pipeline::{MaskShape, MstEdgeInfo};
 
@@ -137,7 +136,7 @@ fn render_vector_preview(
         StageId::Contours | StageId::Simplified => {
             let polylines = result.polylines_for_stage(selected);
             let view_box = compute_view_box(&polylines);
-            let path_data = build_multi_path_data(&polylines);
+            let path_data = build_multi_path_data_normalized(&polylines);
             let stage_label = selected.label();
 
             rsx! {
@@ -166,7 +165,7 @@ fn render_vector_preview(
         StageId::Canvas => {
             let polylines = result.polylines_for_stage(selected);
             let view_box = canvas_view_box(&result.canvas.shape);
-            let path_data = build_multi_path_data(&polylines);
+            let path_data = build_multi_path_data_normalized(&polylines);
 
             rsx! {
                 svg {
@@ -194,7 +193,7 @@ fn render_vector_preview(
         StageId::Output => {
             let polyline = &result.output;
             let view_box = canvas_view_box(&result.canvas.shape);
-            let d = build_path_data(polyline);
+            let d = build_path_data_normalized(polyline);
 
             rsx! {
                 svg {
@@ -221,7 +220,7 @@ fn render_vector_preview(
         StageId::Join => {
             let polyline = &result.joined;
             let view_box = canvas_view_box(&result.canvas.shape);
-            let d = build_path_data(polyline);
+            let d = build_path_data_normalized(polyline);
 
             // Pre-compute diagnostic overlays when active.
             let top_segments = if show_diagnostics {
@@ -271,12 +270,36 @@ fn render_vector_preview(
     }
 }
 
-/// Build SVG path `d` attributes for multiple polylines.
-fn build_multi_path_data(polylines: &[mujou_pipeline::Polyline]) -> Vec<String> {
+/// Build an SVG path `d` attribute string for a normalized-space polyline,
+/// negating Y for SVG (+Y down).
+///
+/// Normalized space is +Y up; SVG is +Y down, so Y coordinates are
+/// negated before emitting.
+#[allow(clippy::cast_possible_truncation)]
+pub fn build_path_data_normalized(polyline: &mujou_pipeline::Polyline) -> String {
+    use std::fmt::Write;
+
+    let points = polyline.points();
+    if points.len() < 2 {
+        return String::new();
+    }
+
+    let mut d = String::new();
+    let first = &points[0];
+    let _ = write!(d, "M{},{}", first.x as f32, -first.y as f32);
+    for p in &points[1..] {
+        let _ = write!(d, " L{},{}", p.x as f32, -p.y as f32);
+    }
+    d
+}
+
+/// Build SVG path `d` attributes for multiple normalized-space polylines,
+/// negating Y for SVG.
+pub fn build_multi_path_data_normalized(polylines: &[mujou_pipeline::Polyline]) -> Vec<String> {
     polylines
         .iter()
         .filter_map(|pl| {
-            let d = build_path_data(pl);
+            let d = build_path_data_normalized(pl);
             if d.is_empty() { None } else { Some(d) }
         })
         .collect()
@@ -299,10 +322,11 @@ pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline]) -> String {
 
     for poly in polylines {
         for p in poly.points() {
+            let svg_y = -p.y;
             min_x = min_x.min(p.x);
-            min_y = min_y.min(p.y);
+            min_y = min_y.min(svg_y);
             max_x = max_x.max(p.x);
-            max_y = max_y.max(p.y);
+            max_y = max_y.max(svg_y);
         }
     }
 
@@ -339,9 +363,9 @@ pub fn canvas_view_box(shape: &MaskShape) -> String {
     let (min_x, min_y, max_x, max_y) = match *shape {
         MaskShape::Circle { center, radius } => (
             center.x - radius,
-            center.y - radius,
+            -center.y - radius,
             center.x + radius,
-            center.y + radius,
+            -center.y + radius,
         ),
         MaskShape::Rectangle {
             center,
@@ -349,9 +373,9 @@ pub fn canvas_view_box(shape: &MaskShape) -> String {
             half_height,
         } => (
             center.x - half_width,
-            center.y - half_height,
+            -center.y - half_height,
             center.x + half_width,
-            center.y + half_height,
+            -center.y + half_height,
         ),
     };
 
@@ -383,17 +407,23 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
         g {
             "data-layer": "mst-edges",
             for (i, edge) in edges.iter().enumerate() {
-                line {
-                    key: "mst-{i}",
-                    x1: "{edge.point_a.0}",
-                    y1: "{edge.point_a.1}",
-                    x2: "{edge.point_b.0}",
-                    y2: "{edge.point_b.1}",
-                    stroke: "var(--diag-mst)",
-                    stroke_width: "2",
-                    stroke_dasharray: "4,2",
-                    opacity: "0.8",
-                    "vector-effect": "non-scaling-stroke",
+                {
+                    let y1 = -edge.point_a.1;
+                    let y2 = -edge.point_b.1;
+                    rsx! {
+                        line {
+                            key: "mst-{i}",
+                            x1: "{edge.point_a.0}",
+                            y1: "{y1}",
+                            x2: "{edge.point_b.0}",
+                            y2: "{y2}",
+                            stroke: "var(--diag-mst)",
+                            stroke_width: "2",
+                            stroke_dasharray: "4,2",
+                            opacity: "0.8",
+                            "vector-effect": "non-scaling-stroke",
+                        }
+                    }
                 }
             }
         }
@@ -420,10 +450,11 @@ fn render_start_indicator(polyline: &mujou_pipeline::Polyline, show: bool) -> El
     // proportions.
     let r = 0.035;
 
+    let cy = -start.y;
     rsx! {
         circle {
             cx: "{start.x}",
-            cy: "{start.y}",
+            cy: "{cy}",
             r: "{r}",
             fill: "none",
             stroke: "var(--diag-start)",
@@ -461,13 +492,15 @@ fn render_top_segments(segments: &[mujou_pipeline::RankedSegment]) -> Element {
                 {
                     let color = SEGMENT_CSS_VARS.get(rank).copied()
                         .unwrap_or("var(--diag-stroke)");
+                    let y1 = -seg.from.1;
+                    let y2 = -seg.to.1;
                     rsx! {
                         line {
                             key: "seg-{rank}",
                             x1: "{seg.from.0}",
-                            y1: "{seg.from.1}",
+                            y1: "{y1}",
                             x2: "{seg.to.0}",
-                            y2: "{seg.to.1}",
+                            y2: "{y2}",
                             stroke: "{color}",
                             stroke_width: "3",
                             opacity: "0.9",

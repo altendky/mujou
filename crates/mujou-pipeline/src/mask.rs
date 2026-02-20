@@ -480,11 +480,11 @@ fn generate_rectangle_border(center: Point, half_width: f64, half_height: f64) -
         half_width > 0.0 && half_height > 0.0,
         "border half-dimensions must be positive, got hw={half_width}, hh={half_height}",
     );
-    let tl = Point::new(center.x - half_width, center.y - half_height);
-    let tr = Point::new(center.x + half_width, center.y - half_height);
-    let br = Point::new(center.x + half_width, center.y + half_height);
-    let bl = Point::new(center.x - half_width, center.y + half_height);
-    Polyline::new(vec![tl, tr, br, bl, tl])
+    let bl = Point::new(center.x - half_width, center.y - half_height);
+    let br = Point::new(center.x + half_width, center.y - half_height);
+    let tr = Point::new(center.x + half_width, center.y + half_height);
+    let tl = Point::new(center.x - half_width, center.y + half_height);
+    Polyline::new(vec![bl, br, tr, tl, bl])
 }
 
 /// Check if a point is inside or on the axis-aligned rectangle.

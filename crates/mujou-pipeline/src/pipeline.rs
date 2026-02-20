@@ -274,8 +274,9 @@ impl EdgesDetected {
     ///
     /// Traces contours from the edge map and then normalizes them from
     /// pixel space to the center-origin coordinate system where
-    /// mask edge = 1.0.  The Y-axis preserves the image convention
-    /// (+Y down).  The normalization transform uses `config.zoom`.
+    /// mask edge = 1.0.  The Y-axis is flipped so that normalized space
+    /// uses the mathematical convention (+Y up).  The normalization
+    /// transform uses `config.zoom`.
     ///
     /// # Errors
     ///
@@ -286,7 +287,7 @@ impl EdgesDetected {
         if contours.is_empty() {
             return Err(PipelineError::NoContours);
         }
-        // Normalize pixel contours to center-origin space (+Y down).
+        // Normalize pixel contours to center-origin space (+Y up).
         let contours =
             crate::normalize::normalize_contours(contours, self.dimensions, self.config.zoom);
         Ok(ContoursTraced {
@@ -402,7 +403,7 @@ impl Simplified {
 
     /// Advance to the canvas stage.
     ///
-    /// Polylines (already in normalized space, +Y down) are clipped to
+    /// Polylines (already in normalized space, +Y up) are clipped to
     /// the canvas boundary.  Circle mask = unit circle at origin
     /// (radius=1.0), rectangle mask = center at origin with
     /// half-short-side=1.0 and half-long-side=aspect_ratio.

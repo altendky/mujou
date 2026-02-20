@@ -16,9 +16,8 @@
 //! math `atan2(y, x)`.  This means theta=0 corresponds to the **+Y**
 //! direction (Cartesian upward / physical-table upward).
 //!
-//! Normalized space uses the image convention of +Y pointing downward,
-//! so Y is negated before the `atan2` call: `atan2(x, -y)`.  This
-//! ensures theta=0 corresponds to "up" (small pixel Y / top of image).
+//! Normalized space is +Y up, which matches the Sisyphus `atan2(x, y)`
+//! convention directly — no Y negation is needed.
 //!
 //! ## Polar Origin
 //!
@@ -61,10 +60,8 @@ pub struct ThrMetadata<'a> {
 ///
 /// In normalized space the origin is the polar center and
 /// `rho = sqrt(x² + y²)` directly.  Theta uses the ecosystem's
-/// `atan2(x, y)` convention (theta=0 points along +Y).  Since
-/// normalized space is +Y down (image convention), Y is negated
-/// before the `atan2` call so theta=0 corresponds to the physical
-/// "up" direction on the table.
+/// `atan2(x, y)` convention (theta=0 points along +Y).  Normalized
+/// space is +Y up, which matches directly — no Y negation is needed.
 ///
 /// Theta accumulates continuously (no wrapping at 2π) and rho is
 /// clamped to [0.0, 1.0].
@@ -122,7 +119,7 @@ pub fn to_thr(polylines: &[Polyline], metadata: &ThrMetadata<'_>) -> String {
     for polyline in polylines {
         let points = polyline.points();
         for point in points {
-            // In normalized space: origin = center, +Y = up.
+            // In normalized space: origin = center, +Y = up (mathematical convention).
             // rho = distance from origin, clamped to [0, 1].
             let dist = point.x.hypot(point.y);
             let rho = dist.clamp(0.0, 1.0);
@@ -134,10 +131,9 @@ pub fn to_thr(polylines: &[Polyline], metadata: &ThrMetadata<'_>) -> String {
                 prev_theta.unwrap_or(0.0)
             } else {
                 // Theta: atan2(x, y) convention (theta=0 points up / +Y).
-                // Normalized space is +Y down (image convention), so we
-                // negate Y to convert to the +Y-up convention expected by
-                // the Sisyphus ecosystem.
-                let raw_theta = point.x.atan2(-point.y);
+                // Normalized space is +Y up, matching the Sisyphus
+                // ecosystem directly.
+                let raw_theta = point.x.atan2(point.y);
 
                 prev_theta.map_or(raw_theta, |prev| {
                     // Continuous unwinding: choose the equivalent angle
@@ -313,15 +309,15 @@ mod tests {
 
     #[test]
     fn atan2_xy_convention_theta_zero_points_up() {
-        // atan2(x, -y) convention: theta=0 points "up" (negative Y in
-        // normalized +Y-down space).
-        // Point at (0, -1): atan2(0, -(-1)) = atan2(0, 1) = 0.
-        let polylines = vec![Polyline::new(vec![Point::new(0.0, -1.0)])];
+        // atan2(x, y) convention: theta=0 points "up" (+Y in
+        // normalized +Y-up space).
+        // Point at (0, +1): atan2(0, 1) = 0.
+        let polylines = vec![Polyline::new(vec![Point::new(0.0, 1.0)])];
         let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert!(
             pairs[0].0.abs() < 1e-4,
-            "theta for point directly 'up' (y=-1) should be ~0, got {}",
+            "theta for point directly 'up' (y=+1) should be ~0, got {}",
             pairs[0].0,
         );
     }
@@ -344,16 +340,16 @@ mod tests {
 
     #[test]
     fn theta_accumulates_counterclockwise() {
-        // Counterclockwise path in normalized space (+Y down).
-        // With atan2(x, -y): "up"→+X→"down"→-X traces 0→π/2→π→3π/2→2π.
-        // "up" = negative Y, "down" = positive Y in +Y-down convention.
+        // Counterclockwise path in normalized space (+Y up).
+        // With atan2(x, y): "up"→+X→"down"→-X traces 0→π/2→π→3π/2→2π.
+        // "up" = positive Y, "down" = negative Y in +Y-up convention.
         let r = 1.0;
         let polylines = vec![Polyline::new(vec![
-            Point::new(0.0, -r), // "up"    → theta=0
+            Point::new(0.0, r),  // "up"    → theta=0
             Point::new(r, 0.0),  // +X      → theta=π/2
-            Point::new(0.0, r),  // "down"  → theta=π
+            Point::new(0.0, -r), // "down"  → theta=π
             Point::new(-r, 0.0), // -X      → theta=3π/2
-            Point::new(0.0, -r), // "up"    → theta=2π (unwound)
+            Point::new(0.0, r),  // "up"    → theta=2π (unwound)
         ])];
         let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
@@ -400,11 +396,11 @@ mod tests {
         // Clockwise path: "up"→-X→"down"→+X→"up". Theta should decrease.
         let r = 1.0;
         let polylines = vec![Polyline::new(vec![
-            Point::new(0.0, -r), // "up"    → theta=0
+            Point::new(0.0, r),  // "up"    → theta=0
             Point::new(-r, 0.0), // -X      → theta=-π/2 (clockwise)
-            Point::new(0.0, r),  // "down"  → theta=-π
+            Point::new(0.0, -r), // "down"  → theta=-π
             Point::new(r, 0.0),  // +X      → theta=-3π/2
-            Point::new(0.0, -r), // "up"    → theta=-2π (unwound)
+            Point::new(0.0, r),  // "up"    → theta=-2π (unwound)
         ])];
         let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
@@ -478,11 +474,11 @@ mod tests {
         let r = 1.0;
         let polylines = vec![
             Polyline::new(vec![
-                Point::new(0.0, -r), // "up"   → theta=0
-                Point::new(r, 0.0),  // +X     → theta=π/2
+                Point::new(0.0, r), // "up"   → theta=0
+                Point::new(r, 0.0), // +X     → theta=π/2
             ]),
             Polyline::new(vec![
-                Point::new(0.0, r),  // "down" → theta=π
+                Point::new(0.0, -r), // "down" → theta=π
                 Point::new(-r, 0.0), // -X     → theta=3π/2
             ]),
         ];
