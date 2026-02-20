@@ -183,7 +183,7 @@ The border shape is tied to the canvas shape via the `CanvasShape` enum — each
 - `aspect_ratio` (f64, 1.0–4.0, default: 1.0) — rectangle aspect ratio (Rectangle only)
 - `landscape` (bool, default: true) — rectangle orientation (Rectangle only)
 - `border_path` (`BorderPathMode`, default: `Auto`)
-- `border_margin` (f64, 0.0-0.15, default: 0.0) — fraction of canvas size reserved as margin on each side; shrinks the canvas by `1 − 2 × border_margin`
+- `border_margin` (f64, 0.0–0.15, default: 0.0) — fraction of canvas size reserved as margin on each side; shrinks the canvas by `1 − 2 × border_margin`
 
 ### 9. Path Ordering + Joining
 
