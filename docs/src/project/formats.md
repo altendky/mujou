@@ -284,10 +284,11 @@ Rasterized render of the traced paths for quick sharing and thumbnailing.
 - Map normalized coordinates to pixel coordinates (with Y-flip):
 
   - **Circle or square rectangle (both axes span [-1, 1]):**
-    `pixel = (norm + 1) × output_resolution / 2`
+    `pixel_x = (norm_x + 1) × output_resolution / 2`
+    `pixel_y = (1 - norm_y) × output_resolution / 2`  ← Y-flip
   - **Rectangle mask (landscape, `aspect_ratio = A`):**
     `pixel_x = (norm_x / A + 1) × output_width  / 2` — `output_width  = output_resolution × A`
-    `pixel_y = (norm_y     + 1) × output_height / 2` — `output_height = output_resolution`
+    `pixel_y = (1 - norm_y)     × output_height / 2` — `output_height = output_resolution`  ← Y-flip
   - **Rectangle mask (portrait):** swap width/height roles
 - White background, black strokes (or configurable colors)
 - Output as PNG-encoded bytes
