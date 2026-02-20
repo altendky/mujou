@@ -225,9 +225,11 @@ CAD interchange format for OnShape, Fusion 360, etc.
 ### Coordinate Transform
 
 Normalized coordinates are emitted directly (unitless) or scaled to a
-target dimension. DXF viewers interpret units based on the `$INSUNITS`
-header variable; mujou emits unitless coordinates matching the normalized
-space (circle: radius 1, centered at origin).
+target dimension. DXF uses a right-hand coordinate system with +Y up,
+matching the normalized coordinate system, so **no Y-flip is required**.
+DXF viewers interpret units based on the `$INSUNITS` header variable;
+mujou emits unitless coordinates matching the normalized space
+(circle: radius 1, centered at origin).
 
 ### Format Specification
 
