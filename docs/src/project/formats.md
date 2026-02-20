@@ -128,13 +128,24 @@ G1 X32.50 Y7.80 F3000
 
 ### Coordinate Transform
 
-Normalized coordinates are scaled to the bed dimensions:
+Normalized coordinates are scaled to the bed dimensions. For a **circle** mask
+(or square rectangle), both axes span [-1, 1]:
 
-- `gcode_x = (norm_x + 1) × bed_width / 2` (shift from [-1, 1] to [0, bed_width])
-- `gcode_y = (norm_y + 1) × bed_height / 2` (shift from [-1, 1] to [0, bed_height])
+- `gcode_x = (norm_x + 1) × bed_width / 2`
+- `gcode_y = (norm_y + 1) × bed_height / 2`
 
-For a rectangle mask with aspect_ratio > 1, the longer axis maps to the
-longer bed dimension.
+For a **rectangle** mask with `aspect_ratio = A > 1`, the long axis spans
+`[-A, A]` in normalized space. Map the long axis to the long bed dimension:
+
+```text
+// landscape (long = X):
+gcode_x = (norm_x / A + 1) × bed_width  / 2   // maps [-A, A] → [0, bed_width]
+gcode_y = (norm_y     + 1) × bed_height / 2   // maps [-1, 1] → [0, bed_height]
+
+// portrait (long = Y):
+gcode_x = (norm_x     + 1) × bed_width  / 2   // maps [-1, 1] → [0, bed_width]
+gcode_y = (norm_y / A + 1) × bed_height / 2   // maps [-A, A] → [0, bed_height]
+```
 
 ### Configuration
 
@@ -268,8 +279,14 @@ Rasterized render of the traced paths for quick sharing and thumbnailing.
 ### Specification
 
 - Render normalized-space polylines onto a pixel buffer using the `image` crate
-- Map normalized coordinates to pixel coordinates:
-  `pixel = (norm + 1) × output_resolution / 2` (with Y-flip)
+- Map normalized coordinates to pixel coordinates (with Y-flip):
+
+  - **Circle or square rectangle (both axes span [-1, 1]):**
+    `pixel = (norm + 1) × output_resolution / 2`
+  - **Rectangle mask (landscape, `aspect_ratio = A`):**
+    `pixel_x = (norm_x / A + 1) × output_width  / 2` — `output_width  = output_resolution × A`
+    `pixel_y = (norm_y     + 1) × output_height / 2` — `output_height = output_resolution`
+  - **Rectangle mask (portrait):** swap width/height roles
 - White background, black strokes (or configurable colors)
 - Output as PNG-encoded bytes
 - Resolution configurable (default: working resolution)
