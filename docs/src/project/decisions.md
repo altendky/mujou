@@ -160,6 +160,95 @@ Positional precision on gentle curves will be limited to the ~3.3mm grid spacing
 
 **Deferred: coarse-then-fine with region masking.** A coarse pass at low resolution identifies where edges exist, producing a binary mask of "interesting" regions. A second fine-resolution pass runs only in unmasked regions, skipping the ~99% of the image that is featureless. This avoids full-image high-res cost while preserving sub-pixel positional precision where edges actually occur. Simpler than a tiling approach (no stitching across tile boundaries). See [Open Questions](open-questions.md#performance).
 
+## Coordinate System and Normalized Space
+
+**Decision:** All pipeline stages after contour tracing operate in a center-origin,
++Y-up normalized coordinate space where the mask edge = 1.0 from center.
+A mask is always required. The `mask_scale` parameter is replaced by `zoom`
+(photographer's convention, default 1.25, range 0.4–3.0).
+
+**Rationale:**
+
+### Problems with the previous design
+
+The previous pipeline used working-resolution pixel coordinates throughout,
+with the mask as an optional clipping step. This caused several issues:
+
+1. **Wasted viewport.** The preview SVG viewBox covered the full image
+   dimensions. When the mask was smaller than the image (the common case),
+   the actual output content occupied a fraction of the preview area.
+
+2. **Resolution-coupled parameters.** Simplification tolerance, subsample
+   spacing, and border point spacing were in pixel units. Changing
+   `working_resolution` silently changed the visual effect of these
+   parameters.
+
+3. **Inconsistent coordinate semantics.** The internal representation
+   (pixel coords), preview (pixel-based viewBox), and export formats
+   (THR: normalized polar; SVG: sometimes mm, sometimes pixels; G-code: mm)
+   each used different coordinate systems with ad-hoc inline transforms.
+
+4. **Ambiguous info strings.** Diagnostic labels mixed pixel values with
+   scale fractions. The `mask_scale` parameter (a fraction of the image
+   diagonal) was labeled "d=" in diagnostics, easily confused with
+   "diameter."
+
+5. **Scale semantics.** `mask_scale` controlled the mask size relative to
+   the image. Increasing the value made the mask larger, showing more
+   content but also expanding the output geometry. The mental model was
+   "resize the mask within a fixed image" rather than "zoom a fixed
+   output frame into the image."
+
+### Design
+
+See [Principles: Coordinate System](principles.md#coordinate-system) for the
+full specification.
+
+Key choices:
+
+- **Center origin, +Y up, radius = 1.** Aligns with the unit circle, makes THR
+  polar conversion trivial (`rho = distance`, no scaling), and matches
+  math/G-code conventions. The Y-flip from pixel space happens once.
+
+- **Mask always required.** Every sand table and plotter has a physical boundary.
+  The mask IS the output frame — it defines the normalized space. Removing the
+  "no mask" case simplifies the pipeline (one coordinate system after
+  normalization) and eliminates an edge case that produced unbounded output.
+
+- **Zoom replaces mask_scale.** The output frame (mask shape) is fixed at
+  radius = 1. The `zoom` parameter controls how the source image is projected
+  into that frame using the photographer's convention: zoom > 1 magnifies
+  (crops more), zoom < 1 shrinks (crops less). This inverts the old mental
+  model and eliminates the viewport waste problem — the preview always fills
+  the screen.
+
+- **Normalization between contour tracing and simplification.** Pixel-buffer
+  stages (decode through Canny) necessarily operate in pixel space.
+  Contour tracing produces pixel coordinates from the edge map. All subsequent
+  vector stages (simplify, mask, join, subsample) operate in normalized space.
+  This is the natural boundary: raster processing ends, vector processing begins.
+
+- **Resolution-independent parameters.** Simplification tolerance, subsample
+  spacing, and border point spacing are in normalized units. The same parameter
+  values produce visually consistent results regardless of `working_resolution`.
+
+### Alternatives considered
+
+- **Normalize at export only.** Keeps the pipeline in pixel space and transforms
+  at the end. Rejected because it perpetuates resolution-coupled parameters and
+  duplicates transform logic across exporters.
+
+- **Shorter dimension = 1 (diameter-based).** The mask circle would have
+  radius = 0.5 and the viewBox would be `-0.5 -0.5 1 1`. Rejected because
+  in a center-origin system, radius = 1 is more natural: it aligns with the
+  unit circle, makes THR rho = Euclidean distance, and avoids 0.5 factors
+  throughout.
+
+- **Keep mask optional.** Would require a separate "no mask" normalization
+  (image shorter dim = 2, center origin). Rejected because every real output
+  device has a physical boundary, and the "no mask" case added complexity for
+  a use case that doesn't exist in practice.
+
 ## Project Architecture
 
 **Decision:** Sans-IO with three-layer Cargo workspace.
