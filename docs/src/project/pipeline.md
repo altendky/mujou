@@ -258,7 +258,7 @@ evenly-spaced intermediate points along segments that exceed
 Short segments (≤ `subsample_max_length`) are kept as-is. The operation is
 idempotent and preserves all original points.
 
-**User parameter:** `subsample_max_length` (f64, default: 2.0, normalized units)
+**User parameter:** `subsample_max_length` (f64, default: TBD, normalized units)
 
 ### 11. Invert (Optional)
 
@@ -288,7 +288,7 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `border_margin` | f64 | 0.0 | — | Canvas margin fraction (0.0–0.15), shrinks canvas by `1 − 2 × value` |
 | `path_joiner` | `PathJoiner` | `Mst` | — | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
 | `parity_strategy` | `ParityStrategy` | `Greedy` | — | Odd-vertex pairing method for Mst joiner (`Greedy`/`Optimal`) |
-| `subsample_max_length` | f64 | 2.0 | normalized | Max segment length before subdivision |
+| `subsample_max_length` | f64 | TBD | normalized | Max segment length before subdivision |
 | `invert` | bool | false | — | Invert edge map |
 
 ## Performance Considerations
