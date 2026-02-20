@@ -287,6 +287,7 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `border_path` | `BorderPathMode` | `Auto` | — | Add border polyline along canvas edge (`Auto`/`On`/`Off`) |
 | `border_margin` | f64 | 0.0 | — | Canvas margin fraction (0.0–0.15), shrinks canvas by `1 − 2 × value` |
 | `path_joiner` | `PathJoiner` | `Mst` | — | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
+| `parity_strategy` | `ParityStrategy` | `Greedy` | — | Odd-vertex pairing method for Mst joiner (`Greedy`/`Optimal`) |
 | `subsample_max_length` | f64 | 2.0 | normalized | Max segment length before subdivision |
 | `invert` | bool | false | — | Invert edge map |
 
