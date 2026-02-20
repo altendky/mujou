@@ -10,14 +10,13 @@
 //!
 //! [Sandify](https://github.com/jeffeb3/sandify) performs the same
 //! operation (with a 2 mm threshold in machine coordinates) before
-//! its Cartesian-to-polar conversion.  Since mujou works in pixel
-//! space and doesn't know the physical table size, the threshold is
-//! expressed in pixels.
+//! its Cartesian-to-polar conversion.  The threshold is expressed in
+//! normalized units (mask edge = 1.0).
 
 use crate::types::{Point, Polyline};
 
 /// Subdivide long segments in a polyline so no segment exceeds
-/// `max_length` pixels.
+/// `max_length` (in normalized units).
 ///
 /// For each consecutive pair of points where the Euclidean distance
 /// exceeds `max_length`, evenly-spaced intermediate points are

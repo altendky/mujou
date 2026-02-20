@@ -65,8 +65,8 @@ pub struct WorkerResult {
     /// Output polyline — the final output.
     ///
     /// Long segments in the joined path are subdivided so no segment
-    /// exceeds `config.subsample_max_length` pixels. This prevents
-    /// angular artifacts in polar (THR) conversion.
+    /// exceeds `config.subsample_max_length` normalized units. This
+    /// prevents angular artifacts in polar (THR) conversion.
     pub output: Polyline,
     /// Per-MST-edge diagnostic details from the join stage.
     ///

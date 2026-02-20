@@ -250,9 +250,9 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     eprintln!("Loaded cherry-blossoms.png: {} bytes", image_bytes.len());
 
     // Match the exact config used to produce the image with the visible
-    // long diagonal: scale=0.6, mst_neighbours=200, Optimal parity.
+    // long diagonal: zoom=0.6, mst_neighbours=200, Optimal parity.
     let config = mujou_pipeline::PipelineConfig {
-        scale: 0.6,
+        zoom: 0.6,
         mst_neighbours: 200,
         parity_strategy: mujou_pipeline::ParityStrategy::Optimal,
         ..mujou_pipeline::PipelineConfig::default()
@@ -274,17 +274,15 @@ fn cherry_blossoms_mst_edge_diagnostics() {
         other => panic!("expected Join metrics, got {other:?}"),
     };
 
-    // Compute mask geometry for border-routing analysis.
-    let w = f64::from(result.dimensions.width);
-    let h = f64::from(result.dimensions.height);
-    let center_x = w / 2.0;
-    let center_y = h / 2.0;
-    let radius = w.min(h) / (2.0 * config.scale);
+    // In normalized space the circle mask is at the origin with radius 1.0.
+    let center_x = 0.0_f64;
+    let center_y = 0.0_f64;
+    let radius = 1.0_f64;
 
     eprintln!("\n=== MST Edge Diagnostics ===");
     eprintln!(
-        "Mask: center=({:.1}, {:.1}) radius={:.1}px scale={:.2}",
-        center_x, center_y, radius, config.scale,
+        "Mask: center=({:.1}, {:.1}) radius={:.1} zoom={:.2}",
+        center_x, center_y, radius, config.zoom,
     );
     eprintln!("Total MST edges: {}", quality.mst_edge_details.len());
     eprintln!();
@@ -373,7 +371,7 @@ fn cherry_blossoms_mst_edge_diagnostics() {
             let pts = poly.points();
             for si in 0..pts.len().saturating_sub(1) {
                 let d = pts[si].distance(pts[si + 1]);
-                if d > 20.0 {
+                if d > 0.04 {
                     input_segments.push((pi, si, d, &pts[si], &pts[si + 1]));
                 }
             }
@@ -422,19 +420,19 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     eprintln!("{}", "-".repeat(80));
 
     // Check each long segment against MST edges to classify it.
-    // Quantize coordinates to 0.1px grid for set-based lookup.
+    // Quantize normalized coordinates to a fine grid for set-based lookup.
     #[allow(clippy::cast_possible_truncation)]
     let mst_set: std::collections::HashSet<((i64, i64), (i64, i64))> = quality
         .mst_edge_details
         .iter()
         .flat_map(|e| {
             let a = (
-                (e.point_a.0 * 10.0).round() as i64,
-                (e.point_a.1 * 10.0).round() as i64,
+                (e.point_a.0 * 10000.0).round() as i64,
+                (e.point_a.1 * 10000.0).round() as i64,
             );
             let b = (
-                (e.point_b.0 * 10.0).round() as i64,
-                (e.point_b.1 * 10.0).round() as i64,
+                (e.point_b.0 * 10000.0).round() as i64,
+                (e.point_b.1 * 10000.0).round() as i64,
             );
             // Both directions
             vec![(a, b), (b, a)]
@@ -448,16 +446,19 @@ fn cherry_blossoms_mst_edge_diagnostics() {
 
         // Classify: is this an MST edge?
         let from_key = (
-            (from.x * 10.0).round() as i64,
-            (from.y * 10.0).round() as i64,
+            (from.x * 10000.0).round() as i64,
+            (from.y * 10000.0).round() as i64,
         );
-        let to_key = ((to.x * 10.0).round() as i64, (to.y * 10.0).round() as i64);
+        let to_key = (
+            (to.x * 10000.0).round() as i64,
+            (to.y * 10000.0).round() as i64,
+        );
         let is_mst = mst_set.contains(&(from_key, to_key));
 
-        // Is either endpoint on the border circle?
+        // Is either endpoint on the border circle (radius=1.0)?
         let from_r = ((from.x - center_x).hypot(from.y - center_y) - radius).abs();
         let to_r = ((to.x - center_x).hypot(to.y - center_y) - radius).abs();
-        let on_border = from_r < 2.0 || to_r < 2.0;
+        let on_border = from_r < 0.005 || to_r < 0.005;
 
         let classification = if is_mst {
             "MST"
@@ -485,7 +486,6 @@ fn cherry_blossoms_mst_edge_diagnostics() {
     // Write diagnostic SVG with highlighted MST edges.
     let diagnostic_svg = mujou_export::to_diagnostic_svg(
         std::slice::from_ref(&result.joined),
-        result.dimensions,
         &mujou_export::SvgMetadata {
             title: Some("cherry-blossoms (MST edge diagnostics)"),
             description: Some("Red lines = MST connecting edges"),
@@ -529,16 +529,13 @@ fn cherry_blossoms_pipeline_to_thr() {
     let result =
         mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
 
-    let mask_shape = Some(&result.canvas.shape);
     let thr = mujou_export::to_thr(
         std::slice::from_ref(result.final_polyline()),
-        result.dimensions,
         &mujou_export::ThrMetadata {
             title: Some("cherry-blossoms.png"),
             description: Some("integration test"),
             ..mujou_export::ThrMetadata::default()
         },
-        mask_shape,
     );
 
     // Header assertions.
@@ -607,12 +604,9 @@ fn cherry_blossoms_pipeline_to_thr_with_mask() {
     let result =
         mujou_pipeline::process_staged(&image_bytes, &config).expect("pipeline should succeed");
 
-    let mask_shape = Some(&result.canvas.shape);
     let thr = mujou_export::to_thr(
         std::slice::from_ref(result.final_polyline()),
-        result.dimensions,
         &mujou_export::ThrMetadata::default(),
-        mask_shape,
     );
 
     let pairs: Vec<(f64, f64)> = thr
@@ -629,7 +623,7 @@ fn cherry_blossoms_pipeline_to_thr_with_mask() {
     eprintln!(
         "THR with mask: {} pairs, mask_shape={:?}",
         pairs.len(),
-        mask_shape,
+        result.canvas.shape,
     );
     assert!(!pairs.is_empty(), "expected non-empty THR output with mask");
 
@@ -709,7 +703,6 @@ fn cherry_blossoms_segment_diagnostics() {
     // Generate the segment diagnostic SVG.
     let svg = mujou_export::to_segment_diagnostic_svg(
         std::slice::from_ref(joined),
-        result.dimensions,
         &mujou_export::SvgMetadata {
             title: Some("cherry-blossoms (segment diagnostics)"),
             description: Some("Top 5 longest segments highlighted in distinct colors"),
@@ -739,7 +732,9 @@ fn cherry_blossoms_svg_uses_joined_not_subsampled() {
     let config = mujou_pipeline::PipelineConfig {
         // Force subsampling to insert points so the precondition
         // (output has more points than joined) is deterministic.
-        subsample_max_length: 1.0,
+        // In normalized space, 0.002 is small enough to guarantee
+        // subdivision of most segments.
+        subsample_max_length: 0.002,
         ..mujou_pipeline::PipelineConfig::default()
     };
     let result =

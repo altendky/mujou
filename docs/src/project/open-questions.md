@@ -5,18 +5,14 @@
 - [ ] WebP decoding in WASM -- Does the `image` crate's WebP decoder work in `wasm32-unknown-unknown`? May need to limit input formats to PNG/JPEG/BMP if not.
 - [x] Maximum image size / working resolution -- Decided: downsample to ~256px on the long axis early in the pipeline. Based on reference target device analysis (34" table, ~5mm track width, ~170 resolvable lines). See [Decisions](decisions.md#reference-target-device).
 - [x] Contour tracing suitability -- Decided: design as a [pluggable algorithm strategy](principles.md#pluggable-algorithm-strategies) via the `ContourTracer` trait. MVP ships with `BorderFollowing` (Suzuki-Abe via `imageproc`). On 1px-wide Canny edges this produces doubled borders that RDP collapses in practice (same approach as Image2Sand). `MarchingSquares` is a deferred alternative for cleaner single-line geometry. See [Pipeline](pipeline.md#5-contour-tracing).
-- [x] Coordinate system and normalized space -- Decided: center origin, +Y up, mask edge = 1.0 (unit circle for circle mask). Mask always required. `mask_scale` replaced by `zoom` (photographer's convention, default 1.25, range 0.4–3.0). Normalization happens between contour tracing and simplification. All vector-stage parameters are in normalized units. See [Decisions](decisions.md#coordinate-system-and-normalized-space) and [Principles: Coordinate System](principles.md#coordinate-system).
 - [ ] Spiral in/out for .thr -- Should we generate spiral-in/out paths for sand tables that need the ball to start/end at center/edge, or is that the table firmware's responsibility? Image2Sand does not generate spirals.
-- [x] Point interpolation for .thr -- Addressed by the subsample pipeline step, which breaks long segments into shorter sub-segments before export. Subsample spacing is now in normalized units. See [Pipeline](pipeline.md).
+- [ ] Point interpolation for .thr -- Image2Sand interpolates additional points along segments for smoother polar coordinate conversion. Do we need this, or is the point density from contour tracing sufficient?
 - [x] Deployment target -- Decided: GitHub Pages. Simplest option (same repo, no additional vendor), free tier sufficient, avoids platform lock-in. App served at `/app/` path with landing page at root. See [Decisions](decisions.md#deployment-target).
 - [ ] Pre-commit scope -- Match onshape-mcp's full hook suite from day one, or start with a minimal set?
 - [ ] CI setup -- GitHub Actions workflows, when to set up? After MVP UI is working, or earlier?
 - [x] Project naming -- Decided: **mujou** (無常, impermanence), domain **mujou.art**. See [Naming](naming.md) for full exploration and reasoning.
 - [ ] WASM binary size -- How large will the binary be with `image` + `imageproc`? May need `wasm-opt -Oz` and `lto = true` in release profile. Need to measure.
 - [ ] `imageproc` Rust version requirement -- `imageproc` 0.26 may require Rust 1.87+ (edition 2024). Verify and pin in `rust-toolchain.toml`.
-- [ ] Normalized `simplify_tolerance` default -- Need to determine the right default for `simplify_tolerance` in normalized units. The old default was 2.0px at ~256px working resolution, which is roughly 2.0/128 ≈ 0.016 normalized (half the shorter dimension). Needs validation with real images at different working resolutions.
-- [ ] Normalized `subsample_max_length` default -- Same concern as `simplify_tolerance`. Old default was 2.0px. Need to validate the normalized equivalent.
-- [ ] Physical size awareness in pipeline -- Currently physical dimensions (mm) are only known at the export boundary. Future features (device-specific optimization, physical track width awareness) may require physical size awareness earlier in the pipeline. Deferred until a concrete feature needs it.
 
 ## Deferred
 
@@ -31,7 +27,7 @@ Items to address after MVP:
 
 ### Validation
 
-- [ ] `PipelineConfig` validated constructor -- Add `try_new()` (or a builder) that enforces invariants (`blur_sigma > 0`, `canny_low <= canny_high`, `0.4 <= zoom <= 3.0`, `1.0 <= mask_aspect_ratio <= 4.0`, `simplify_tolerance >= 0.0`, `subsample_max_length > 0.0`), make fields private, add getters, and return `PipelineError::InvalidConfig` on failure. See [PR #2 discussion](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
+- [ ] `PipelineConfig` validated constructor -- Add `try_new()` (or a builder) that enforces invariants (`blur_sigma > 0`, `canny_low <= canny_high`, `0.0 <= mask_scale <= 1.5`, `1.0 <= mask_aspect_ratio <= 4.0`, `simplify_tolerance >= 0.0`), make fields private, add getters, and return `PipelineError::InvalidConfig` on failure. See [PR #2 discussion](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
 
 ### Architecture
 

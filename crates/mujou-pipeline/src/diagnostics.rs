@@ -161,7 +161,7 @@ pub enum StageMetrics {
     },
     /// Path simplification metrics.
     Simplification {
-        /// RDP tolerance in pixels.
+        /// RDP tolerance in normalized units.
         tolerance: f64,
         /// Number of polylines after simplification.
         polyline_count: usize,
@@ -207,7 +207,7 @@ pub enum StageMetrics {
     },
     /// Segment subsampling metrics.
     Output {
-        /// Maximum segment length in pixels.
+        /// Maximum segment length in normalized units.
         max_length: f64,
         /// Points in the joined path before subsampling.
         points_before: usize,
@@ -407,13 +407,13 @@ fn format_metrics(metrics: &StageMetrics) -> String {
                     })
                     .map(|e| {
                         format!(
-                            " longest={:.1}px (poly {} <-> poly {})",
+                            " longest={:.4} (poly {} <-> poly {})",
                             e.weight, e.poly_a, e.poly_b,
                         )
                     })
                     .unwrap_or_default();
                 format!(
-                    "{base} | mst={} edges, conn={:.1}px max={:.1}px retrace={:.1}px path={:.1}px odd={}->{}{longest_info}",
+                    "{base} | mst={} edges, conn={:.4} max={:.4} retrace={:.4} path={:.4} odd={}->{}{longest_info}",
                     q.mst_edge_count,
                     q.total_mst_edge_weight,
                     q.max_mst_edge_weight,
@@ -431,7 +431,7 @@ fn format_metrics(metrics: &StageMetrics) -> String {
             points_before,
             points_after,
         } => {
-            format!("max_len={max_length:.2}px {points_before}->{points_after} pts")
+            format!("max_len={max_length:.4} {points_before}->{points_after} pts")
         }
     }
 }
@@ -722,7 +722,7 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = crate::PipelineConfig {
             invert: false,
-            scale: 0.5,
+            zoom: 0.5,
             ..crate::PipelineConfig::default()
         };
         let clock = FakeClock::new();
@@ -763,7 +763,7 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = crate::PipelineConfig {
             shape: crate::mask::CanvasShape::Circle,
-            scale: 0.5,
+            zoom: 0.5,
             invert: true,
             ..crate::PipelineConfig::default()
         };
@@ -868,7 +868,7 @@ mod tests {
             canvas: StageDiagnostics {
                 duration: Duration::from_millis(5),
                 metrics: StageMetrics::Canvas {
-                    shape_info: "d=1.25 r=50.0px".to_string(),
+                    shape_info: "zoom=1.25 r=1.0".to_string(),
                     polylines_before: 10,
                     polylines_after: 10,
                     points_before: 100,
@@ -974,7 +974,7 @@ mod tests {
             canvas: StageDiagnostics {
                 duration: Duration::from_millis(3),
                 metrics: StageMetrics::Canvas {
-                    shape_info: "d=1.25 r=96.0px".to_string(),
+                    shape_info: "zoom=1.25 r=1.0".to_string(),
                     polylines_before: 8,
                     polylines_after: 8,
                     points_before: 80,

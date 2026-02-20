@@ -17,12 +17,16 @@ pub use image::GrayImage;
 /// original decoded image without depending on `image` directly.
 pub use image::RgbaImage;
 
-/// A 2D point in image coordinates.
+/// A 2D point.
+///
+/// Before normalization (stages 0–4): pixel coordinates (origin at
+/// top-left, +Y down).  After normalization (stages 5–9): center-origin
+/// normalized coordinates (+Y up, mask edge = 1.0).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Point {
-    /// Horizontal position (pixels from left edge).
+    /// Horizontal position.
     pub x: f64,
-    /// Vertical position (pixels from top edge).
+    /// Vertical position.
     pub y: f64,
 }
 
@@ -131,47 +135,12 @@ pub struct Dimensions {
 }
 
 impl Dimensions {
-    /// Compute the canvas circle radius in pixels for a given `scale`.
-    ///
-    /// Formula: `radius = min(width, height) / (2 × scale)`.
-    ///
-    /// At `scale = 1.0` the circle inscribes the image's shorter
-    /// dimension exactly. Values below 1.0 produce a larger circle
-    /// (extending beyond the shorter axis); values above 1.0 produce
-    /// a smaller circle.
+    /// The length of the shorter pixel dimension.
     #[must_use]
-    pub fn canvas_radius(self, scale: f64) -> f64 {
+    pub fn shorter_dim(self) -> f64 {
         let w = f64::from(self.width);
         let h = f64::from(self.height);
-        w.min(h) / (2.0 * scale)
-    }
-
-    /// Compute the rectangular canvas half-dimensions in pixels.
-    ///
-    /// `scale` controls the **shorter** dimension of the rectangle
-    /// relative to the image's shorter dimension (same divisor
-    /// relationship as [`canvas_radius`](Self::canvas_radius)).
-    /// `aspect_ratio` extends the longer dimension. `landscape`
-    /// determines orientation.
-    ///
-    /// Returns `(half_width, half_height)`.
-    #[must_use]
-    pub fn canvas_rect_half_dims(
-        self,
-        scale: f64,
-        aspect_ratio: f64,
-        landscape: bool,
-    ) -> (f64, f64) {
-        let w = f64::from(self.width);
-        let h = f64::from(self.height);
-        let shorter_image_dim = w.min(h);
-        let rect_shorter_side = shorter_image_dim / scale;
-        let rect_longer_side = rect_shorter_side * aspect_ratio;
-        if landscape {
-            (rect_longer_side / 2.0, rect_shorter_side / 2.0)
-        } else {
-            (rect_shorter_side / 2.0, rect_longer_side / 2.0)
-        }
+        w.min(h)
     }
 }
 
@@ -305,7 +274,7 @@ impl fmt::Display for StartPointStrategy {
 /// Fields are currently public with no construction-time validation.
 /// A validated constructor (`try_new`) or builder should be added to
 /// enforce invariants such as `blur_sigma > 0`, `canny_low <= canny_high`,
-/// `canny_low >= 1.0`, `scale in [0.1, 4.0]`, and
+/// `canny_low >= 1.0`, `zoom in [0.4, 3.0]`, and
 /// `simplify_tolerance >= 0.0`.
 /// Invalid values would return [`PipelineError::InvalidConfig`].
 /// See [open-questions: PipelineConfig validation](https://github.com/altendky/mujou/pull/2#discussion_r2778003093).
@@ -339,7 +308,7 @@ pub struct PipelineConfig {
     /// Which contour tracing algorithm to use.
     pub contour_tracer: ContourTracerKind,
 
-    /// Ramer-Douglas-Peucker simplification tolerance in pixels.
+    /// Ramer-Douglas-Peucker simplification tolerance in normalized units.
     /// Higher values remove more points, producing simpler paths.
     pub simplify_tolerance: f64,
 
@@ -351,17 +320,18 @@ pub struct PipelineConfig {
     #[serde(default)]
     pub shape: CanvasShape,
 
-    /// Canvas scale factor ([0.1, 4.0]).
+    /// Zoom factor ([0.4, 3.0]) — photographer's convention.
     ///
-    /// Controls the size of the canvas shape relative to the image.
-    /// Formula: `radius = min(w, h) / (2 × scale)` (circle) or
-    /// `shorter_side = min(w, h) / scale` (rectangle).
+    /// Controls magnification of the source image before clipping to the
+    /// canvas mask.  `zoom > 1` magnifies / crops more (smaller canvas
+    /// relative to image), `zoom < 1` shrinks / shows more.
     ///
-    /// At 1.0, the circle inscribes the shorter image dimension
-    /// exactly. Values below 1.0 produce a larger shape; values
-    /// above 1.0 produce a smaller shape.
-    #[serde(default = "PipelineConfig::default_scale")]
-    pub scale: f64,
+    /// The normalization transform applied after contour tracing is:
+    /// `norm = (pixel − center) × 2 × zoom / shorter_pixel_dim`
+    ///
+    /// Default 1.25, range 0.4–3.0.
+    #[serde(default = "PipelineConfig::default_zoom", alias = "scale")]
+    pub zoom: f64,
 
     /// Rectangle canvas aspect ratio (1.0 to 4.0).
     ///
@@ -448,7 +418,7 @@ pub struct PipelineConfig {
     #[serde(default)]
     pub start_point: StartPointStrategy,
 
-    /// Maximum segment length in pixels for subsampling.
+    /// Maximum segment length in normalized units for subsampling.
     ///
     /// After path joining, any segment longer than this value is
     /// subdivided into evenly-spaced sub-segments. This prevents
@@ -470,15 +440,18 @@ impl PipelineConfig {
     pub const DEFAULT_CANNY_HIGH: f32 = 40.0;
     /// Default Canny slider maximum.
     pub const DEFAULT_CANNY_MAX: f32 = 60.0;
-    /// Default RDP simplification tolerance in pixels.
-    pub const DEFAULT_SIMPLIFY_TOLERANCE: f64 = 1.0;
+    /// Default RDP simplification tolerance in normalized units.
+    ///
+    /// Equivalent to the old 1.0 px default at 1000 px working
+    /// resolution: `1.0 / 500.0 = 0.002` (`shorter_dim`/2 = 500).
+    pub const DEFAULT_SIMPLIFY_TOLERANCE: f64 = 0.002;
     /// Default canvas shape (Circle).
     pub const DEFAULT_SHAPE: CanvasShape = CanvasShape::Circle;
-    /// Default canvas scale factor.
+    /// Default zoom factor.
     ///
-    /// At 1.25, the canvas circle has radius `min(w,h) / 2.5` —
-    /// slightly smaller than inscribing the shorter dimension.
-    pub const DEFAULT_SCALE: f64 = 1.25;
+    /// At 1.25, the visible region is slightly smaller than the full
+    /// image — equivalent to the old `scale = 1.25`.
+    pub const DEFAULT_ZOOM: f64 = 1.25;
     /// Default rectangle canvas aspect ratio (square).
     pub const DEFAULT_ASPECT_RATIO: f64 = 1.0;
     /// Default rectangle canvas landscape orientation.
@@ -508,19 +481,17 @@ impl PipelineConfig {
     };
     /// Default start point strategy (outside / perimeter).
     pub const DEFAULT_START_POINT: StartPointStrategy = StartPointStrategy::Outside;
-    /// Default subsample max segment length in pixels.
+    /// Default subsample max segment length in normalized units.
     ///
-    /// Chosen to be small enough to prevent angular artifacts in polar
-    /// conversion while avoiding excessive point counts. At the default
-    /// working resolution of 1000px, a 500px-radius circle would have
-    /// segments of ~2px, well within a 2% arc.
-    pub const DEFAULT_SUBSAMPLE_MAX_LENGTH: f64 = 2.0;
+    /// Equivalent to the old 2.0 px default at 1000 px working
+    /// resolution: `2.0 / 500.0 = 0.004`.
+    pub const DEFAULT_SUBSAMPLE_MAX_LENGTH: f64 = 0.004;
 
     // Serde default helpers — serde's per-field `#[serde(default)]` uses
     // the *type's* `Default`, which is wrong for `f64` (0.0) and `bool`
     // (false).  These functions return the pipeline-specific defaults.
-    const fn default_scale() -> f64 {
-        Self::DEFAULT_SCALE
+    const fn default_zoom() -> f64 {
+        Self::DEFAULT_ZOOM
     }
     const fn default_aspect_ratio() -> f64 {
         Self::DEFAULT_ASPECT_RATIO
@@ -546,7 +517,7 @@ impl PipelineConfig {
     /// - `canny_high <= canny_max`
     /// - `canny_max <= edge::max_gradient_magnitude()`
     /// - `simplify_tolerance >= 0`
-    /// - `scale` in `[0.1, 4.0]`
+    /// - `zoom` in `[0.4, 3.0]`
     /// - `aspect_ratio` in `[1.0, 4.0]`
     /// - `working_resolution > 0`
     /// - `mst_neighbours > 0`
@@ -594,10 +565,10 @@ impl PipelineConfig {
                 self.simplify_tolerance,
             )));
         }
-        if !(0.1..=4.0).contains(&self.scale) {
+        if !(0.4..=3.0).contains(&self.zoom) {
             return Err(PipelineError::InvalidConfig(format!(
-                "scale must be in [0.1, 4.0], got {}",
-                self.scale,
+                "zoom must be in [0.4, 3.0], got {}",
+                self.zoom,
             )));
         }
         if !(1.0..=4.0).contains(&self.aspect_ratio) {
@@ -648,7 +619,7 @@ impl Default for PipelineConfig {
             simplify_tolerance: Self::DEFAULT_SIMPLIFY_TOLERANCE,
             path_joiner: PathJoinerKind::default(),
             shape: Self::DEFAULT_SHAPE,
-            scale: Self::DEFAULT_SCALE,
+            zoom: Self::DEFAULT_ZOOM,
             aspect_ratio: Self::DEFAULT_ASPECT_RATIO,
             landscape: Self::DEFAULT_LANDSCAPE,
             border_path: Self::DEFAULT_BORDER_PATH,
@@ -683,7 +654,7 @@ impl PipelineConfig {
             simplify_tolerance,
             path_joiner,
             shape,
-            scale,
+            zoom,
             aspect_ratio,
             landscape,
             border_path,
@@ -705,7 +676,7 @@ impl PipelineConfig {
             && *simplify_tolerance == other.simplify_tolerance
             && *path_joiner == other.path_joiner
             && *shape == other.shape
-            && *scale == other.scale
+            && *zoom == other.zoom
             && (*shape != CanvasShape::Rectangle
                 || (*aspect_ratio == other.aspect_ratio && *landscape == other.landscape))
             && *border_path == other.border_path
@@ -749,7 +720,7 @@ impl PipelineConfig {
             simplify_tolerance,
             path_joiner,
             shape,
-            scale,
+            zoom,
             aspect_ratio,
             landscape,
             border_path,
@@ -785,8 +756,9 @@ impl PipelineConfig {
             return 4;
         }
 
-        // Stage 5 — contour tracing: contour_tracer
-        if *contour_tracer != other.contour_tracer {
+        // Stage 5 — contour tracing + normalization: contour_tracer, zoom
+        // Zoom is part of the normalization transform folded into this stage.
+        if *contour_tracer != other.contour_tracer || *zoom != other.zoom {
             return 5;
         }
 
@@ -795,12 +767,11 @@ impl PipelineConfig {
             return 6;
         }
 
-        // Stage 7 — canvas: shape, scale, aspect_ratio, landscape, border_path, border_margin
+        // Stage 7 — canvas: shape, aspect_ratio, landscape, border_path, border_margin
         // aspect_ratio and landscape only affect output in Rectangle mode.
         let rect_relevant =
             *shape == CanvasShape::Rectangle || other.shape == CanvasShape::Rectangle;
         if *shape != other.shape
-            || *scale != other.scale
             || (rect_relevant
                 && (*aspect_ratio != other.aspect_ratio || *landscape != other.landscape))
             || *border_path != other.border_path
@@ -886,8 +857,8 @@ pub struct StagedResult {
     /// Stage 9: output path (the final output).
     ///
     /// Long segments in the joined path are subdivided so no segment
-    /// exceeds `config.subsample_max_length` pixels. This prevents
-    /// angular artifacts in polar (THR) conversion.
+    /// exceeds `config.subsample_max_length` normalized units. This
+    /// prevents angular artifacts in polar (THR) conversion.
     pub output: Polyline,
     /// Per-MST-edge diagnostic details from the join stage.
     ///
@@ -1203,10 +1174,10 @@ mod tests {
         assert!((config.canny_high - 40.0).abs() < f32::EPSILON);
         assert!((config.canny_max - 60.0).abs() < f32::EPSILON);
         assert_eq!(config.contour_tracer, ContourTracerKind::BorderFollowing);
-        assert!((config.simplify_tolerance - 1.0).abs() < f64::EPSILON);
+        assert!((config.simplify_tolerance - 0.002).abs() < f64::EPSILON);
         assert_eq!(config.path_joiner, PathJoinerKind::Mst);
         assert_eq!(config.shape, CanvasShape::Circle);
-        assert!((config.scale - 1.25).abs() < f64::EPSILON);
+        assert!((config.zoom - 1.25).abs() < f64::EPSILON);
         assert!((config.aspect_ratio - 1.0).abs() < f64::EPSILON);
         assert!(config.landscape);
         assert!(!config.invert);
@@ -1225,8 +1196,8 @@ mod tests {
         assert!(!config.edge_channels.saturation);
         assert_eq!(config.start_point, StartPointStrategy::Outside);
         assert!(
-            (config.subsample_max_length - 2.0).abs() < f64::EPSILON,
-            "default subsample_max_length should be 2.0",
+            (config.subsample_max_length - 0.004).abs() < f64::EPSILON,
+            "default subsample_max_length should be 0.004",
         );
     }
 
@@ -1321,8 +1292,8 @@ mod tests {
         assert!(!a.pipeline_eq(&b), "path_joiner change should be detected");
 
         let mut b = a.clone();
-        b.scale -= 0.1;
-        assert!(!a.pipeline_eq(&b), "scale change should be detected");
+        b.zoom -= 0.1;
+        assert!(!a.pipeline_eq(&b), "zoom change should be detected");
 
         let mut b = a.clone();
         b.mst_neighbours += 10;
@@ -1375,68 +1346,68 @@ mod tests {
     }
 
     #[test]
-    fn validate_rejects_scale_below_minimum() {
+    fn validate_rejects_zoom_below_minimum() {
         let config = PipelineConfig {
-            scale: 0.0,
+            zoom: 0.0,
             ..PipelineConfig::default()
         };
         let err = config.validate().unwrap_err();
         assert!(
-            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("scale")),
-            "expected InvalidConfig about scale, got {err:?}",
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("zoom")),
+            "expected InvalidConfig about zoom, got {err:?}",
         );
     }
 
     #[test]
-    fn validate_accepts_scale_minimum() {
+    fn validate_accepts_zoom_minimum() {
         let config = PipelineConfig {
-            scale: 0.1,
+            zoom: 0.4,
             ..PipelineConfig::default()
         };
         assert!(config.validate().is_ok());
     }
 
     #[test]
-    fn validate_accepts_scale_max() {
+    fn validate_accepts_zoom_max() {
         let config = PipelineConfig {
-            scale: 4.0,
+            zoom: 3.0,
             ..PipelineConfig::default()
         };
         assert!(config.validate().is_ok());
     }
 
     #[test]
-    fn validate_accepts_scale_above_one() {
+    fn validate_accepts_zoom_above_one() {
         let config = PipelineConfig {
-            scale: 1.3,
+            zoom: 1.3,
             ..PipelineConfig::default()
         };
         assert!(config.validate().is_ok());
     }
 
     #[test]
-    fn validate_rejects_scale_negative() {
+    fn validate_rejects_zoom_negative() {
         let config = PipelineConfig {
-            scale: -0.01,
+            zoom: -0.01,
             ..PipelineConfig::default()
         };
         let err = config.validate().unwrap_err();
         assert!(
-            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("scale")),
-            "expected InvalidConfig about scale, got {err:?}",
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("zoom")),
+            "expected InvalidConfig about zoom, got {err:?}",
         );
     }
 
     #[test]
-    fn validate_rejects_scale_above_max() {
+    fn validate_rejects_zoom_above_max() {
         let config = PipelineConfig {
-            scale: 4.01,
+            zoom: 3.01,
             ..PipelineConfig::default()
         };
         let err = config.validate().unwrap_err();
         assert!(
-            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("scale")),
-            "expected InvalidConfig about scale, got {err:?}",
+            matches!(err, PipelineError::InvalidConfig(ref s) if s.contains("zoom")),
+            "expected InvalidConfig about zoom, got {err:?}",
         );
     }
 
@@ -1539,7 +1510,7 @@ mod tests {
             simplify_tolerance: 1.5,
             path_joiner: PathJoinerKind::Retrace,
             shape: CanvasShape::Rectangle,
-            scale: 0.85,
+            zoom: 0.85,
             aspect_ratio: 2.0,
             landscape: false,
             border_path: BorderPathMode::On,
@@ -1617,7 +1588,8 @@ mod tests {
         }"#;
         let config: PipelineConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.shape, CanvasShape::Circle);
-        assert!((config.scale - PipelineConfig::DEFAULT_SCALE).abs() < f64::EPSILON,);
+        // The old JSON has "scale" which is read via the serde alias.
+        assert!((config.zoom - PipelineConfig::DEFAULT_ZOOM).abs() < f64::EPSILON,);
         assert!((config.aspect_ratio - PipelineConfig::DEFAULT_ASPECT_RATIO).abs() < f64::EPSILON,);
         assert_eq!(config.landscape, PipelineConfig::DEFAULT_LANDSCAPE);
     }
@@ -1876,13 +1848,14 @@ mod tests {
     }
 
     #[test]
-    fn earliest_changed_stage_scale() {
+    fn earliest_changed_stage_zoom() {
         let a = PipelineConfig::default();
         let b = PipelineConfig {
-            scale: 1.2,
+            zoom: 1.2,
             ..PipelineConfig::default()
         };
-        assert_eq!(a.earliest_changed_stage(&b), 7);
+        // Zoom is folded into stage 5 (contour tracing + normalization).
+        assert_eq!(a.earliest_changed_stage(&b), 5);
     }
 
     #[test]
@@ -1927,12 +1900,12 @@ mod tests {
 
     #[test]
     fn earliest_changed_stage_returns_earliest() {
-        // When both blur_sigma (stage 3) and scale (stage 7)
+        // When both blur_sigma (stage 3) and zoom (stage 5)
         // change, the earliest stage should be 3.
         let a = PipelineConfig::default();
         let b = PipelineConfig {
             blur_sigma: 5.0,
-            scale: 1.2,
+            zoom: 1.2,
             ..PipelineConfig::default()
         };
         assert_eq!(a.earliest_changed_stage(&b), 3);

@@ -12,9 +12,10 @@ use crate::types::{Point, Polyline};
 
 /// Simplify a single polyline using the Ramer-Douglas-Peucker algorithm.
 ///
-/// Points within `tolerance` pixels of the line between their endpoints
-/// are removed. A tolerance of 0.0 preserves all non-collinear points
-/// (perfectly collinear interior points are still removed).
+/// Points within `tolerance` (in normalized units) of the line between
+/// their endpoints are removed. A tolerance of 0.0 preserves all
+/// non-collinear points (perfectly collinear interior points are still
+/// removed).
 ///
 /// Returns the simplified polyline. Polylines with fewer than 3 points
 /// are returned unchanged (nothing to simplify).

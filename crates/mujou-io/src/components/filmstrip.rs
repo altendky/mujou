@@ -147,9 +147,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
 
         StageId::Contours | StageId::Simplified | StageId::Canvas => {
             let polylines = result.polylines_for_stage(stage);
-            let w = result.dimensions.width;
-            let h = result.dimensions.height;
-            let view_box = super::compute_view_box(&polylines, w, h);
+            let view_box = super::compute_view_box(&polylines);
 
             rsx! {
                 svg {
@@ -172,9 +170,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             } else {
                 &result.joined
             };
-            let w = result.dimensions.width;
-            let h = result.dimensions.height;
-            let view_box = super::compute_view_box(std::slice::from_ref(polyline), w, h);
+            let view_box = super::compute_view_box(std::slice::from_ref(polyline));
             let d = build_path_data(polyline);
 
             rsx! {
@@ -190,7 +186,8 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
                             d: "{d}",
                             fill: "none",
                             stroke: "var(--preview-stroke)",
-                            stroke_width: "1",
+                            stroke_width: THUMBNAIL_STROKE_WIDTH,
+                            "vector-effect": "non-scaling-stroke",
                         }
                     }
                 }
@@ -210,6 +207,14 @@ fn render_img_thumb(url: &str, alt: &str) -> Element {
     }
 }
 
+/// Stroke width for filmstrip thumbnail SVG paths (CSS pixels).
+///
+/// With `vector-effect: non-scaling-stroke`, this is an absolute CSS
+/// pixel value.  A sub-pixel width produces anti-aliased lines that
+/// visually match the Edges raster thumbnail (which is a full-
+/// resolution image downscaled by the browser).
+const THUMBNAIL_STROKE_WIDTH: &str = "0.5";
+
 /// Render a single polyline as an SVG path for a thumbnail.
 fn render_thumbnail_path(polyline: &mujou_pipeline::Polyline) -> Element {
     let d = build_path_data(polyline);
@@ -222,7 +227,8 @@ fn render_thumbnail_path(polyline: &mujou_pipeline::Polyline) -> Element {
             d: "{d}",
             fill: "none",
             stroke: "var(--preview-stroke)",
-            stroke_width: "1",
+            stroke_width: THUMBNAIL_STROKE_WIDTH,
+            "vector-effect": "non-scaling-stroke",
         }
     }
 }

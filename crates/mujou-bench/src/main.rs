@@ -61,9 +61,9 @@ struct Cli {
     #[arg(long, value_enum, default_value_t = CLI_DEFAULT_SHAPE)]
     shape: CliCanvasShape,
 
-    /// Canvas scale divisor (0.1-4.0); radius = min(w,h) / (2 × scale).
-    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_SCALE)]
-    scale: f64,
+    /// Zoom factor (0.4-3.0); >1 magnifies/crops, <1 shows more.
+    #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_ZOOM)]
+    zoom: f64,
 
     /// Rectangle canvas aspect ratio (1.0-4.0, width/height before orientation).
     #[arg(long, default_value_t = mujou_pipeline::PipelineConfig::DEFAULT_ASPECT_RATIO)]
@@ -213,7 +213,7 @@ fn config_from_cli(cli: &Cli) -> Result<mujou_pipeline::PipelineConfig, String> 
             CliCanvasShape::Circle => mujou_pipeline::CanvasShape::Circle,
             CliCanvasShape::Rectangle => mujou_pipeline::CanvasShape::Rectangle,
         },
-        scale: cli.scale,
+        zoom: cli.zoom,
         aspect_ratio: cli.aspect_ratio,
         landscape: cli.landscape,
         invert: cli.invert,

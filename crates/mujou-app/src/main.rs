@@ -752,12 +752,12 @@ fn app() -> Element {
                     cfg.path_joiner,
                     match cfg.shape {
                         mujou_pipeline::CanvasShape::Circle => {
-                            format!("circle s={:.2}", cfg.scale)
+                            format!("circle zoom={:.2}", cfg.zoom)
                         }
                         mujou_pipeline::CanvasShape::Rectangle => {
                             format!(
-                                "rect s={:.2} ar={:.2} {}",
-                                cfg.scale,
+                                "rect zoom={:.2} ar={:.2} {}",
+                                cfg.zoom,
                                 cfg.aspect_ratio,
                                 if cfg.landscape { "land" } else { "port" },
                             )

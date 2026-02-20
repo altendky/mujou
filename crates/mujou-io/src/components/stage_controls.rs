@@ -346,12 +346,12 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "simplify_tolerance",
                         "Simplify Tolerance",
-                        desc("Point reduction strength. Higher means fewer points."),
+                        desc("Point reduction strength in normalized units. Higher means fewer points."),
                         value,
                         0.0,
-                        10.0,
-                        0.1,
-                        1,
+                        0.05,
+                        0.001,
+                        3,
                         1.0, "",
                         move |v: f64| {
                             let mut c = config.clone();
@@ -365,7 +365,7 @@ pub fn StageControls(props: StageControlsProps) -> Element {
 
         StageId::Canvas => {
             let shape = config.shape;
-            let scale = config.scale;
+            let zoom = config.zoom;
             let aspect_ratio = config.aspect_ratio;
             let landscape = config.landscape;
             let is_rectangle = matches!(shape, CanvasShape::Rectangle);
@@ -397,18 +397,18 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     )}
 
                     {render_slider(
-                        "scale",
-                        "Scale",
-                        desc("Scale divisor — larger values produce a smaller canvas. radius = min(w,h) / (2 × scale)."),
-                        scale,
-                        0.1,
-                        4.0,
+                        "zoom",
+                        "Zoom",
+                        desc("Zoom factor — larger values magnify/crop more. Default 1.25."),
+                        zoom,
+                        0.4,
+                        3.0,
                         0.01,
-                        0,
-                        100.0, "%",
+                        2,
+                        1.0, "",
                         move |v: f64| {
                             let mut c = config_slider.clone();
-                            c.scale = v;
+                            c.zoom = v;
                             on_change.call(c);
                         },
                     )}
@@ -586,12 +586,12 @@ pub fn StageControls(props: StageControlsProps) -> Element {
                     {render_slider(
                         "subsample_max_length",
                         "Max Segment Length",
-                        desc("Maximum segment length in pixels. Longer segments are subdivided for smooth polar (THR) conversion."),
+                        desc("Maximum segment length in normalized units. Longer segments are subdivided for smooth polar (THR) conversion."),
                         value,
-                        0.5,
-                        20.0,
+                        0.001,
                         0.1,
-                        1,
+                        0.001,
+                        3,
                         1.0, "",
                         move |v: f64| {
                             let mut c = config.clone();

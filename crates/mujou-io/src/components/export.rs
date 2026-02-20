@@ -133,13 +133,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         config_json: config_json.as_deref(),
                     };
                     let polyline = res.final_polyline();
-                    let mask_shape = Some(&res.canvas.shape);
-                    let thr = mujou_export::to_thr(
-                        std::slice::from_ref(polyline),
-                        res.dimensions,
-                        &thr_metadata,
-                        mask_shape,
-                    );
+                    let thr = mujou_export::to_thr(std::slice::from_ref(polyline), &thr_metadata);
                     let download_name = format!("{filename}_{timestamp}.thr");
                     if let Err(e) = download::trigger_download(&thr, &download_name, "text/plain") {
                         export_error.set(Some(format!("THR download failed: {e}")));
