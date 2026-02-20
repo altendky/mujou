@@ -80,7 +80,9 @@ The mask defines the output frame. A mask is always required.
    `rho = sqrt(x² + y²)` with no scaling factor — Euclidean distance IS rho
    for a circular mask.
 
-2. **Center origin.** Polar conversion (`theta = atan2(x, y)`) requires a
+2. **Center origin.** Polar conversion (`theta = atan2(x, y)`, Sisyphus
+   convention — not standard math `atan2(y, x)`;
+   see [Formats](formats.md#normalized-to-polar-conversion)) requires a
    centered origin. Mask clipping is naturally symmetric around the center.
    Export serializers apply format-specific offsets (bottom-left for G-code,
    top-left for SVG viewBox).
