@@ -5,7 +5,7 @@ The pipeline converts raster images into vector paths in two coordinate spaces.
 **Pixel space** (steps 1–5): raster stages operate on pixel buffers in
 working-resolution image coordinates (origin top-left, +Y down, units in pixels).
 
-**Normalized space** (steps 6–10): vector stages operate on polylines in the
+**Normalized space** (steps 6–11): vector stages operate on polylines in the
 [normalized coordinate system](principles.md#coordinate-system) defined by the
 mask shape (origin center, +Y up, mask edge = 1.0 from center).
 
@@ -247,7 +247,20 @@ Spirals are the natural visual language of polar sand tables.
 
 **Tradeoffs:** Only applicable to polar output formats. Requires theta-rho space path planning.
 
-### 10. Invert (Optional)
+### 10. Subsample
+
+Break long line segments into shorter sub-segments. Long straight segments
+in Cartesian (XY) space can map to unexpected arcs when converted to polar
+(theta-rho) coordinates for the THR export format. Subsampling inserts
+evenly-spaced intermediate points along segments that exceed
+`subsample_max_length`, ensuring the polar conversion produces smooth curves.
+
+Short segments (≤ `subsample_max_length`) are kept as-is. The operation is
+idempotent and preserves all original points.
+
+**User parameter:** `subsample_max_length` (f64, default: 2.0, normalized units)
+
+### 11. Invert (Optional)
 
 By default, edges (high contrast boundaries) are traced.
 Inversion swaps the binary edge map so dark regions are traced instead of light-to-dark transitions.
@@ -274,6 +287,7 @@ Inversion swaps the binary edge map so dark regions are traced instead of light-
 | `border_path` | `BorderPathMode` | `Auto` | — | Add border polyline along canvas edge (`Auto`/`On`/`Off`) |
 | `border_margin` | f64 | 0.0 | — | Canvas margin fraction (0.0–0.15), shrinks canvas by `1 − 2 × value` |
 | `path_joiner` | `PathJoiner` | `Mst` | — | Path joining method ([strategy](principles.md#pluggable-algorithm-strategies)) |
+| `subsample_max_length` | f64 | 2.0 | normalized | Max segment length before subdivision |
 | `invert` | bool | false | — | Invert edge map |
 
 ## Performance Considerations
