@@ -145,9 +145,28 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             render_img_thumb(url, "Edges thumbnail")
         }
 
-        StageId::Contours | StageId::Simplified | StageId::Canvas => {
+        StageId::Contours | StageId::Simplified => {
             let polylines = result.polylines_for_stage(stage);
             let view_box = super::compute_view_box(&polylines);
+
+            rsx! {
+                svg {
+                    xmlns: "http://www.w3.org/2000/svg",
+                    view_box: "{view_box}",
+                    class: "w-full h-full",
+                    "preserveAspectRatio": "xMidYMid meet",
+                    "aria-hidden": "true",
+
+                    for polyline in polylines.iter() {
+                        {render_thumbnail_path(polyline)}
+                    }
+                }
+            }
+        }
+
+        StageId::Canvas => {
+            let polylines = result.polylines_for_stage(stage);
+            let view_box = super::canvas_view_box(&result.canvas.shape);
 
             rsx! {
                 svg {
@@ -170,7 +189,7 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             } else {
                 &result.joined
             };
-            let view_box = super::compute_view_box(std::slice::from_ref(polyline));
+            let view_box = super::canvas_view_box(&result.canvas.shape);
             let d = build_path_data(polyline);
 
             rsx! {

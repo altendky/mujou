@@ -23,8 +23,8 @@ use dioxus::prelude::*;
 use crate::stage::StageId;
 use crate::worker::WorkerResult;
 use mujou_export::build_path_data;
-use mujou_pipeline::MstEdgeInfo;
 use mujou_pipeline::segment_analysis::find_top_segments;
+use mujou_pipeline::{MaskShape, MstEdgeInfo};
 
 /// Props for the [`StagePreview`] component.
 #[derive(Props, Clone)]
@@ -127,13 +127,14 @@ fn render_raster_edges(result: &WorkerResult, visible: bool, is_dark: bool) -> E
 
 /// Render the vector (SVG) preview for Contours, Simplified, Join, or
 /// Masked stages. Returns empty for raster stages.
+#[allow(clippy::too_many_lines)]
 fn render_vector_preview(
     result: &WorkerResult,
     selected: StageId,
     show_diagnostics: bool,
 ) -> Element {
     match selected {
-        StageId::Contours | StageId::Simplified | StageId::Canvas => {
+        StageId::Contours | StageId::Simplified => {
             let polylines = result.polylines_for_stage(selected);
             let view_box = compute_view_box(&polylines);
             let path_data = build_multi_path_data(&polylines);
@@ -162,9 +163,37 @@ fn render_vector_preview(
             }
         }
 
+        StageId::Canvas => {
+            let polylines = result.polylines_for_stage(selected);
+            let view_box = canvas_view_box(&result.canvas.shape);
+            let path_data = build_multi_path_data(&polylines);
+
+            rsx! {
+                svg {
+                    xmlns: "http://www.w3.org/2000/svg",
+                    view_box: "{view_box}",
+                    class: "w-full h-full bg-[var(--preview-bg)] rounded",
+                    "preserveAspectRatio": "xMidYMid meet",
+                    role: "img",
+                    "aria-label": "Canvas stage preview",
+
+                    for (i, d) in path_data.iter().enumerate() {
+                    path {
+                        key: "{i}",
+                        d: "{d}",
+                        fill: "none",
+                        stroke: "var(--preview-stroke)",
+                        stroke_width: "1",
+                        "vector-effect": "non-scaling-stroke",
+                    }
+                    }
+                }
+            }
+        }
+
         StageId::Output => {
             let polyline = &result.output;
-            let view_box = compute_view_box(std::slice::from_ref(polyline));
+            let view_box = canvas_view_box(&result.canvas.shape);
             let d = build_path_data(polyline);
 
             rsx! {
@@ -191,7 +220,7 @@ fn render_vector_preview(
 
         StageId::Join => {
             let polyline = &result.joined;
-            let view_box = compute_view_box(std::slice::from_ref(polyline));
+            let view_box = canvas_view_box(&result.canvas.shape);
             let d = build_path_data(polyline);
 
             // Pre-compute diagnostic overlays when active.
@@ -295,6 +324,49 @@ pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline]) -> String {
     max_y += pad;
 
     format!("{min_x} {min_y} {} {}", max_x - min_x, max_y - min_y)
+}
+
+/// Compute an SVG `viewBox` from the canvas mask geometry.
+///
+/// Post-canvas stages (Canvas, Join, Output) use a fixed viewBox
+/// derived from the mask shape rather than the data bounds.  This
+/// ensures consistent framing regardless of zoom level or whether
+/// any polylines were clipped.
+///
+/// A small padding is added so border strokes aren't clipped.
+#[must_use]
+pub fn canvas_view_box(shape: &MaskShape) -> String {
+    let (min_x, min_y, max_x, max_y) = match *shape {
+        MaskShape::Circle { center, radius } => (
+            center.x - radius,
+            center.y - radius,
+            center.x + radius,
+            center.y + radius,
+        ),
+        MaskShape::Rectangle {
+            center,
+            half_width,
+            half_height,
+        } => (
+            center.x - half_width,
+            center.y - half_height,
+            center.x + half_width,
+            center.y + half_height,
+        ),
+    };
+
+    // Padding: 5% of the larger dimension (minimum 0.05).
+    let dx = max_x - min_x;
+    let dy = max_y - min_y;
+    let pad = 0.05 * dx.max(dy).max(0.1);
+
+    format!(
+        "{} {} {} {}",
+        min_x - pad,
+        min_y - pad,
+        2.0f64.mul_add(pad, dx),
+        2.0f64.mul_add(pad, dy),
+    )
 }
 
 // ───────────────────────── Diagnostic overlay ────────────────────────

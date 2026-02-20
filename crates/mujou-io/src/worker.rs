@@ -95,9 +95,8 @@ impl WorkerResult {
     /// Select the polylines to display for a given vector stage.
     ///
     /// Returns the appropriate polyline slice for Contours, Simplified,
-    /// and Masked stages. For Masked, all polylines (clipped + border)
-    /// are collected; if no mask result is available, falls back to
-    /// simplified.
+    /// and Canvas stages. For Canvas, all polylines (clipped + optional
+    /// border) are collected from the [`MaskResult`].
     #[must_use]
     pub fn polylines_for_stage(&self, stage: StageId) -> Cow<'_, [Polyline]> {
         match stage {

@@ -16,5 +16,6 @@ pub use filmstrip::Filmstrip;
 pub use preview::Preview;
 pub use stage_controls::StageControls;
 pub use stage_preview::StagePreview;
+pub use stage_preview::canvas_view_box;
 pub use stage_preview::compute_view_box;
 pub use upload::FileUpload;
