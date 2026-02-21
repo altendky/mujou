@@ -74,8 +74,8 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
     let mut show = props.show;
 
     let has_result = props.result.is_some();
-    let mut svg_selected = use_signal(|| true);
-    let mut thr_selected = use_signal(|| false);
+    let mut svg_selected = use_signal(|| false);
+    let mut thr_selected = use_signal(|| true);
     let mut export_error = use_signal(|| Option::<String>::None);
 
     // Clear stale export errors when the popup opens.  `show` is a
