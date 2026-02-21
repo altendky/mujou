@@ -22,9 +22,8 @@ use dioxus::prelude::*;
 
 use crate::stage::StageId;
 use crate::worker::WorkerResult;
-use mujou_export::build_path_data;
-use mujou_pipeline::MstEdgeInfo;
 use mujou_pipeline::segment_analysis::find_top_segments;
+use mujou_pipeline::{MaskShape, MstEdgeInfo};
 
 /// Props for the [`StagePreview`] component.
 #[derive(Props, Clone)]
@@ -77,8 +76,6 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
     };
 
     let selected = props.selected;
-    let w = result.dimensions.width;
-    let h = result.dimensions.height;
     let is_dark = props.is_dark;
 
     // Diagnostic overlay toggle provided by the app root.
@@ -94,7 +91,7 @@ pub fn StagePreview(props: StagePreviewProps) -> Element {
         {render_raster_edges(result, selected == StageId::Edges, is_dark)}
 
         // Vector stages — conditionally rendered (SVG is instant).
-        {render_vector_preview(result, selected, w, h, show_diagnostics())}
+        {render_vector_preview(result, selected, show_diagnostics())}
     }
 }
 
@@ -129,18 +126,17 @@ fn render_raster_edges(result: &WorkerResult, visible: bool, is_dark: bool) -> E
 
 /// Render the vector (SVG) preview for Contours, Simplified, Join, or
 /// Masked stages. Returns empty for raster stages.
+#[allow(clippy::too_many_lines)]
 fn render_vector_preview(
     result: &WorkerResult,
     selected: StageId,
-    w: u32,
-    h: u32,
     show_diagnostics: bool,
 ) -> Element {
     match selected {
-        StageId::Contours | StageId::Simplified | StageId::Canvas => {
+        StageId::Contours | StageId::Simplified => {
             let polylines = result.polylines_for_stage(selected);
-            let view_box = compute_view_box(&polylines, w, h);
-            let path_data = build_multi_path_data(&polylines);
+            let view_box = compute_view_box(&polylines);
+            let path_data = build_multi_path_data_normalized(&polylines);
             let stage_label = selected.label();
 
             rsx! {
@@ -153,13 +149,42 @@ fn render_vector_preview(
                     "aria-label": "{stage_label} stage preview",
 
                     for (i, d) in path_data.iter().enumerate() {
-                        path {
-                            key: "{i}",
-                            d: "{d}",
-                            fill: "none",
-                            stroke: "var(--preview-stroke)",
-                            stroke_width: "1",
-                        }
+                    path {
+                        key: "{i}",
+                        d: "{d}",
+                        fill: "none",
+                        stroke: "var(--preview-stroke)",
+                        stroke_width: "1",
+                        "vector-effect": "non-scaling-stroke",
+                    }
+                    }
+                }
+            }
+        }
+
+        StageId::Canvas => {
+            let polylines = result.polylines_for_stage(selected);
+            let view_box = canvas_view_box(&result.canvas.shape);
+            let path_data = build_multi_path_data_normalized(&polylines);
+
+            rsx! {
+                svg {
+                    xmlns: "http://www.w3.org/2000/svg",
+                    view_box: "{view_box}",
+                    class: "w-full h-full bg-[var(--preview-bg)] rounded",
+                    "preserveAspectRatio": "xMidYMid meet",
+                    role: "img",
+                    "aria-label": "Canvas stage preview",
+
+                    for (i, d) in path_data.iter().enumerate() {
+                    path {
+                        key: "{i}",
+                        d: "{d}",
+                        fill: "none",
+                        stroke: "var(--preview-stroke)",
+                        stroke_width: "1",
+                        "vector-effect": "non-scaling-stroke",
+                    }
                     }
                 }
             }
@@ -167,8 +192,8 @@ fn render_vector_preview(
 
         StageId::Output => {
             let polyline = &result.output;
-            let view_box = compute_view_box(std::slice::from_ref(polyline), w, h);
-            let d = build_path_data(polyline);
+            let view_box = canvas_view_box(&result.canvas.shape);
+            let d = build_path_data_normalized(polyline);
 
             rsx! {
                 svg {
@@ -185,6 +210,7 @@ fn render_vector_preview(
                             fill: "none",
                             stroke: "var(--preview-stroke)",
                             stroke_width: "1",
+                            "vector-effect": "non-scaling-stroke",
                         }
                     }
                 }
@@ -193,8 +219,8 @@ fn render_vector_preview(
 
         StageId::Join => {
             let polyline = &result.joined;
-            let view_box = compute_view_box(std::slice::from_ref(polyline), w, h);
-            let d = build_path_data(polyline);
+            let view_box = canvas_view_box(&result.canvas.shape);
+            let d = build_path_data_normalized(polyline);
 
             // Pre-compute diagnostic overlays when active.
             let top_segments = if show_diagnostics {
@@ -223,6 +249,7 @@ fn render_vector_preview(
                             fill: "none",
                             stroke: if show_diagnostics { "var(--diag-stroke)" } else { "var(--preview-stroke)" },
                             stroke_width: "1",
+                            "vector-effect": "non-scaling-stroke",
                         }
                     }
 
@@ -233,7 +260,7 @@ fn render_vector_preview(
                     {render_top_segments(&top_segments)}
 
                     // Diagnostic: hollow green circle at path start point.
-                    {render_start_indicator(polyline, show_diagnostics, w, h)}
+                    {render_start_indicator(polyline, show_diagnostics)}
                 }
             }
         }
@@ -243,12 +270,36 @@ fn render_vector_preview(
     }
 }
 
-/// Build SVG path `d` attributes for multiple polylines.
-fn build_multi_path_data(polylines: &[mujou_pipeline::Polyline]) -> Vec<String> {
+/// Build an SVG path `d` attribute string for a normalized-space polyline,
+/// negating Y for SVG (+Y down).
+///
+/// Normalized space is +Y up; SVG is +Y down, so Y coordinates are
+/// negated before emitting.
+#[allow(clippy::cast_possible_truncation)]
+pub fn build_path_data_normalized(polyline: &mujou_pipeline::Polyline) -> String {
+    use std::fmt::Write;
+
+    let points = polyline.points();
+    if points.len() < 2 {
+        return String::new();
+    }
+
+    let mut d = String::new();
+    let first = &points[0];
+    let _ = write!(d, "M{},{}", first.x as f32, -first.y as f32);
+    for p in &points[1..] {
+        let _ = write!(d, " L{},{}", p.x as f32, -p.y as f32);
+    }
+    d
+}
+
+/// Build SVG path `d` attributes for multiple normalized-space polylines,
+/// negating Y for SVG.
+pub fn build_multi_path_data_normalized(polylines: &[mujou_pipeline::Polyline]) -> Vec<String> {
     polylines
         .iter()
         .filter_map(|pl| {
-            let d = build_path_data(pl);
+            let d = build_path_data_normalized(pl);
             if d.is_empty() { None } else { Some(d) }
         })
         .collect()
@@ -256,33 +307,90 @@ fn build_multi_path_data(polylines: &[mujou_pipeline::Polyline]) -> Vec<String> 
 
 /// Compute an SVG `viewBox` that contains all polyline data.
 ///
-/// Encompasses both the image area (`0,0` to `w,h`) and any polyline
-/// data that extends beyond it (e.g. a border circle).  Adds a small
-/// padding so strokes aren't clipped at the boundary.
+/// In normalized space (stages 5–9), polylines are centered at the
+/// origin with typical extent ≈ ±1.5.  The viewBox is computed purely
+/// from the data bounds.  When no data is present, a default covering
+/// the unit circle (±1.5) is returned.
+///
+/// A small padding is added so strokes aren't clipped at the boundary.
 #[must_use]
-pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline], w: u32, h: u32) -> String {
-    let mut min_x: f64 = 0.0;
-    let mut min_y: f64 = 0.0;
-    let mut max_x = f64::from(w);
-    let mut max_y = f64::from(h);
+pub fn compute_view_box(polylines: &[mujou_pipeline::Polyline]) -> String {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
 
     for poly in polylines {
         for p in poly.points() {
+            let svg_y = -p.y;
             min_x = min_x.min(p.x);
-            min_y = min_y.min(p.y);
+            min_y = min_y.min(svg_y);
             max_x = max_x.max(p.x);
-            max_y = max_y.max(p.y);
+            max_y = max_y.max(svg_y);
         }
     }
 
-    // Small padding so strokes at the boundary aren't clipped.
-    let pad = 1.0;
+    // Default to unit circle extent if no data.
+    if min_x > max_x {
+        min_x = -1.5;
+        min_y = -1.5;
+        max_x = 1.5;
+        max_y = 1.5;
+    }
+
+    // Padding: 5% of the larger dimension (minimum 0.05).
+    let dx = max_x - min_x;
+    let dy = max_y - min_y;
+    let pad = 0.05 * dx.max(dy).max(0.1);
     min_x -= pad;
     min_y -= pad;
     max_x += pad;
     max_y += pad;
 
     format!("{min_x} {min_y} {} {}", max_x - min_x, max_y - min_y)
+}
+
+/// Compute an SVG `viewBox` from the canvas mask geometry.
+///
+/// Post-canvas stages (Canvas, Join, Output) use a fixed viewBox
+/// derived from the mask shape rather than the data bounds.  This
+/// ensures consistent framing regardless of zoom level or whether
+/// any polylines were clipped.
+///
+/// A small padding is added so border strokes aren't clipped.
+#[must_use]
+pub fn canvas_view_box(shape: &MaskShape) -> String {
+    let (min_x, min_y, max_x, max_y) = match *shape {
+        MaskShape::Circle { center, radius } => (
+            center.x - radius,
+            -center.y - radius,
+            center.x + radius,
+            -center.y + radius,
+        ),
+        MaskShape::Rectangle {
+            center,
+            half_width,
+            half_height,
+        } => (
+            center.x - half_width,
+            -center.y - half_height,
+            center.x + half_width,
+            -center.y + half_height,
+        ),
+    };
+
+    // Padding: 5% of the larger dimension (minimum 0.05).
+    let dx = max_x - min_x;
+    let dy = max_y - min_y;
+    let pad = 0.05 * dx.max(dy).max(0.1);
+
+    format!(
+        "{} {} {} {}",
+        min_x - pad,
+        min_y - pad,
+        2.0f64.mul_add(pad, dx),
+        2.0f64.mul_add(pad, dy),
+    )
 }
 
 // ───────────────────────── Diagnostic overlay ────────────────────────
@@ -299,16 +407,23 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
         g {
             "data-layer": "mst-edges",
             for (i, edge) in edges.iter().enumerate() {
-                line {
-                    key: "mst-{i}",
-                    x1: "{edge.point_a.0}",
-                    y1: "{edge.point_a.1}",
-                    x2: "{edge.point_b.0}",
-                    y2: "{edge.point_b.1}",
-                    stroke: "var(--diag-mst)",
-                    stroke_width: "2",
-                    stroke_dasharray: "4,2",
-                    opacity: "0.8",
+                {
+                    let y1 = -edge.point_a.1;
+                    let y2 = -edge.point_b.1;
+                    rsx! {
+                        line {
+                            key: "mst-{i}",
+                            x1: "{edge.point_a.0}",
+                            y1: "{y1}",
+                            x2: "{edge.point_b.0}",
+                            y2: "{y2}",
+                            stroke: "var(--diag-mst)",
+                            stroke_width: "2",
+                            stroke_dasharray: "4,2",
+                            opacity: "0.8",
+                            "vector-effect": "non-scaling-stroke",
+                        }
+                    }
                 }
             }
         }
@@ -317,16 +432,12 @@ fn render_mst_edges(edges: &[MstEdgeInfo]) -> Element {
 
 /// Render a hollow green circle at the first point of the joined path.
 ///
-/// The radius and stroke width are proportional to the image diagonal
-/// so the indicator looks consistent across different image sizes.
+/// In normalized space the typical drawing extent is ≈ 3 units
+/// (diameter of the unit circle + padding).  The indicator radius is
+/// a fixed fraction of that so it stays visually consistent.
 /// `vector-effect: non-scaling-stroke` keeps the stroke visually
 /// stable when the browser scales the SVG to fit the viewport.
-fn render_start_indicator(
-    polyline: &mujou_pipeline::Polyline,
-    show: bool,
-    w: u32,
-    h: u32,
-) -> Element {
+fn render_start_indicator(polyline: &mujou_pipeline::Polyline, show: bool) -> Element {
     if !show {
         return rsx! {};
     }
@@ -334,18 +445,16 @@ fn render_start_indicator(
         return rsx! {};
     };
 
-    // Radius is proportional to the image diagonal so the circle is
-    // a consistent fraction of the drawing regardless of resolution.
-    // Stroke width uses `vector-effect: non-scaling-stroke` so it
-    // stays a constant 2 screen-pixels regardless of how the browser
-    // scales the SVG to fit the viewport.
-    let diag = f64::from(w).hypot(f64::from(h));
-    let r = diag * 0.012;
+    // Fixed radius in normalized units — approximately 1.2% of the
+    // typical ~3 unit viewBox extent, matching the old pixel-space
+    // proportions.
+    let r = 0.035;
 
+    let cy = -start.y;
     rsx! {
         circle {
             cx: "{start.x}",
-            cy: "{start.y}",
+            cy: "{cy}",
             r: "{r}",
             fill: "none",
             stroke: "var(--diag-start)",
@@ -383,16 +492,19 @@ fn render_top_segments(segments: &[mujou_pipeline::RankedSegment]) -> Element {
                 {
                     let color = SEGMENT_CSS_VARS.get(rank).copied()
                         .unwrap_or("var(--diag-stroke)");
+                    let y1 = -seg.from.1;
+                    let y2 = -seg.to.1;
                     rsx! {
                         line {
                             key: "seg-{rank}",
                             x1: "{seg.from.0}",
-                            y1: "{seg.from.1}",
+                            y1: "{y1}",
                             x2: "{seg.to.0}",
-                            y2: "{seg.to.1}",
+                            y2: "{y2}",
                             stroke: "{color}",
                             stroke_width: "3",
                             opacity: "0.9",
+                            "vector-effect": "non-scaling-stroke",
                         }
                     }
                 }

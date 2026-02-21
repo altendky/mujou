@@ -1,7 +1,7 @@
 //! THR (Theta-Rho) export serializer.
 //!
-//! Converts polylines into a `.thr` text file for polar sand tables
-//! (Sisyphus, Oasis, Dune Weaver, and DIY polar builds).
+//! Converts polylines (in normalized space) into a `.thr` text file for
+//! polar sand tables (Sisyphus, Oasis, Dune Weaver, and DIY polar builds).
 //!
 //! Each line contains a `theta rho` pair (space-separated), where:
 //! - **theta**: continuous radians (accumulating, does NOT wrap at 2π)
@@ -16,30 +16,22 @@
 //! math `atan2(y, x)`.  This means theta=0 corresponds to the **+Y**
 //! direction (Cartesian upward / physical-table upward).
 //!
-//! Because internal pipeline coordinates use image-space Y (increasing
-//! downward), the converter flips Y (`dy = center_y - point.y`) before
-//! computing `atan2(dx, dy)`.  Sandify works in a mathematical Y-up
-//! coordinate system natively, so no flip is needed there.
-//!
-//! Confirmed by both [Sandify](https://github.com/jeffeb3/sandify)
-//! (`geometry.js`, `toThetaRho`) and
-//! [jsisyphus](https://github.com/markyland/SisyphusForTheRestOfUs)
-//! (`Point.java`: *"The zero radial is coincident with the positive y
-//! axis"*).
+//! Normalized space is +Y up, which matches the Sisyphus `atan2(x, y)`
+//! convention directly — no Y negation is needed.
 //!
 //! ## Polar Origin
 //!
-//! When a circular mask is present, its center and radius define the
-//! polar coordinate system.  Otherwise, the image center is used as
-//! the origin and the circumscribing circle (half the diagonal) as
-//! the radius.
+//! In normalized space the origin is the center and rho = `sqrt(x² + y²)`
+//! directly.  For a circular mask (radius = 1.0 in normalized space),
+//! rho is naturally in [0, 1].  For rectangular masks or no mask, rho is
+//! clamped to [0, 1].
 //!
 //! This is a pure function with no I/O — it returns a `String`.
 
 use std::f64::consts::PI;
 use std::fmt::Write;
 
-use mujou_pipeline::{Dimensions, MaskShape, Polyline};
+use mujou_pipeline::Polyline;
 
 /// Metadata to embed as `#`-prefixed comment lines at the top of the
 /// `.thr` file.
@@ -63,20 +55,16 @@ pub struct ThrMetadata<'a> {
     pub config_json: Option<&'a str>,
 }
 
-/// Serialize polylines into a THR (Theta-Rho) text string.
+/// Serialize polylines (in normalized space) into a THR (Theta-Rho) text
+/// string.
 ///
-/// Each point is converted from image XY coordinates to polar
-/// coordinates using the ecosystem's `atan2(x, y)` convention.
+/// In normalized space the origin is the polar center and
+/// `rho = sqrt(x² + y²)` directly.  Theta uses the ecosystem's
+/// `atan2(x, y)` convention (theta=0 points along +Y).  Normalized
+/// space is +Y up, which matches directly — no Y negation is needed.
+///
 /// Theta accumulates continuously (no wrapping at 2π) and rho is
-/// normalized to [0.0, 1.0].
-///
-/// ## Polar Origin
-///
-/// - If `mask_shape` is `Some(MaskShape::Circle { center, radius })`,
-///   those values define the polar coordinate system directly.
-/// - Otherwise (rectangle mask or no mask), the image center is used
-///   as the origin and `sqrt(w² + h²) / 2` as the radius
-///   (circumscribing circle).
+/// clamped to [0.0, 1.0].
 ///
 /// ## Precision
 ///
@@ -86,30 +74,20 @@ pub struct ThrMetadata<'a> {
 /// # Examples
 ///
 /// ```
-/// use mujou_pipeline::{Dimensions, Point, Polyline};
+/// use mujou_pipeline::{Point, Polyline};
 /// use mujou_export::thr::{ThrMetadata, to_thr};
 ///
 /// let polylines = vec![
 ///     Polyline::new(vec![
-///         Point::new(100.0, 100.0),  // center
-///         Point::new(150.0, 100.0),  // right of center
+///         Point::new(0.0, 0.0),   // center → rho = 0
+///         Point::new(0.5, 0.0),   // right of center → rho = 0.5
 ///     ]),
 /// ];
-/// let dims = Dimensions { width: 200, height: 200 };
-/// let thr = to_thr(&polylines, dims, &ThrMetadata::default(), None);
+/// let thr = to_thr(&polylines, &ThrMetadata::default());
 /// assert!(thr.contains("# mujou"));
-/// // First point at center → rho ≈ 0.0
-/// // Second point 50px right → some theta, rho > 0
 /// ```
 #[must_use]
-pub fn to_thr(
-    polylines: &[Polyline],
-    dimensions: Dimensions,
-    metadata: &ThrMetadata<'_>,
-    mask_shape: Option<&MaskShape>,
-) -> String {
-    let (center_x, center_y, max_radius) = polar_params(dimensions, mask_shape);
-
+pub fn to_thr(polylines: &[Polyline], metadata: &ThrMetadata<'_>) -> String {
     let mut out = String::new();
 
     // --- Metadata header ---
@@ -141,18 +119,10 @@ pub fn to_thr(
     for polyline in polylines {
         let points = polyline.points();
         for point in points {
-            let dx = point.x - center_x;
-            // Flip Y: image coordinates have Y increasing downward,
-            // but the ecosystem's Cartesian convention has +Y up.
-            let dy = center_y - point.y;
-
-            // Rho: normalized distance from center, clamped to [0, 1].
-            let dist = dx.hypot(dy);
-            let rho = if max_radius > 0.0 {
-                (dist / max_radius).clamp(0.0, 1.0)
-            } else {
-                0.0
-            };
+            // In normalized space: origin = center, +Y = up (mathematical convention).
+            // rho = distance from origin, clamped to [0, 1].
+            let dist = point.x.hypot(point.y);
+            let rho = dist.clamp(0.0, 1.0);
 
             // At the exact polar origin (rho=0), theta is geometrically
             // undefined.  Reuse the previous theta to avoid a spurious
@@ -161,10 +131,9 @@ pub fn to_thr(
                 prev_theta.unwrap_or(0.0)
             } else {
                 // Theta: atan2(x, y) convention (theta=0 points up / +Y).
-                // dy was already flipped above (center_y - point.y) so
-                // that +dy corresponds to Cartesian +Y (upward), matching
-                // the convention used by Sandify and jsisyphus.
-                let raw_theta = dx.atan2(dy);
+                // Normalized space is +Y up, matching the Sisyphus
+                // ecosystem directly.
+                let raw_theta = point.x.atan2(point.y);
 
                 prev_theta.map_or(raw_theta, |prev| {
                     // Continuous unwinding: choose the equivalent angle
@@ -188,30 +157,12 @@ pub fn to_thr(
     out
 }
 
-/// Derive polar coordinate system parameters from dimensions and mask.
-///
-/// Returns `(center_x, center_y, max_radius)`.
-fn polar_params(dimensions: Dimensions, mask_shape: Option<&MaskShape>) -> (f64, f64, f64) {
-    if let Some(MaskShape::Circle { center, radius }) = mask_shape {
-        (center.x, center.y, *radius)
-    } else {
-        // Circumscribe the full image.
-        let w = f64::from(dimensions.width);
-        let h = f64::from(dimensions.height);
-        (w / 2.0, h / 2.0, w.hypot(h) / 2.0)
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::suboptimal_flops)]
 mod tests {
     use mujou_pipeline::Point;
 
     use super::*;
-
-    fn dims(width: u32, height: u32) -> Dimensions {
-        Dimensions { width, height }
-    }
 
     fn no_meta() -> ThrMetadata<'static> {
         ThrMetadata::default()
@@ -235,7 +186,7 @@ mod tests {
 
     #[test]
     fn header_always_contains_mujou_identifier() {
-        let thr = to_thr(&[], dims(100, 100), &no_meta(), None);
+        let thr = to_thr(&[], &no_meta());
         assert!(thr.starts_with("# mujou\n"));
     }
 
@@ -245,7 +196,7 @@ mod tests {
             title: Some("cherry-blossoms.jpg"),
             ..ThrMetadata::default()
         };
-        let thr = to_thr(&[], dims(100, 100), &meta, None);
+        let thr = to_thr(&[], &meta);
         assert!(thr.contains("# Source: cherry-blossoms.jpg\n"));
     }
 
@@ -255,7 +206,7 @@ mod tests {
             description: Some("blur=1.4, canny=15/40"),
             ..ThrMetadata::default()
         };
-        let thr = to_thr(&[], dims(100, 100), &meta, None);
+        let thr = to_thr(&[], &meta);
         assert!(thr.contains("# blur=1.4, canny=15/40\n"));
     }
 
@@ -265,7 +216,7 @@ mod tests {
             timestamp: Some("2026-02-14_12-30-45"),
             ..ThrMetadata::default()
         };
-        let thr = to_thr(&[], dims(100, 100), &meta, None);
+        let thr = to_thr(&[], &meta);
         assert!(thr.contains("# Exported: 2026-02-14_12-30-45\n"));
     }
 
@@ -275,7 +226,7 @@ mod tests {
             config_json: Some(r#"{"blur_sigma":1.4}"#),
             ..ThrMetadata::default()
         };
-        let thr = to_thr(&[], dims(100, 100), &meta, None);
+        let thr = to_thr(&[], &meta);
         assert!(thr.contains("# Config: {\"blur_sigma\":1.4}\n"));
     }
 
@@ -287,7 +238,7 @@ mod tests {
             timestamp: Some("2026"),
             config_json: Some("{}"),
         };
-        let thr = to_thr(&[], dims(100, 100), &meta, None);
+        let thr = to_thr(&[], &meta);
         let mujou_pos = thr.find("# mujou").unwrap();
         let source_pos = thr.find("# Source:").unwrap();
         let params_pos = thr.find("# params").unwrap();
@@ -303,62 +254,51 @@ mod tests {
 
     #[test]
     fn empty_polylines_produces_header_only() {
-        let thr = to_thr(&[], dims(100, 100), &no_meta(), None);
+        let thr = to_thr(&[], &no_meta());
         let pairs = parse_pairs(&thr);
         assert!(pairs.is_empty());
     }
 
     #[test]
     fn single_point_produces_one_pair() {
-        let polylines = vec![Polyline::new(vec![Point::new(50.0, 50.0)])];
-        let thr = to_thr(&polylines, dims(100, 100), &no_meta(), None);
+        // In normalized space: point at (0.5, 0.0)
+        let polylines = vec![Polyline::new(vec![Point::new(0.5, 0.0)])];
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert_eq!(pairs.len(), 1);
     }
 
-    // --- Coordinate conversion ---
+    // --- Coordinate conversion (normalized space) ---
 
     #[test]
-    fn center_point_has_zero_rho() {
-        // Point at exact center of 200x200 image → rho = 0.
-        let polylines = vec![Polyline::new(vec![Point::new(100.0, 100.0)])];
-        let shape = MaskShape::Circle {
-            center: Point::new(100.0, 100.0),
-            radius: 100.0,
-        };
-        let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
+    fn origin_has_zero_rho() {
+        // Point at origin → rho = 0.
+        let polylines = vec![Polyline::new(vec![Point::new(0.0, 0.0)])];
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert_eq!(pairs.len(), 1);
-        assert!((pairs[0].1 - 0.0).abs() < 1e-4, "rho at center should be 0");
+        assert!((pairs[0].1 - 0.0).abs() < 1e-4, "rho at origin should be 0");
     }
 
     #[test]
-    fn edge_point_has_rho_one() {
-        // Point at radius distance from center → rho = 1.0.
-        let polylines = vec![Polyline::new(vec![Point::new(200.0, 100.0)])];
-        let shape = MaskShape::Circle {
-            center: Point::new(100.0, 100.0),
-            radius: 100.0,
-        };
-        let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
+    fn unit_distance_has_rho_one() {
+        // Point at (1.0, 0.0) → rho = 1.0.
+        let polylines = vec![Polyline::new(vec![Point::new(1.0, 0.0)])];
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert_eq!(pairs.len(), 1);
         assert!(
             (pairs[0].1 - 1.0).abs() < 1e-4,
-            "rho at edge should be 1.0, got {}",
+            "rho at unit distance should be 1.0, got {}",
             pairs[0].1,
         );
     }
 
     #[test]
     fn rho_is_clamped_to_one() {
-        // Point beyond the radius → rho clamped to 1.0.
-        let polylines = vec![Polyline::new(vec![Point::new(250.0, 100.0)])];
-        let shape = MaskShape::Circle {
-            center: Point::new(100.0, 100.0),
-            radius: 100.0,
-        };
-        let thr = to_thr(&polylines, dims(300, 200), &no_meta(), Some(&shape));
+        // Point beyond unit circle → rho clamped to 1.0.
+        let polylines = vec![Polyline::new(vec![Point::new(1.5, 0.0)])];
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert!(
             (pairs[0].1 - 1.0).abs() < 1e-4,
@@ -369,40 +309,29 @@ mod tests {
 
     #[test]
     fn atan2_xy_convention_theta_zero_points_up() {
-        // atan2(x, y) convention: theta=0 points along Cartesian +Y (up).
-        // A point *above* center in image coordinates (smaller Y) maps
-        // to positive Cartesian dy, so atan2(0, +dy) = 0.
-        //
-        // Point at (100, 0) relative to center (100, 100):
-        //   dx = 0, dy = center_y - point.y = 100 → atan2(0, 100) = 0.
-        let polylines = vec![Polyline::new(vec![Point::new(100.0, 0.0)])];
-        let shape = MaskShape::Circle {
-            center: Point::new(100.0, 100.0),
-            radius: 100.0,
-        };
-        let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
+        // atan2(x, y) convention: theta=0 points "up" (+Y in
+        // normalized +Y-up space).
+        // Point at (0, +1): atan2(0, 1) = 0.
+        let polylines = vec![Polyline::new(vec![Point::new(0.0, 1.0)])];
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert!(
             pairs[0].0.abs() < 1e-4,
-            "theta for point directly above center should be ~0, got {}",
+            "theta for point directly 'up' (y=+1) should be ~0, got {}",
             pairs[0].0,
         );
     }
 
     #[test]
-    fn point_right_of_center_has_positive_theta() {
-        // Point to the right: dx > 0, dy = 0 → atan2(dx, 0) = π/2.
-        let polylines = vec![Polyline::new(vec![Point::new(200.0, 100.0)])];
-        let shape = MaskShape::Circle {
-            center: Point::new(100.0, 100.0),
-            radius: 100.0,
-        };
-        let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
+    fn point_right_has_positive_theta() {
+        // Point at (1, 0): atan2(1, -0) = atan2(1, 0) = π/2.
+        let polylines = vec![Polyline::new(vec![Point::new(1.0, 0.0)])];
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         let expected = std::f64::consts::FRAC_PI_2;
         assert!(
             (pairs[0].0 - expected).abs() < 1e-4,
-            "theta for point right of center should be π/2, got {}",
+            "theta for point along +X should be π/2, got {}",
             pairs[0].0,
         );
     }
@@ -411,24 +340,18 @@ mod tests {
 
     #[test]
     fn theta_accumulates_counterclockwise() {
-        // Trace a counterclockwise path in Cartesian space.
-        // In the atan2(x, y) convention, counterclockwise goes:
-        //   theta=0 (+Y up), π/2 (+X right), π (-Y down), 3π/2 (-X left), 2π.
-        //
-        // Image-coordinate points (Y flipped relative to Cartesian):
-        //   Cartesian +Y (up)    = image -Y (above center)
-        //   Cartesian -Y (down)  = image +Y (below center)
-        let center = Point::new(0.0, 0.0);
-        let r = 100.0;
+        // Counterclockwise path in normalized space (+Y up).
+        // With atan2(x, y): "up"→+X→"down"→-X traces 0→π/2→π→3π/2→2π.
+        // "up" = positive Y, "down" = negative Y in +Y-up convention.
+        let r = 1.0;
         let polylines = vec![Polyline::new(vec![
-            Point::new(0.0, -r), // Cartesian (0, +r)  → theta=0
-            Point::new(r, 0.0),  // Cartesian (+r, 0)  → theta=π/2
-            Point::new(0.0, r),  // Cartesian (0, -r)  → theta=π
-            Point::new(-r, 0.0), // Cartesian (-r, 0)  → theta=3π/2
-            Point::new(0.0, -r), // Cartesian (0, +r)  → theta=2π (unwound)
+            Point::new(0.0, r),  // "up"    → theta=0
+            Point::new(r, 0.0),  // +X      → theta=π/2
+            Point::new(0.0, -r), // "down"  → theta=π
+            Point::new(-r, 0.0), // -X      → theta=3π/2
+            Point::new(0.0, r),  // "up"    → theta=2π (unwound)
         ])];
-        let shape = MaskShape::Circle { center, radius: r };
-        let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert_eq!(pairs.len(), 5);
 
@@ -470,21 +393,16 @@ mod tests {
 
     #[test]
     fn theta_accumulates_clockwise() {
-        // Trace a clockwise path in Cartesian space: theta should decrease.
-        // Clockwise from +Y: +Y → -X → -Y → +X → +Y.
-        //
-        // Image-coordinate points (Y flipped relative to Cartesian):
-        let center = Point::new(0.0, 0.0);
-        let r = 100.0;
+        // Clockwise path: "up"→-X→"down"→+X→"up". Theta should decrease.
+        let r = 1.0;
         let polylines = vec![Polyline::new(vec![
-            Point::new(0.0, -r), // Cartesian (0, +r)  → theta=0
-            Point::new(-r, 0.0), // Cartesian (-r, 0)  → theta=-π/2 (clockwise)
-            Point::new(0.0, r),  // Cartesian (0, -r)  → theta=-π
-            Point::new(r, 0.0),  // Cartesian (+r, 0)  → theta=-3π/2
-            Point::new(0.0, -r), // Cartesian (0, +r)  → theta=-2π (unwound)
+            Point::new(0.0, r),  // "up"    → theta=0
+            Point::new(-r, 0.0), // -X      → theta=-π/2 (clockwise)
+            Point::new(0.0, -r), // "down"  → theta=-π
+            Point::new(r, 0.0),  // +X      → theta=-3π/2
+            Point::new(0.0, r),  // "up"    → theta=-2π (unwound)
         ])];
-        let shape = MaskShape::Circle { center, radius: r };
-        let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert_eq!(pairs.len(), 5);
 
@@ -513,10 +431,10 @@ mod tests {
     #[test]
     fn output_has_five_decimal_places() {
         let polylines = vec![Polyline::new(vec![
-            Point::new(50.0, 50.0),
-            Point::new(75.0, 50.0),
+            Point::new(0.5, 0.0),
+            Point::new(0.75, 0.0),
         ])];
-        let thr = to_thr(&polylines, dims(100, 100), &no_meta(), None);
+        let thr = to_thr(&polylines, &no_meta());
         let data_lines: Vec<&str> = thr
             .lines()
             .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
@@ -537,77 +455,34 @@ mod tests {
         }
     }
 
-    // --- Fallback polar params (no circular mask) ---
-
-    #[test]
-    fn no_mask_uses_circumscribing_circle() {
-        // 100x100 image, no mask → center=(50,50), radius=sqrt(100²+100²)/2 ≈ 70.71.
-        // Point at (100, 50) is 50px right of center → rho = 50/70.71 ≈ 0.707.
-        let polylines = vec![Polyline::new(vec![Point::new(100.0, 50.0)])];
-        let thr = to_thr(&polylines, dims(100, 100), &no_meta(), None);
-        let pairs = parse_pairs(&thr);
-        let expected_rho = 50.0 / (100.0_f64.hypot(100.0) / 2.0);
-        assert!(
-            (pairs[0].1 - expected_rho).abs() < 1e-4,
-            "rho should be ~{expected_rho}, got {}",
-            pairs[0].1,
-        );
-    }
-
-    #[test]
-    fn rectangle_mask_falls_back_to_circumscribing_circle() {
-        // Rectangle mask should be treated the same as no mask.
-        let shape = MaskShape::Rectangle {
-            center: Point::new(50.0, 50.0),
-            half_width: 40.0,
-            half_height: 30.0,
-        };
-        let polylines = vec![Polyline::new(vec![Point::new(100.0, 50.0)])];
-        let thr_rect = to_thr(&polylines, dims(100, 100), &no_meta(), Some(&shape));
-        let thr_none = to_thr(&polylines, dims(100, 100), &no_meta(), None);
-        let pairs_rect = parse_pairs(&thr_rect);
-        let pairs_none = parse_pairs(&thr_none);
-        assert!(
-            (pairs_rect[0].0 - pairs_none[0].0).abs() < 1e-10,
-            "theta should be identical for rect mask vs no mask",
-        );
-        assert!(
-            (pairs_rect[0].1 - pairs_none[0].1).abs() < 1e-10,
-            "rho should be identical for rect mask vs no mask",
-        );
-    }
-
     // --- Multiple polylines ---
 
     #[test]
     fn multiple_polylines_concatenated() {
         let polylines = vec![
-            Polyline::new(vec![Point::new(50.0, 50.0), Point::new(60.0, 50.0)]),
-            Polyline::new(vec![Point::new(70.0, 50.0), Point::new(80.0, 50.0)]),
+            Polyline::new(vec![Point::new(0.5, 0.0), Point::new(0.6, 0.0)]),
+            Polyline::new(vec![Point::new(0.7, 0.0), Point::new(0.8, 0.0)]),
         ];
-        let thr = to_thr(&polylines, dims(100, 100), &no_meta(), None);
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
         assert_eq!(pairs.len(), 4);
     }
 
     #[test]
     fn theta_continues_across_polylines() {
-        // Theta unwinding should continue across polyline boundaries.
-        // Counterclockwise in Cartesian: +Y → +X → -Y → -X.
-        let center = Point::new(0.0, 0.0);
-        let r = 100.0;
+        // Counterclockwise: "up" → +X → "down" → -X.
+        let r = 1.0;
         let polylines = vec![
             Polyline::new(vec![
-                Point::new(0.0, -r), // Cartesian (0, +r)  → theta=0
-                Point::new(r, 0.0),  // Cartesian (+r, 0)  → theta=π/2
+                Point::new(0.0, r), // "up"   → theta=0
+                Point::new(r, 0.0), // +X     → theta=π/2
             ]),
             Polyline::new(vec![
-                Point::new(0.0, r),  // Cartesian (0, -r)  → theta=π
-                Point::new(-r, 0.0), // Cartesian (-r, 0)  → theta=3π/2
+                Point::new(0.0, -r), // "down" → theta=π
+                Point::new(-r, 0.0), // -X     → theta=3π/2
             ]),
         ];
-        let shape = MaskShape::Circle { center, radius: r };
-        let thr = to_thr(&polylines, dims(200, 200), &no_meta(), Some(&shape));
+        let thr = to_thr(&polylines, &no_meta());
         let pairs = parse_pairs(&thr);
 
         // All thetas should monotonically increase.
@@ -629,8 +504,7 @@ mod tests {
     fn end_to_end_image_to_thr() {
         use mujou_pipeline::{PipelineConfig, process_staged};
 
-        // Use scale=0.5 so the canvas (radius=40) covers the full
-        // 40×40 test image.
+        // Use zoom=0.5 so the canvas covers the full 40×40 test image.
         let img = image::RgbaImage::from_fn(40, 40, |x, _y| {
             if x < 20 {
                 image::Rgba([0, 0, 0, 255])
@@ -650,17 +524,11 @@ mod tests {
         .unwrap();
 
         let config = PipelineConfig {
-            scale: 0.5,
+            zoom: 0.5,
             ..PipelineConfig::default()
         };
         let result = process_staged(&buf, &config).unwrap();
-        let mask_shape = Some(&result.canvas.shape);
-        let thr = to_thr(
-            std::slice::from_ref(result.final_polyline()),
-            result.dimensions,
-            &no_meta(),
-            mask_shape,
-        );
+        let thr = to_thr(std::slice::from_ref(result.final_polyline()), &no_meta());
 
         // Should have the header and some data lines.
         assert!(thr.starts_with("# mujou"));

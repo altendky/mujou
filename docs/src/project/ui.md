@@ -22,14 +22,7 @@ Uses the Lucide `upload` icon via `dioxus-free-icons`.
 Traced paths rendered as inline SVG elements directly in Dioxus RSX.
 No HTML `<canvas>` or JavaScript interop needed.
 
-- SVG `viewBox` matches the mask bounding box in
-  [normalized coordinates](principles.md#coordinate-system):
-  - Circle: `viewBox="-1 -1 2 2"`
-  - Rectangle: viewBox covers the rectangle extent
-    (e.g., `"-2 -1 4 2"` for aspect ratio 2, landscape)
-- The mask shape always fills the entire preview — no screen space is
-  wasted on clipped-away content
-- Y-axis flipped at the SVG boundary (normalized +Y up → SVG +Y down)
+- SVG `viewBox` matches image dimensions
 - Each polyline becomes a `<path>` element
 - Toggle between preview modes: original, edges, paths overlaid, paths only
 - Paths may use a higher RDP tolerance for display to keep the DOM lightweight
@@ -39,36 +32,19 @@ No HTML `<canvas>` or JavaScript interop needed.
 Sliders wired to `PipelineConfig` via Dioxus signals.
 Pipeline re-runs when parameters change.
 
-Parameters operating on pixel buffers (steps 1–5) are in pixel units.
-Parameters operating on polylines (steps 6–10) are in
-[normalized units](principles.md#coordinate-system) and produce consistent
-results regardless of `working_resolution`.
-
-| Control | Input Type | Range | Default | Units |
-| ------- | ---------- | ----- | ------- | ----- |
-| Blur radius | Slider | 0.0 – 10.0 | 1.4 | pixels |
-| Canny low threshold | Slider | 1 – canny max | 15 | pixels |
-| Canny high threshold | Slider | canny low – canny max | 40 | pixels |
-| Canny max | Slider | canny high – ~1140 | 60 | pixels |
-| Contour tracing | Select | Border following / Marching squares | Border following | — |
-| Zoom | Slider | 0.4 – 3.0 | 1.25 | × (zoom factor) |
-| Simplify tolerance | Slider | 0.0 – TBD | TBD | normalized |
-| Mask shape | Select | Circle / Rectangle | Circle | — |
-| Mask aspect ratio | Slider | 1.0 – 4.0 | 1.0 | — (Rectangle only) |
-| Mask orientation | Toggle | landscape/portrait | landscape | — (Rectangle only) |
-| Path joining | Select | Straight line / Retrace / Mst | Mst | — |
-| Border path | Select | Auto / On / Off | Auto | — |
-| Invert | Toggle | on/off | off | — |
-| Preview mode | Select | original/edges/paths/paths only | paths | — |
-
-Key changes from previous design:
-
-- **Zoom** replaces "Mask diameter" — controls image magnification into the
-  fixed mask frame, not the mask size
-- **Mask shape** replaces "Circular mask" toggle — always required, choose
-  between Circle and Rectangle
-- **Units column** added for clarity — pixel-space parameters are clearly
-  distinct from normalized-space parameters
+| Control | Input Type | Range | Default |
+| ------- | ---------- | ----- | ------- |
+| Blur radius | Slider | 0.0 - 10.0 | 1.4 |
+| Canny low threshold | Slider | 1 - canny max | 15 |
+| Canny high threshold | Slider | canny low - canny max | 40 |
+| Canny max | Slider | canny high - ~1140 | 60 |
+| Contour tracing | Select | Border following / Marching squares | Border following |
+| Simplify tolerance | Slider | 0.0 - 20.0 | 2.0 |
+| Path joining | Select | Straight line / Retrace / ... | Mst |
+| Circular mask | Toggle | on/off | on |
+| Mask diameter | Slider | 0.1 - 1.0 | 1.0 |
+| Invert | Toggle | on/off | off |
+| Preview mode | Select | original/edges/paths/paths only | paths |
 
 Strategy selects (contour tracing, path joining) follow the [pluggable algorithm strategy](principles.md#pluggable-algorithm-strategies) principle.
 Only implemented strategies are shown in the UI; future strategies appear as they are added.
@@ -115,9 +91,8 @@ Many Oasis Mini users will access from phones.
 │     Preview Canvas       │  │ Blur: ━━━●━━━━━━━━━  │ │
 │                          │  │ Low:  ━━━━●━━━━━━━━  │ │
 │     (SVG rendering)      │  │ High: ━━━━━━━●━━━━  │ │
-│     Mask fills entire    │  │ Zoom: ━━━━●━━━━━━━  │ │
-│     preview area         │  │ Simplify: ━●━━━━━━━  │ │
-│                          │  │ Shape: ○ Circle       │ │
+│                          │  │ Simplify: ━●━━━━━━━  │ │
+│                          │  │ ☐ Circular mask      │ │
 │                          │  │ ☐ Invert             │ │
 │                          │  └──────────────────────┘ │
 │                          │                           │
@@ -150,16 +125,12 @@ Stacked vertically: header (with upload button), preview, parameters (collapsed/
 
 Dioxus signals for reactive state:
 
-- `image_bytes: Signal<Option<Vec<u8>>>` — uploaded image data
-- `config: Signal<PipelineConfig>` — pipeline parameters from sliders and
-  strategy selects (includes `zoom`, `mask_shape`, etc.)
-- `path: Signal<Option<Polyline>>` — pipeline output (single continuous path,
-  in [normalized coordinates](principles.md#coordinate-system))
-- `processing: Signal<bool>` — loading indicator
+- `image_bytes: Signal<Option<Vec<u8>>>` -- uploaded image data
+- `config: Signal<PipelineConfig>` -- pipeline parameters from sliders and strategy selects
+- `path: Signal<Option<Polyline>>` -- pipeline output (single continuous path)
+- `processing: Signal<bool>` -- loading indicator
 
-When `image_bytes` or `config` changes, the pipeline re-runs and `path` updates.
-The SVG preview renders the normalized-space path with a `viewBox` matching the
-mask bounding box, so the mask shape always fills the preview.
+When `image_bytes` or `config` changes, the pipeline re-runs and `path` updates, which triggers the SVG preview to re-render.
 
 ## Error Handling
 

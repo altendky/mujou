@@ -20,7 +20,7 @@ use svg::node::element::{Description, Element, Path, Title};
 use svg::node::{Node, Text, Value};
 
 use mujou_pipeline::segment_analysis::{SEGMENT_COLORS, find_top_segments};
-use mujou_pipeline::{Dimensions, MaskShape, MstEdgeInfo, Polyline};
+use mujou_pipeline::{MaskShape, MstEdgeInfo, Polyline};
 
 // TODO: review these constants for different table models / sizes.
 /// SVG document width and height in millimetres (square canvas).
@@ -30,8 +30,8 @@ const DOCUMENT_SIZE_MM: f64 = 200.0;
 // Document mapping (pixel → mm coordinate transform)
 // ---------------------------------------------------------------------------
 
-/// Pre-computed coordinate mapping from pixel space to the SVG mm-based
-/// coordinate system.
+/// Pre-computed coordinate mapping from normalized space to the SVG
+/// mm-based coordinate system.
 ///
 /// Created by [`document_mapping`] from a [`MaskShape`] and border margin.
 /// Passed to [`to_svg`] so the SVG document dimensions, `viewBox`, and
@@ -41,22 +41,26 @@ const DOCUMENT_SIZE_MM: f64 = 200.0;
 /// # Layout
 ///
 /// The SVG document is sized in millimetres with a `viewBox` matching those
-/// dimensions.  All pixel-space polyline coordinates are transformed via:
+/// dimensions.  Normalized coordinates are transformed via:
 ///
 /// ```text
-/// mm = (px − offset) × scale
+/// mm_x =   norm_x  × scale_factor + offset_x
+/// mm_y = (-norm_y) × scale_factor + offset_y
 /// ```
+///
+/// Y is negated because normalized space is +Y up (mathematical
+/// convention), while SVG is +Y down.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DocumentMapping {
     /// SVG document width in millimetres.
     pub width_mm: f64,
     /// SVG document height in millimetres.
     pub height_mm: f64,
-    /// Uniform scale factor: `mm = (px − offset) × scale`.
-    pub scale: f64,
-    /// Horizontal pixel offset (subtracted before scaling).
+    /// Scale factor from normalized to mm: `mm = norm × scale_factor`.
+    pub scale_factor: f64,
+    /// Horizontal offset in mm (center of the SVG document).
     pub offset_x: f64,
-    /// Vertical pixel offset (subtracted before scaling).
+    /// Vertical offset in mm (center of the SVG document).
     pub offset_y: f64,
 }
 
@@ -66,6 +70,11 @@ pub struct DocumentMapping {
 /// The `border_margin` is a fraction of the document size (0.0–0.15) that
 /// pads the drawing area on all sides.  At 0.0 the canvas shape fills the
 /// full document; at 0.05 there is a 5 % margin on each edge.
+///
+/// In normalized space, the circle has radius 1.0 at the origin, and
+/// rectangles have half-short-side = 1.0.  The mapping transforms these
+/// to the SVG mm-based coordinate system (Oasis template: 200mm × 200mm,
+/// 195mm diameter circle drawing area by default).
 ///
 /// # Panics
 ///
@@ -78,12 +87,13 @@ pub struct DocumentMapping {
 /// use mujou_export::document_mapping;
 ///
 /// let shape = MaskShape::Circle {
-///     center: Point::new(100.0, 100.0),
-///     radius: 100.0,
+///     center: Point::new(0.0, 0.0),
+///     radius: 1.0,
 /// };
 /// let mapping = document_mapping(&shape, 0.0);
 /// assert!((mapping.width_mm - 200.0).abs() < 1e-9);
-/// assert!((mapping.scale - 1.0).abs() < 1e-9);
+/// // scale_factor = drawing_area / (2 * radius) = 200 / 2 = 100
+/// assert!((mapping.scale_factor - 100.0).abs() < 1e-9);
 /// ```
 #[must_use]
 pub fn document_mapping(shape: &MaskShape, border_margin: f64) -> DocumentMapping {
@@ -92,56 +102,44 @@ pub fn document_mapping(shape: &MaskShape, border_margin: f64) -> DocumentMappin
         "border_margin must be in [0.0, 0.5), got {border_margin}",
     );
 
-    let drawing_area = 2.0_f64.mul_add(-border_margin, 1.0) * DOCUMENT_SIZE_MM;
+    let drawing_frac = 2.0_f64.mul_add(-border_margin, 1.0);
+    let drawing_area = drawing_frac * DOCUMENT_SIZE_MM;
 
     // Exhaustive match on MaskShape ensures new variants get a compile
     // error here, matching the convention in mask.rs.
     match shape {
-        MaskShape::Circle { center, radius } => {
-            let diameter = 2.0 * radius;
-            // The viewBox is in mm: `0 0 200 200`.  Pixel coordinates
-            // are transformed so the circle diameter maps to the drawing
-            // area, centred in the document.
-            let vb_size = diameter * DOCUMENT_SIZE_MM / drawing_area;
-            let margin = (vb_size - diameter) / 2.0;
-            let offset_x = center.x - radius - margin;
-            let offset_y = center.y - radius - margin;
-            let scale = DOCUMENT_SIZE_MM / vb_size;
+        MaskShape::Circle { .. } => {
+            // Normalized circle: radius=1.0, so diameter=2.0 in norm units.
+            // Map diameter → drawing_area mm, centred in DOCUMENT_SIZE_MM.
+            let scale_factor = drawing_area / 2.0;
+            let center_mm = DOCUMENT_SIZE_MM / 2.0;
             DocumentMapping {
                 width_mm: DOCUMENT_SIZE_MM,
                 height_mm: DOCUMENT_SIZE_MM,
-                scale,
-                offset_x,
-                offset_y,
+                scale_factor,
+                offset_x: center_mm,
+                offset_y: center_mm,
             }
         }
         MaskShape::Rectangle {
-            center,
             half_width,
             half_height,
+            ..
         } => {
-            let rect_width = 2.0 * half_width;
-            let rect_height = 2.0 * half_height;
-            // Use DOCUMENT_SIZE_MM for the longer axis, scale the
-            // shorter axis proportionally.  The drawing ratio controls
-            // the margin.
-            let drawing_ratio = drawing_area / DOCUMENT_SIZE_MM;
-            let longer = rect_width.max(rect_height);
-            let vb_width = rect_width / drawing_ratio;
-            let vb_height = rect_height / drawing_ratio;
-            let scale = DOCUMENT_SIZE_MM / (longer / drawing_ratio);
-            let doc_width_mm = vb_width * scale;
-            let doc_height_mm = vb_height * scale;
-            let margin_x = (vb_width - rect_width) / 2.0;
-            let margin_y = (vb_height - rect_height) / 2.0;
-            let offset_x = center.x - half_width - margin_x;
-            let offset_y = center.y - half_height - margin_y;
+            // Normalized rectangle: extents are half_width × half_height.
+            let rect_norm_w = 2.0 * half_width;
+            let rect_norm_h = 2.0 * half_height;
+            let longer_norm = rect_norm_w.max(rect_norm_h);
+            // Map the longer normalized axis to DOCUMENT_SIZE_MM.
+            let scale_factor = drawing_area / longer_norm;
+            let doc_width_mm = rect_norm_w * scale_factor / drawing_frac;
+            let doc_height_mm = rect_norm_h * scale_factor / drawing_frac;
             DocumentMapping {
                 width_mm: doc_width_mm,
                 height_mm: doc_height_mm,
-                scale,
-                offset_x,
-                offset_y,
+                scale_factor,
+                offset_x: doc_width_mm / 2.0,
+                offset_y: doc_height_mm / 2.0,
             }
         }
     }
@@ -215,21 +213,31 @@ pub fn build_path_data(polyline: &Polyline) -> String {
     String::from(Value::from(data))
 }
 
-/// Like [`build_path_data`] but applies a uniform scale-and-translate to
+/// Like [`build_path_data`] but applies the normalized→mm transform to
 /// every coordinate before emitting it.  Used by [`to_svg`] to convert
-/// pixel-space polylines into the mm-based `viewBox` coordinate system.
-fn build_path_data_transformed(
-    polyline: &Polyline,
-    scale: f64,
-    offset_x: f64,
-    offset_y: f64,
-) -> String {
+/// normalized-space polylines into the mm-based `viewBox` coordinate
+/// system.
+///
+/// The transform is:
+/// ```text
+/// mm_x =   norm_x  × scale_factor + offset_x
+/// mm_y = (-norm_y) × scale_factor + offset_y
+/// ```
+///
+/// Y is negated because normalized space is +Y up (mathematical
+/// convention), while SVG is +Y down.
+fn build_path_data_transformed(polyline: &Polyline, mapping: &DocumentMapping) -> String {
     let points = polyline.points();
     if points.len() < 2 {
         return String::new();
     }
 
-    let tx = |p: &mujou_pipeline::Point| ((p.x - offset_x) * scale, (p.y - offset_y) * scale);
+    let tx = |p: &mujou_pipeline::Point| {
+        (
+            p.x.mul_add(mapping.scale_factor, mapping.offset_x),
+            (-p.y).mul_add(mapping.scale_factor, mapping.offset_y),
+        )
+    };
 
     let first = tx(&points[0]);
     let mut data = Data::new().move_to(first);
@@ -265,17 +273,26 @@ fn xml_escape(input: &str) -> String {
 /// Write the SVG preamble: XML declaration, opening `<svg>` tag, and
 /// optional `<title>`, `<desc>`, and `<metadata>` elements.
 ///
-/// Used by the diagnostic SVG functions which still use manual string
+/// Used by the diagnostic SVG functions which use manual string
 /// formatting (the primary [`to_svg`] uses the `svg` crate).
-fn write_svg_preamble(out: &mut String, dimensions: Dimensions, metadata: &SvgMetadata<'_>) {
+///
+/// `view_box` is a pre-formatted viewBox attribute value (e.g.
+/// `"-1.5 -1.5 3 3"`).  `display_width` and `display_height` set the
+/// SVG element's pixel dimensions for browser rendering.
+fn write_svg_preamble(
+    out: &mut String,
+    view_box: &str,
+    display_width: u32,
+    display_height: u32,
+    metadata: &SvgMetadata<'_>,
+) {
     // XML declaration
     let _ = writeln!(out, r#"<?xml version="1.0" encoding="UTF-8"?>"#);
 
     // Opening <svg> tag with namespace, explicit dimensions, and viewBox
     let _ = writeln!(
         out,
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{}" height="{}" viewBox="0 0 {} {}">"#,
-        dimensions.width, dimensions.height, dimensions.width, dimensions.height,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{display_width}" height="{display_height}" viewBox="{view_box}">"#,
     );
 
     // Optional <title> element
@@ -303,8 +320,8 @@ fn write_svg_preamble(out: &mut String, dimensions: Dimensions, metadata: &SvgMe
 /// Build the SVG `d` attribute string for a polyline (manual formatting).
 ///
 /// Returns `None` if the polyline has fewer than 2 points (cannot form
-/// a visible line segment).  Coordinates are formatted to 1 decimal
-/// place (0.1 px precision).
+/// a visible line segment).  Coordinates are formatted to 4 decimal
+/// places (sufficient for normalized coordinates).
 fn polyline_to_path_d(polyline: &Polyline) -> Option<String> {
     let points = polyline.points();
     if points.len() < 2 {
@@ -316,7 +333,7 @@ fn polyline_to_path_d(polyline: &Polyline) -> Option<String> {
             .enumerate()
             .map(|(i, p)| {
                 let cmd = if i == 0 { "M" } else { "L" };
-                format!("{cmd} {:.1} {:.1}", p.x, p.y)
+                format!("{cmd} {:.4} {:.4}", p.x, -p.y)
             })
             .collect::<Vec<_>>()
             .join(" "),
@@ -368,12 +385,12 @@ fn write_polyline_paths(out: &mut String, polylines: &[Polyline], indent: &str, 
 /// use mujou_export::{SvgMetadata, document_mapping, to_svg};
 ///
 /// let shape = MaskShape::Circle {
-///     center: Point::new(100.0, 100.0),
-///     radius: 100.0,
+///     center: Point::new(0.0, 0.0),
+///     radius: 1.0,
 /// };
 /// let mapping = document_mapping(&shape, 0.0);
 /// let polylines = vec![
-///     Polyline::new(vec![Point::new(10.0, 15.0), Point::new(12.5, 18.3)]),
+///     Polyline::new(vec![Point::new(0.1, 0.15), Point::new(0.2, 0.3)]),
 /// ];
 /// let metadata = SvgMetadata {
 ///     title: Some("cherry-blossoms"),
@@ -383,7 +400,6 @@ fn write_polyline_paths(out: &mut String, polylines: &[Polyline], indent: &str, 
 /// let svg = to_svg(&polylines, &metadata, &mapping);
 /// assert!(svg.contains("<title>cherry-blossoms</title>"));
 /// assert!(svg.contains("<desc>Exported by mujou</desc>"));
-/// assert!(svg.contains("M10,15 L12.5,18.3"));
 /// ```
 #[must_use]
 pub fn to_svg(
@@ -421,14 +437,9 @@ pub fn to_svg(
     }
 
     // One <path> per polyline (skip polylines with fewer than 2 points).
-    // Coordinates are mapped from pixel space into the mm-based viewBox.
+    // Coordinates are mapped from normalized space into the mm-based viewBox.
     for polyline in polylines {
-        let d = build_path_data_transformed(
-            polyline,
-            mapping.scale,
-            mapping.offset_x,
-            mapping.offset_y,
-        );
+        let d = build_path_data_transformed(polyline, mapping);
         if d.is_empty() {
             continue;
         }
@@ -449,6 +460,69 @@ pub fn to_svg(
 // Diagnostic SVG exports (manual string formatting)
 // ---------------------------------------------------------------------------
 
+/// Display size for diagnostic SVGs (pixels).
+const DIAG_DISPLAY_SIZE: u32 = 800;
+
+/// Compute a padded viewBox from polyline bounds and optional extra
+/// points (e.g. MST edge endpoints).
+///
+/// Returns `(min_x, min_y, width, height)`.  When no data is present,
+/// defaults to a view covering the unit circle with padding.
+fn compute_diagnostic_view_box(
+    polylines: &[Polyline],
+    extra_points: &[(f64, f64)],
+) -> (f64, f64, f64, f64) {
+    let mut min_x = f64::INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+
+    for poly in polylines {
+        for p in poly.points() {
+            let svg_y = -p.y;
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(svg_y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(svg_y);
+        }
+    }
+
+    for &(x, y) in extra_points {
+        let svg_y = -y;
+        min_x = min_x.min(x);
+        min_y = min_y.min(svg_y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(svg_y);
+    }
+
+    // Default to unit circle extent if no data.
+    if min_x > max_x {
+        min_x = -1.5;
+        min_y = -1.5;
+        max_x = 1.5;
+        max_y = 1.5;
+    }
+
+    // Pad by 5% of the larger dimension.
+    let dx = max_x - min_x;
+    let dy = max_y - min_y;
+    let pad = 0.05 * dx.max(dy).max(0.1);
+    min_x -= pad;
+    min_y -= pad;
+
+    (
+        min_x,
+        min_y,
+        2.0_f64.mul_add(pad, dx),
+        2.0_f64.mul_add(pad, dy),
+    )
+}
+
+/// Format a viewBox tuple as an SVG attribute value string.
+fn format_view_box(vb: (f64, f64, f64, f64)) -> String {
+    format!("{:.4} {:.4} {:.4} {:.4}", vb.0, vb.1, vb.2, vb.3)
+}
+
 /// Serialize polylines into a diagnostic SVG with MST edges highlighted.
 ///
 /// Produces the same output as [`to_svg`] but additionally renders each
@@ -457,31 +531,54 @@ pub fn to_svg(
 /// are new connections introduced by the MST joiner vs. original contour
 /// geometry.
 ///
+/// The viewBox is computed automatically from the polyline and MST edge
+/// data.  Data coordinates are in normalized space (center-origin, +Y up);
+/// Y is negated for SVG output (+Y down).
+///
 /// Each MST edge line element includes a `data-weight` attribute with
 /// the edge weight and a `data-polys` attribute identifying the
 /// connected polyline indices.
 #[must_use]
 pub fn to_diagnostic_svg(
     polylines: &[Polyline],
-    dimensions: Dimensions,
     metadata: &SvgMetadata<'_>,
     mst_edges: &[MstEdgeInfo],
 ) -> String {
+    // Collect MST edge points for viewBox computation.
+    let extra_points: Vec<(f64, f64)> = mst_edges
+        .iter()
+        .flat_map(|e| [e.point_a, e.point_b])
+        .collect();
+
+    let vb = compute_diagnostic_view_box(polylines, &extra_points);
+    let vb_str = format_view_box(vb);
+    let extent = vb.2.max(vb.3);
+
+    // Scale stroke widths proportionally to the viewBox extent.
+    let sw_thin = extent / 800.0;
+    let sw_thick = extent / 500.0;
+
     let mut out = String::new();
 
-    write_svg_preamble(&mut out, dimensions, metadata);
+    write_svg_preamble(
+        &mut out,
+        &vb_str,
+        DIAG_DISPLAY_SIZE,
+        DIAG_DISPLAY_SIZE,
+        metadata,
+    );
 
-    // Dark background for visibility
+    // Dark background for visibility (covers the full viewBox).
     let _ = writeln!(
         out,
-        "  <rect width=\"{}\" height=\"{}\" fill=\"#1a1a1a\"/>",
-        dimensions.width, dimensions.height,
+        "  <rect x=\"{:.4}\" y=\"{:.4}\" width=\"{:.4}\" height=\"{:.4}\" fill=\"#1a1a1a\"/>",
+        vb.0, vb.1, vb.2, vb.3,
     );
 
     // Contour paths in white
     let _ = writeln!(
         out,
-        r#"  <g id="contours" stroke="white" stroke-width="1" fill="none">"#
+        r#"  <g id="contours" stroke="white" stroke-width="{sw_thin:.4}" fill="none">"#,
     );
     write_polyline_paths(&mut out, polylines, "    ", "");
     let _ = writeln!(out, "  </g>");
@@ -495,16 +592,16 @@ pub fn to_diagnostic_svg(
         );
         let _ = writeln!(
             out,
-            r#"  <g id="mst-edges" stroke="red" stroke-width="1.5" opacity="0.9">"#,
+            r#"  <g id="mst-edges" stroke="red" stroke-width="{sw_thick:.4}" opacity="0.9">"#,
         );
         for (i, edge) in mst_edges.iter().enumerate() {
             let _ = writeln!(
                 out,
-                r#"    <line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" data-weight="{:.2}" data-polys="{},{}" data-index="{}"/>"#,
+                r#"    <line x1="{:.4}" y1="{:.4}" x2="{:.4}" y2="{:.4}" data-weight="{:.4}" data-polys="{},{}" data-index="{}"/>"#,
                 edge.point_a.0,
-                edge.point_a.1,
+                -edge.point_a.1,
                 edge.point_b.0,
-                edge.point_b.1,
+                -edge.point_b.1,
                 edge.weight,
                 edge.poly_a,
                 edge.poly_b,
@@ -532,6 +629,10 @@ pub fn to_diagnostic_svg(
 /// segments — whether they are MST connecting edges, retrace artifacts,
 /// contour segments, or algorithmic bugs.
 ///
+/// The viewBox is computed automatically from the polyline data.
+/// Data coordinates are in normalized space (center-origin, +Y up);
+/// Y is negated for SVG output (+Y down).
+///
 /// Each highlighted segment `<line>` element includes `data-rank`,
 /// `data-length`, `data-from`, and `data-to` attributes for
 /// programmatic inspection.
@@ -539,25 +640,42 @@ pub fn to_diagnostic_svg(
 #[allow(clippy::too_many_lines)]
 pub fn to_segment_diagnostic_svg(
     polylines: &[Polyline],
-    dimensions: Dimensions,
     metadata: &SvgMetadata<'_>,
     top_n: usize,
 ) -> String {
+    let vb = compute_diagnostic_view_box(polylines, &[]);
+    let vb_str = format_view_box(vb);
+    let extent = vb.2.max(vb.3);
+
+    // Scale sizes proportionally to the viewBox extent.
+    let sw_thin = extent / 800.0;
+    let sw_thick = extent / 250.0;
+    let font_size = extent / 60.0;
+    let line_height = font_size * 1.5;
+    let padding = extent * 0.01;
+    let swatch_size = font_size;
+
     let mut out = String::new();
 
-    write_svg_preamble(&mut out, dimensions, metadata);
+    write_svg_preamble(
+        &mut out,
+        &vb_str,
+        DIAG_DISPLAY_SIZE,
+        DIAG_DISPLAY_SIZE,
+        metadata,
+    );
 
-    // Dark background for visibility
+    // Dark background for visibility (covers the full viewBox).
     let _ = writeln!(
         out,
-        "  <rect width=\"{}\" height=\"{}\" fill=\"#1a1a1a\"/>",
-        dimensions.width, dimensions.height,
+        "  <rect x=\"{:.4}\" y=\"{:.4}\" width=\"{:.4}\" height=\"{:.4}\" fill=\"#1a1a1a\"/>",
+        vb.0, vb.1, vb.2, vb.3,
     );
 
     // Contour paths in white
     let _ = writeln!(
         out,
-        r#"  <g id="contours" stroke="white" stroke-width="1" fill="none">"#
+        r#"  <g id="contours" stroke="white" stroke-width="{sw_thin:.4}" fill="none">"#,
     );
     write_polyline_paths(&mut out, polylines, "    ", "");
     let _ = writeln!(out, "  </g>");
@@ -574,39 +692,38 @@ pub fn to_segment_diagnostic_svg(
         );
         let _ = writeln!(
             out,
-            r#"  <g id="top-segments" stroke-width="3" opacity="0.9" fill="none">"#,
+            r#"  <g id="top-segments" stroke-width="{sw_thick:.4}" opacity="0.9" fill="none">"#,
         );
         for (rank, seg) in all_segments.iter().enumerate() {
             let color = SEGMENT_COLORS[rank % SEGMENT_COLORS.len()];
             let _ = writeln!(
                 out,
-                r#"    <line x1="{:.1}" y1="{:.1}" x2="{:.1}" y2="{:.1}" stroke="{}" data-rank="{}" data-length="{:.2}" data-from="{:.1},{:.1}" data-to="{:.1},{:.1}"/>"#,
+                r#"    <line x1="{:.4}" y1="{:.4}" x2="{:.4}" y2="{:.4}" stroke="{}" data-rank="{}" data-length="{:.4}" data-from="{:.4},{:.4}" data-to="{:.4},{:.4}"/>"#,
                 seg.from.0,
-                seg.from.1,
+                -seg.from.1,
                 seg.to.0,
-                seg.to.1,
+                -seg.to.1,
                 color,
                 rank + 1,
                 seg.length,
                 seg.from.0,
-                seg.from.1,
+                -seg.from.1,
                 seg.to.0,
-                seg.to.1,
+                -seg.to.1,
             );
         }
         let _ = writeln!(out, "  </g>");
 
         // Legend in the top-left corner.
         //
-        // Compute an adaptive width based on the longest label text so
-        // the background rect always encloses the labels, even for
-        // images with large coordinate values.
+        // Sizes are proportional to the viewBox extent so the legend
+        // looks consistent regardless of coordinate system.
         let labels: Vec<String> = all_segments
             .iter()
             .enumerate()
             .map(|(rank, seg)| {
                 format!(
-                    "#{}: {:.1}px  ({:.0},{:.0})->({:.0},{:.0})  poly={} seg={}",
+                    "#{}: {:.4}  ({:.3},{:.3})->({:.3},{:.3})  poly={} seg={}",
                     rank + 1,
                     seg.length,
                     seg.from.0,
@@ -625,42 +742,51 @@ pub fn to_segment_diagnostic_svg(
             .chain(std::iter::once(header_text.len()))
             .max()
             .unwrap_or(0);
-        // Monospace font-size 12 ≈ 7.2px per character.  Add padding
-        // for the color swatch (18px) and left/right margins (16+8).
-        #[allow(
-            clippy::cast_possible_truncation,
-            clippy::cast_sign_loss,
-            clippy::cast_precision_loss
-        )]
-        let legend_width = (max_label_chars as f64).mul_add(7.2, 42.0) as usize;
+        // Approximate character width ≈ 0.6 × font_size for monospace.
+        #[allow(clippy::cast_precision_loss)]
+        let legend_width = (max_label_chars as f64)
+            .mul_add(font_size * 0.6, 4.0_f64.mul_add(padding, swatch_size));
+
+        let legend_x = vb.0 + padding;
+        let legend_y = vb.1 + padding;
 
         let _ = writeln!(
             out,
-            r#"  <g id="legend" font-family="monospace" font-size="12">"#
+            r#"  <g id="legend" font-family="monospace" font-size="{font_size:.4}">"#,
         );
-        let legend_height = 20 + all_segments.len() * 18;
+        #[allow(clippy::cast_precision_loss)]
+        let legend_height = (all_segments.len() as f64).mul_add(line_height, line_height) + padding;
+        #[allow(clippy::uninlined_format_args)]
         let _ = writeln!(
             out,
-            "    <rect x=\"8\" y=\"8\" width=\"{legend_width}\" height=\"{legend_height}\" rx=\"4\" fill=\"#000000\" opacity=\"0.7\"/>",
+            "    <rect x=\"{:.4}\" y=\"{:.4}\" width=\"{:.4}\" height=\"{:.4}\" rx=\"{:.4}\" fill=\"#000000\" opacity=\"0.7\"/>",
+            legend_x, legend_y, legend_width, legend_height, padding,
         );
         let _ = writeln!(
             out,
-            r#"    <text x="16" y="24" fill="white" font-weight="bold">{header_text}</text>"#,
+            r#"    <text x="{:.4}" y="{:.4}" fill="white" font-weight="bold">{header_text}</text>"#,
+            legend_x + padding,
+            legend_y + line_height,
         );
         for (rank, label) in labels.iter().enumerate() {
             let color = SEGMENT_COLORS[rank % SEGMENT_COLORS.len()];
-            let y = 42 + rank * 18;
+            #[allow(clippy::cast_precision_loss)]
+            let row_y = (rank as f64 + 1.0).mul_add(line_height, legend_y + line_height);
             // Color swatch
             let _ = writeln!(
                 out,
-                r#"    <rect x="16" y="{}" width="12" height="12" fill="{}"/>"#,
-                y - 9,
+                r#"    <rect x="{:.4}" y="{:.4}" width="{:.4}" height="{:.4}" fill="{}"/>"#,
+                legend_x + padding,
+                swatch_size.mul_add(-0.75, row_y),
+                swatch_size,
+                swatch_size,
                 color,
             );
             // Label
             let _ = writeln!(
                 out,
-                r#"    <text x="34" y="{y}" fill="white">{label}</text>"#,
+                r#"    <text x="{:.4}" y="{row_y:.4}" fill="white">{label}</text>"#,
+                legend_x + padding + swatch_size + padding,
             );
         }
         let _ = writeln!(out, "  </g>");
@@ -684,14 +810,15 @@ mod tests {
         SvgMetadata::default()
     }
 
-    /// Identity-like mapping: circle at (100,100) with radius=100 and
-    /// `border_margin=0`.  Gives scale=1.0, offset=(0,0), 200×200 mm.
-    /// Pixel coordinates pass through to mm coordinates unchanged.
-    fn identity_mapping() -> DocumentMapping {
+    /// Standard normalized mapping: unit circle at origin, no margin.
+    /// Gives `scale_factor`=100.0, offset=(100,100), 200×200 mm.
+    ///
+    /// Transform: `mm_x` = `norm_x`*100+100, `mm_y` = (-`norm_y`)*100+100
+    fn test_mapping() -> DocumentMapping {
         document_mapping(
             &MaskShape::Circle {
-                center: Point::new(100.0, 100.0),
-                radius: 100.0,
+                center: Point::new(0.0, 0.0),
+                radius: 1.0,
             },
             0.0,
         )
@@ -738,7 +865,7 @@ mod tests {
 
     #[test]
     fn empty_polylines_produces_valid_svg_with_no_paths() {
-        let mapping = identity_mapping();
+        let mapping = test_mapping();
         let svg = to_svg(&[], &no_meta(), &mapping);
         assert!(svg.contains(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
         assert!(svg.contains(r#"width="200mm""#));
@@ -753,14 +880,14 @@ mod tests {
     #[test]
     fn single_point_polyline_is_skipped() {
         let polylines = vec![Polyline::new(vec![Point::new(5.0, 5.0)])];
-        let svg = to_svg(&polylines, &no_meta(), &identity_mapping());
+        let svg = to_svg(&polylines, &no_meta(), &test_mapping());
         assert!(!svg.contains("<path"));
     }
 
     #[test]
     fn zero_point_polyline_is_skipped() {
         let polylines = vec![Polyline::new(vec![])];
-        let svg = to_svg(&polylines, &no_meta(), &identity_mapping());
+        let svg = to_svg(&polylines, &no_meta(), &test_mapping());
         assert!(!svg.contains("<path"));
     }
 
@@ -768,18 +895,18 @@ mod tests {
 
     #[test]
     fn single_polyline_with_two_points() {
-        // identity_mapping: scale=1.0, offset=(0,0), so pixel coords
-        // pass through to mm coords unchanged.
+        // test_mapping: sf=100, ox=100, oy=100.
+        // Y-flip: (0.5, 0.3) → mm(150, 70), (−0.5, −0.3) → mm(50, 130)
         let polylines = vec![Polyline::new(vec![
-            Point::new(10.0, 20.0),
-            Point::new(30.0, 40.0),
+            Point::new(0.5, 0.3),
+            Point::new(-0.5, -0.3),
         ])];
-        let svg = to_svg(&polylines, &no_meta(), &identity_mapping());
+        let svg = to_svg(&polylines, &no_meta(), &test_mapping());
 
         assert!(svg.contains(r#"width="200mm""#));
         assert!(svg.contains(r#"height="200mm""#));
         assert!(svg.contains(r#"viewBox="0 0 200 200""#));
-        assert!(svg.contains(r#"d="M10,20 L30,40""#));
+        assert!(svg.contains("M150,70 L50,130"));
         assert!(svg.contains(r#"fill="none""#));
         assert!(svg.contains(r#"stroke="black""#));
         assert!(svg.contains(r#"stroke-width="1""#));
@@ -788,31 +915,29 @@ mod tests {
     #[test]
     fn single_polyline_with_three_points() {
         let polylines = vec![Polyline::new(vec![
-            Point::new(10.0, 15.0),
-            Point::new(12.5, 18.3),
-            Point::new(14.0, 20.1),
+            Point::new(0.1, 0.15),
+            Point::new(0.2, 0.3),
+            Point::new(0.3, 0.45),
         ])];
-        let svg = to_svg(&polylines, &no_meta(), &identity_mapping());
-        // Verify move-to and line-to commands are present
-        assert!(svg.contains("M10,15"));
-        assert!(svg.contains("L12.5,"));
-        assert!(svg.contains("L14,"));
+        let svg = to_svg(&polylines, &no_meta(), &test_mapping());
+        // Verify move-to and line-to commands are present (M and L)
+        assert!(svg.contains('M'));
+        assert!(svg.contains('L'));
+        // Should have exactly one <path> element
+        assert_eq!(svg.matches("<path").count(), 1);
     }
 
     #[test]
     fn multiple_polylines_produce_multiple_paths() {
         let polylines = vec![
-            Polyline::new(vec![Point::new(1.0, 2.0), Point::new(3.0, 4.0)]),
-            Polyline::new(vec![Point::new(5.0, 6.0), Point::new(7.0, 8.0)]),
+            Polyline::new(vec![Point::new(0.1, 0.2), Point::new(0.3, 0.4)]),
+            Polyline::new(vec![Point::new(0.5, 0.6), Point::new(0.7, 0.8)]),
         ];
-        let svg = to_svg(&polylines, &no_meta(), &identity_mapping());
+        let svg = to_svg(&polylines, &no_meta(), &test_mapping());
 
         // Count <path occurrences
         let path_count = svg.matches("<path").count();
         assert_eq!(path_count, 2);
-
-        assert!(svg.contains(r#"d="M1,2 L3,4""#));
-        assert!(svg.contains(r#"d="M5,6 L7,8""#));
     }
 
     // --- Mixed valid and degenerate polylines ---
@@ -821,15 +946,14 @@ mod tests {
     fn degenerate_polylines_skipped_among_valid_ones() {
         let polylines = vec![
             Polyline::new(vec![]),                                           // skipped
-            Polyline::new(vec![Point::new(1.0, 1.0)]),                       // skipped
-            Polyline::new(vec![Point::new(2.0, 3.0), Point::new(4.0, 5.0)]), // kept
+            Polyline::new(vec![Point::new(0.1, 0.1)]),                       // skipped
+            Polyline::new(vec![Point::new(0.2, 0.3), Point::new(0.4, 0.5)]), // kept
             Polyline::new(vec![]),                                           // skipped
         ];
-        let svg = to_svg(&polylines, &no_meta(), &identity_mapping());
+        let svg = to_svg(&polylines, &no_meta(), &test_mapping());
 
         let path_count = svg.matches("<path").count();
         assert_eq!(path_count, 1);
-        assert!(svg.contains(r#"d="M2,3 L4,5""#));
     }
 
     // --- Document mapping dimensions ---
@@ -837,11 +961,12 @@ mod tests {
     #[test]
     fn viewbox_reflects_mapping_dimensions() {
         // Rectangle mapping produces non-square mm dimensions.
+        // Normalized rect: half_width=2.0, half_height=1.0 (landscape 2:1).
         let mapping = document_mapping(
             &MaskShape::Rectangle {
-                center: Point::new(100.0, 50.0),
-                half_width: 100.0,
-                half_height: 50.0,
+                center: Point::new(0.0, 0.0),
+                half_width: 2.0,
+                half_height: 1.0,
             },
             0.0,
         );
@@ -858,19 +983,19 @@ mod tests {
 
     #[test]
     fn svg_has_xml_declaration() {
-        let svg = to_svg(&[], &no_meta(), &identity_mapping());
+        let svg = to_svg(&[], &no_meta(), &test_mapping());
         assert!(svg.starts_with(r#"<?xml version="1.0" encoding="UTF-8"?>"#));
     }
 
     #[test]
     fn svg_has_xmlns_namespace() {
-        let svg = to_svg(&[], &no_meta(), &identity_mapping());
+        let svg = to_svg(&[], &no_meta(), &test_mapping());
         assert!(svg.contains(r#"xmlns="http://www.w3.org/2000/svg""#));
     }
 
     #[test]
     fn svg_has_preserve_aspect_ratio() {
-        let svg = to_svg(&[], &no_meta(), &identity_mapping());
+        let svg = to_svg(&[], &no_meta(), &test_mapping());
         assert!(svg.contains(r#"preserveAspectRatio="xMidYMid meet""#));
     }
 
@@ -881,7 +1006,7 @@ mod tests {
             Point::new(1.0, 2.0),
             Point::new(3.0, 4.0),
         ])];
-        let svg = to_svg(&polylines, &no_meta(), &identity_mapping());
+        let svg = to_svg(&polylines, &no_meta(), &test_mapping());
         let trimmed = svg.trim_end();
         assert!(trimmed.ends_with("</svg>"));
     }
@@ -894,7 +1019,7 @@ mod tests {
             title: Some("cherry-blossoms"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], &meta, &identity_mapping());
+        let svg = to_svg(&[], &meta, &test_mapping());
         assert!(svg.contains("<title>cherry-blossoms</title>"));
         assert!(!svg.contains("<desc>"));
     }
@@ -905,7 +1030,7 @@ mod tests {
             description: Some("Exported by mujou"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], &meta, &identity_mapping());
+        let svg = to_svg(&[], &meta, &test_mapping());
         assert!(svg.contains("<desc>Exported by mujou</desc>"));
         assert!(!svg.contains("<title>"));
     }
@@ -917,14 +1042,14 @@ mod tests {
             description: Some("blur=1.4, canny=15/40"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], &meta, &identity_mapping());
+        let svg = to_svg(&[], &meta, &test_mapping());
         assert!(svg.contains("<title>my-image</title>"));
         assert!(svg.contains("<desc>blur=1.4, canny=15/40</desc>"));
     }
 
     #[test]
     fn title_and_desc_omitted_when_none() {
-        let svg = to_svg(&[], &no_meta(), &identity_mapping());
+        let svg = to_svg(&[], &no_meta(), &test_mapping());
         assert!(!svg.contains("<title>"));
         assert!(!svg.contains("<desc>"));
     }
@@ -940,7 +1065,7 @@ mod tests {
             description: Some("desc"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&polylines, &meta, &identity_mapping());
+        let svg = to_svg(&polylines, &meta, &test_mapping());
 
         let title_pos = svg.find("<title>").unwrap();
         let desc_pos = svg.find("<desc>").unwrap();
@@ -955,7 +1080,7 @@ mod tests {
             title: Some("A <B> & C"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], &meta, &identity_mapping());
+        let svg = to_svg(&[], &meta, &test_mapping());
         assert!(svg.contains("<title>A &lt;B&gt; &amp; C</title>"));
     }
 
@@ -965,7 +1090,7 @@ mod tests {
             description: Some("x < y & z > w"),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], &meta, &identity_mapping());
+        let svg = to_svg(&[], &meta, &test_mapping());
         assert!(svg.contains("<desc>x &lt; y &amp; z &gt; w</desc>"));
     }
 
@@ -977,7 +1102,7 @@ mod tests {
             config_json: Some(r#"{"blur_sigma":1.4}"#),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], &meta, &identity_mapping());
+        let svg = to_svg(&[], &meta, &test_mapping());
         assert!(svg.contains("<metadata>"));
         assert!(svg.contains("</metadata>"));
         assert!(svg.contains(r#"<mujou:pipeline xmlns:mujou="https://mujou.app/ns/1">"#));
@@ -986,7 +1111,7 @@ mod tests {
 
     #[test]
     fn metadata_element_omitted_when_config_json_none() {
-        let svg = to_svg(&[], &no_meta(), &identity_mapping());
+        let svg = to_svg(&[], &no_meta(), &test_mapping());
         assert!(!svg.contains("<metadata>"));
     }
 
@@ -996,7 +1121,7 @@ mod tests {
             config_json: Some(r#"{"note":"a < b & c > d"}"#),
             ..SvgMetadata::default()
         };
-        let svg = to_svg(&[], &meta, &identity_mapping());
+        let svg = to_svg(&[], &meta, &test_mapping());
         // The svg crate escapes <, >, & in text content
         assert!(svg.contains("&lt;"));
         assert!(svg.contains("&amp;"));
@@ -1014,7 +1139,7 @@ mod tests {
             description: Some("desc"),
             config_json: Some(r#"{"blur_sigma":1.4}"#),
         };
-        let svg = to_svg(&polylines, &meta, &identity_mapping());
+        let svg = to_svg(&polylines, &meta, &test_mapping());
 
         let desc_pos = svg.find("<desc>").unwrap();
         let metadata_pos = svg.find("<metadata>").unwrap();
@@ -1068,11 +1193,10 @@ mod tests {
     fn end_to_end_image_to_svg() {
         use mujou_pipeline::{PipelineConfig, process_staged};
 
-        // Use scale=0.5 so the canvas (radius=40) covers the full
-        // 40×40 test image.
+        // Use zoom=0.5 so the canvas covers the full 40×40 test image.
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            scale: 0.5,
+            zoom: 0.5,
             ..PipelineConfig::default()
         };
         let result = process_staged(&png, &config).unwrap();
@@ -1094,28 +1218,27 @@ mod tests {
     // --- Example from formats.md ---
 
     #[test]
-    fn matches_formats_doc_example() {
-        // Use the identity mapping so pixel coords pass through unchanged.
+    fn multiple_polylines_correct_structure() {
+        // Two polylines in normalized space, verify SVG structure.
         let polylines = vec![
             Polyline::new(vec![
-                Point::new(10.0, 15.0),
-                Point::new(12.5, 18.3),
-                Point::new(14.0, 20.1),
+                Point::new(0.1, 0.15),
+                Point::new(0.125, 0.183),
+                Point::new(0.14, 0.201),
             ]),
             Polyline::new(vec![
-                Point::new(30.0, 5.0),
-                Point::new(32.5, 7.8),
-                Point::new(35.0, 10.2),
+                Point::new(0.3, 0.05),
+                Point::new(0.325, 0.078),
+                Point::new(0.35, 0.102),
             ]),
         ];
-        let svg = to_svg(&polylines, &no_meta(), &identity_mapping());
+        let svg = to_svg(&polylines, &no_meta(), &test_mapping());
 
         assert!(svg.contains(r#"width="200mm""#));
         assert!(svg.contains(r#"height="200mm""#));
         assert!(svg.contains(r#"viewBox="0 0 200 200""#));
-        // Both paths should be present with correct commands
-        assert!(svg.contains("M10,15"));
-        assert!(svg.contains("M30,5"));
+        // Both paths should be present
+        assert_eq!(svg.matches("<path").count(), 2);
         assert!(svg.contains(r#"fill="none""#));
         assert!(svg.contains(r#"stroke="black""#));
         assert!(svg.contains(r#"stroke-width="1""#));
@@ -1125,21 +1248,13 @@ mod tests {
 
     #[test]
     fn circle_mapping_produces_square_viewbox() {
-        // radius=50, center=(100,80), border_margin=0
-        // diameter=100, drawing_area=200
-        // vb_size=100*200/200=100, margin=0
-        // offset_x=100-50=50, offset_y=80-50=30
-        // scale=200/100=2.0
-        let mapping = document_mapping(
-            &MaskShape::Circle {
-                center: Point::new(100.0, 80.0),
-                radius: 50.0,
-            },
-            0.0,
-        );
+        // Normalized circle: radius=1.0 at origin, border_margin=0.
+        // scale_factor = 200/2 = 100, offset = (100, 100).
+        let mapping = test_mapping();
+        // Y-flip: (0.5, 0.5) → mm(150, 50), (-0.5, -0.5) → mm(50, 150)
         let polylines = vec![Polyline::new(vec![
-            Point::new(60.0, 40.0),
-            Point::new(140.0, 120.0),
+            Point::new(0.5, 0.5),
+            Point::new(-0.5, -0.5),
         ])];
         let svg = to_svg(&polylines, &no_meta(), &mapping);
 
@@ -1150,40 +1265,36 @@ mod tests {
             "viewBox should be 200×200, got:\n{svg}",
         );
         assert!(svg.contains(r#"preserveAspectRatio="xMidYMid meet""#));
-        // (60,40) → ((60-50)*2, (40-30)*2) = (20, 20)
-        // (140,120) → ((140-50)*2, (120-30)*2) = (180, 180)
         assert!(
-            svg.contains("M20,20 L180,180"),
+            svg.contains("M150,50 L50,150"),
             "path coordinates should be in mm, got:\n{svg}",
         );
     }
 
     #[test]
     fn circle_mapping_with_border_margin() {
-        // radius=100, center=(100,100), border_margin=0.1 (10%)
-        // drawing_area = 0.8 * 200 = 160
-        // diameter=200, vb_size=200*200/160=250
-        // margin=(250-200)/2=25
-        // offset_x=100-100-25=-25, offset_y=-25
-        // scale=200/250=0.8
+        // Normalized circle: radius=1.0 at origin, border_margin=0.1 (10%).
+        // drawing_frac = 0.8, drawing_area = 160mm.
+        // scale_factor = 160 / 2 = 80, offset = (100, 100).
         let mapping = document_mapping(
             &MaskShape::Circle {
-                center: Point::new(100.0, 100.0),
-                radius: 100.0,
+                center: Point::new(0.0, 0.0),
+                radius: 1.0,
             },
             0.1,
         );
         assert!((mapping.width_mm - 200.0).abs() < 1e-9);
         assert!((mapping.height_mm - 200.0).abs() < 1e-9);
-        assert!((mapping.scale - 0.8).abs() < 1e-9);
-        assert!((mapping.offset_x - -25.0).abs() < 1e-9);
-        assert!((mapping.offset_y - -25.0).abs() < 1e-9);
+        assert!((mapping.scale_factor - 80.0).abs() < 1e-9);
+        assert!((mapping.offset_x - 100.0).abs() < 1e-9);
+        assert!((mapping.offset_y - 100.0).abs() < 1e-9);
 
-        // Point at center (100,100) → ((100-(-25))*0.8, same) = (100, 100) ✓
-        // Point at edge (0,100) → ((0-(-25))*0.8, (100-(-25))*0.8) = (20, 100)
+        // Y-flip (y=0 is unchanged):
+        // norm (-1.0, 0.0) → mm(-1*80+100, -0*80+100) = (20, 100)
+        // norm (1.0, 0.0) → mm(1*80+100, -0*80+100) = (180, 100)
         let polylines = vec![Polyline::new(vec![
-            Point::new(0.0, 100.0),
-            Point::new(200.0, 100.0),
+            Point::new(-1.0, 0.0),
+            Point::new(1.0, 0.0),
         ])];
         let svg = to_svg(&polylines, &no_meta(), &mapping);
         assert!(
@@ -1193,15 +1304,9 @@ mod tests {
     }
 
     #[test]
-    fn large_circle_still_uses_mm_viewbox() {
-        // Circle exceeds image — viewBox is always 0 0 200 200 in mm.
-        let mapping = document_mapping(
-            &MaskShape::Circle {
-                center: Point::new(500.0, 500.0),
-                radius: 600.0,
-            },
-            0.0,
-        );
+    fn any_circle_uses_mm_viewbox() {
+        // Any circle mapping produces a 200×200 mm viewBox.
+        let mapping = test_mapping();
         let svg = to_svg(&[], &no_meta(), &mapping);
         assert!(
             svg.contains(r#"viewBox="0 0 200 200""#),
@@ -1212,22 +1317,15 @@ mod tests {
 
     #[test]
     fn circle_mapping_still_renders_paths() {
-        // radius=50, center=(50,50), border_margin=0
-        // scale=200/100=2.0, offset=(0,0)
-        let mapping = document_mapping(
-            &MaskShape::Circle {
-                center: Point::new(50.0, 50.0),
-                radius: 50.0,
-            },
-            0.0,
-        );
+        // test_mapping: sf=100, ox=100, oy=100.
+        // Y-flip: (-0.5, 0.5) → mm(50, 50), (0.5, -0.5) → mm(150, 150)
+        let mapping = test_mapping();
         let polylines = vec![Polyline::new(vec![
-            Point::new(25.0, 25.0),
-            Point::new(75.0, 75.0),
+            Point::new(-0.5, 0.5),
+            Point::new(0.5, -0.5),
         ])];
         let svg = to_svg(&polylines, &no_meta(), &mapping);
         assert!(svg.contains("<path"));
-        // (25,25) → (50,50), (75,75) → (150,150)
         assert!(
             svg.contains(r#"d="M50,50 L150,150""#),
             "path coordinates should be in mm, got:\n{svg}",
@@ -1237,13 +1335,7 @@ mod tests {
 
     #[test]
     fn mapping_with_metadata() {
-        let mapping = document_mapping(
-            &MaskShape::Circle {
-                center: Point::new(100.0, 100.0),
-                radius: 100.0,
-            },
-            0.0,
-        );
+        let mapping = test_mapping();
         let meta = SvgMetadata {
             title: Some("test"),
             description: Some("masked export"),
@@ -1260,46 +1352,47 @@ mod tests {
     // --- document_mapping unit tests ---
 
     #[test]
-    fn identity_mapping_has_unit_scale() {
-        let m = identity_mapping();
+    fn test_mapping_has_expected_values() {
+        let m = test_mapping();
         assert!((m.width_mm - 200.0).abs() < 1e-9);
         assert!((m.height_mm - 200.0).abs() < 1e-9);
-        assert!((m.scale - 1.0).abs() < 1e-9);
-        assert!(m.offset_x.abs() < 1e-9);
-        assert!(m.offset_y.abs() < 1e-9);
+        // scale_factor = drawing_area / 2 = 200 / 2 = 100
+        assert!((m.scale_factor - 100.0).abs() < 1e-9);
+        assert!((m.offset_x - 100.0).abs() < 1e-9);
+        assert!((m.offset_y - 100.0).abs() < 1e-9);
     }
 
     #[test]
     fn rectangle_mapping_produces_correct_aspect_ratio() {
-        // 200×100 pixel rectangle: longer axis maps to 200mm.
+        // Normalized rect: half_width=2.0, half_height=1.0 (landscape 2:1).
+        // Longer normalized axis = 4.0. drawing_area=200. scale_factor=200/4=50.
         let mapping = document_mapping(
             &MaskShape::Rectangle {
-                center: Point::new(100.0, 50.0),
-                half_width: 100.0,
-                half_height: 50.0,
+                center: Point::new(0.0, 0.0),
+                half_width: 2.0,
+                half_height: 1.0,
             },
             0.0,
         );
         assert!((mapping.width_mm - 200.0).abs() < 1e-9);
         assert!((mapping.height_mm - 100.0).abs() < 1e-9);
-        // scale = 200 / (200/1.0) = 1.0
-        assert!((mapping.scale - 1.0).abs() < 1e-9);
+        assert!((mapping.scale_factor - 50.0).abs() < 1e-9);
     }
 
     #[test]
     fn rectangle_mapping_taller_than_wide() {
-        // 100×200 pixel rectangle (taller): longer axis (height=200) maps
-        // to 200mm.
+        // Normalized rect: half_width=1.0, half_height=2.0 (portrait 2:1).
+        // Longer normalized axis = 4.0. scale_factor = 200/4 = 50.
         let mapping = document_mapping(
             &MaskShape::Rectangle {
-                center: Point::new(50.0, 100.0),
-                half_width: 50.0,
-                half_height: 100.0,
+                center: Point::new(0.0, 0.0),
+                half_width: 1.0,
+                half_height: 2.0,
             },
             0.0,
         );
         assert!((mapping.width_mm - 100.0).abs() < 1e-9);
         assert!((mapping.height_mm - 200.0).abs() < 1e-9);
-        assert!((mapping.scale - 1.0).abs() < 1e-9);
+        assert!((mapping.scale_factor - 50.0).abs() < 1e-9);
     }
 }

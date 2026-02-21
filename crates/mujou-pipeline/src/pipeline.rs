@@ -272,6 +272,12 @@ impl EdgesDetected {
 
     /// Advance to the contour tracing stage.
     ///
+    /// Traces contours from the edge map and then normalizes them from
+    /// pixel space to the center-origin coordinate system where
+    /// mask edge = 1.0.  The Y-axis is flipped so that normalized space
+    /// uses the mathematical convention (+Y up).  The normalization
+    /// transform uses `config.zoom`.
+    ///
     /// # Errors
     ///
     /// Returns [`PipelineError::NoContours`] if the edge map produces no
@@ -281,6 +287,9 @@ impl EdgesDetected {
         if contours.is_empty() {
             return Err(PipelineError::NoContours);
         }
+        // Normalize pixel contours to center-origin space (+Y up).
+        let contours =
+            crate::normalize::normalize_contours(contours, self.dimensions, self.config.zoom);
         Ok(ContoursTraced {
             config: self.config,
             original: self.original,
@@ -394,29 +403,30 @@ impl Simplified {
 
     /// Advance to the canvas stage.
     ///
-    /// Polylines are clipped to the canvas boundary (circle or
-    /// rectangle) and an optional border polyline is generated based
-    /// on [`BorderPathMode`].
+    /// Polylines (already in normalized space, +Y up) are clipped to
+    /// the canvas boundary.  Circle mask = unit circle at origin
+    /// (radius=1.0), rectangle mask = center at origin with
+    /// half-short-side=1.0 and half-long-side=aspect_ratio.
+    ///
+    /// An optional border polyline is generated based on
+    /// [`BorderPathMode`].
     pub fn canvas(self) -> Canvas {
-        let center = Point::new(
-            f64::from(self.dimensions.width) / 2.0,
-            f64::from(self.dimensions.height) / 2.0,
-        );
+        let center = Point::new(0.0, 0.0);
 
         let margin_factor = 2.0f64.mul_add(-self.config.border_margin, 1.0);
 
         let canvas_result = match self.config.shape {
             CanvasShape::Circle => {
-                let radius = self.dimensions.canvas_radius(self.config.scale) * margin_factor;
+                let radius = 1.0 * margin_factor;
                 let shape = MaskShape::Circle { center, radius };
                 Self::clip_and_border(&self.reduced, shape, self.config.border_path)
             }
             CanvasShape::Rectangle => {
-                let (half_width, half_height) = self.dimensions.canvas_rect_half_dims(
-                    self.config.scale,
-                    self.config.aspect_ratio,
-                    self.config.landscape,
-                );
+                let (half_width, half_height) = if self.config.landscape {
+                    (self.config.aspect_ratio, 1.0)
+                } else {
+                    (1.0, self.config.aspect_ratio)
+                };
                 let half_width = half_width * margin_factor;
                 let half_height = half_height * margin_factor;
                 let shape = MaskShape::Rectangle {
@@ -985,18 +995,17 @@ impl PipelineStage for Canvas {
     fn metrics(&self) -> Option<StageMetrics> {
         let shape_info = match self.config.shape {
             CanvasShape::Circle => {
-                let radius_px = self.dimensions.canvas_radius(self.config.scale);
-                format!("scale={:.2} r={radius_px:.1}px", self.config.scale)
+                format!("zoom={:.2} r=1.0", self.config.zoom)
             }
             CanvasShape::Rectangle => {
-                let (hw, hh) = self.dimensions.canvas_rect_half_dims(
-                    self.config.scale,
-                    self.config.aspect_ratio,
-                    self.config.landscape,
-                );
+                let (hw, hh) = if self.config.landscape {
+                    (self.config.aspect_ratio, 1.0)
+                } else {
+                    (1.0, self.config.aspect_ratio)
+                };
                 format!(
-                    "scale={:.2} ar={:.2} {} {:.1}\u{00d7}{:.1}px",
-                    self.config.scale,
+                    "zoom={:.2} ar={:.2} {} {:.2}\u{00d7}{:.2}",
+                    self.config.zoom,
                     self.config.aspect_ratio,
                     if self.config.landscape {
                         "land"
@@ -1842,14 +1851,14 @@ mod tests {
         buf
     }
 
-    /// Config with `scale = 0.5` so the canvas covers the full 40×40
-    /// test image.  Default `scale = 1.25` produces a tight canvas
-    /// (radius = 16 px) that clips the 2-point simplified contour from
+    /// Config with `zoom = 0.5` so the canvas covers the full 40×40
+    /// test image.  Default `zoom = 1.25` produces a tight canvas
+    /// that clips the 2-point simplified contour from
     /// [`sharp_edge_png`] because RDP collapses the collinear edge to
     /// two adjacent points near the image top.
     fn wide_canvas_config() -> PipelineConfig {
         PipelineConfig {
-            scale: 0.5,
+            zoom: 0.5,
             ..PipelineConfig::default()
         }
     }
@@ -1982,7 +1991,7 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             shape: crate::mask::CanvasShape::Circle,
-            scale: 0.8,
+            zoom: 0.8,
             ..PipelineConfig::default()
         };
         let canvas_stage = Pipeline::new(png, config)
@@ -2080,7 +2089,7 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             shape: crate::mask::CanvasShape::Circle,
-            scale: 0.8,
+            zoom: 0.8,
             ..PipelineConfig::default()
         };
 
@@ -2412,7 +2421,7 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config1 = PipelineConfig::default();
         let config2 = PipelineConfig {
-            scale: 1.0,
+            zoom: 1.0,
             ..PipelineConfig::default()
         };
 
@@ -2585,7 +2594,7 @@ mod tests {
         };
         let config3 = PipelineConfig {
             blur_sigma: 2.0,
-            scale: 1.0,
+            zoom: 1.0,
             ..PipelineConfig::default()
         };
 
