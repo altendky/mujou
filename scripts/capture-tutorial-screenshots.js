@@ -145,23 +145,27 @@ const ICONS = {
 
 async function extractIcons(page, outDir) {
   for (const [name, ariaLabel] of Object.entries(ICONS)) {
-    const inner = await page.evaluate(
+    const svgData = await page.evaluate(
       (label) => {
         const svg = document.querySelector(
           `[aria-label="${label}"] svg`,
         );
-        return svg ? svg.innerHTML : null;
+        if (!svg) return null;
+        return {
+          innerHTML: svg.innerHTML,
+          viewBox: svg.getAttribute("viewBox") || "0 0 24 24",
+        };
       },
       ariaLabel,
     );
-    if (!inner) {
+    if (!svgData) {
       console.warn(`  warning: icon "${name}" not found (aria-label="${ariaLabel}")`);
       continue;
     }
     // Strip Dioxus placeholder comments.
-    const cleaned = inner.replace(/<!--[\s\S]*?-->/g, "");
+    const cleaned = svgData.innerHTML.replace(/<!--[\s\S]*?-->/g, "");
     const html =
-      `<svg class="inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${cleaned}</svg>`;
+      `<svg class="inline-icon" viewBox="${svgData.viewBox}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${cleaned}</svg>`;
     const file = path.join(outDir, `${name}.html`);
     fs.writeFileSync(file, html);
     console.log(`  extracted ${name}.html`);
