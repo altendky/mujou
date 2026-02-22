@@ -160,8 +160,8 @@ async function extractIcons(page, outDir) {
 // Each step describes:
 //   slug     – filename component
 //   before   – async function run before the screenshot (click stage, etc.)
-//   after    – async function run after *both* theme variants are captured
-//              (used for cleanup like resetting slider values)
+//   after    – async function run after each theme's screenshot for this step
+//              (used for cleanup like resetting slider values or closing dialogs)
 //
 // Steps are executed in order.  The `before` callback receives the page.
 // Each step is re-executed for each theme; page.reload() at dark-theme start
