@@ -264,11 +264,11 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                     p {
                         "Sisyphus: use THR, upload via the "
                         a {
-                            href: "https://sisyphus-industries.com/community/",
+                            href: "https://sisyphus-industries.com/",
                             target: "_blank",
                             rel: "noopener noreferrer",
                             class: "underline text-[var(--btn-primary)] hover:opacity-80",
-                            aria_label: "Sisyphus app (opens in new tab)",
+                            aria_label: "Sisyphus Industries website (opens in new tab)",
                             "Sisyphus app"
                         }
                     }
