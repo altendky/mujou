@@ -4,6 +4,10 @@
 
 [mujou](project/index.md)
 
+# Tutorial
+
+- [Convert a Photo to a Sand Table Pattern](tutorial/index.md)
+
 # Core Design
 
 - [Principles](project/principles.md)
