@@ -7,6 +7,14 @@ backend = "aqua:EmbarkStudios/cargo-deny"
 "platforms.macos-x64" = { checksum = "sha256:c42163655413f7e872638cd8c4345a327b512ef0ab99109e9cced691b95af5fb", url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.0/cargo-deny-0.19.0-x86_64-apple-darwin.tar.gz"}
 "platforms.windows-x64" = { checksum = "sha256:413f0e2ce780d0d14ba8e9339f9fb033419a8a971ec7714faec518e4a664bdb0", url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.0/cargo-deny-0.19.0-x86_64-pc-windows-msvc.tar.gz"}
 
+[[tools."aqua:rust-lang/mdBook"]]
+version = "0.5.2"
+backend = "aqua:rust-lang/mdBook"
+"platforms.linux-x64" = { checksum = "sha256:8e9d802bbecea34380aabfc65bec4fdba23c07453ef2c7e06fa34c282082e2c4", url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-unknown-linux-musl.tar.gz"}
+"platforms.macos-arm64" = { checksum = "sha256:17cc64478ec279a73881420e850bd8f9d460552e56b50159ff465bc97eb90d6c", url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-apple-darwin.tar.gz"}
+"platforms.macos-x64" = { checksum = "sha256:17cc64478ec279a73881420e850bd8f9d460552e56b50159ff465bc97eb90d6c", url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-apple-darwin.tar.gz"}
+"platforms.windows-x64" = { checksum = "sha256:e78fa1159bfc381d03f9c6659c48c883706497dc63c9153007a8a4c8df8da166", url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-pc-windows-msvc.zip"}
+
 [[tools."aqua:rustwasm/wasm-pack"]]
 version = "0.14.0"
 backend = "aqua:rustwasm/wasm-pack"
@@ -44,14 +52,6 @@ backend = "github:nextest-rs/nextest"
 
 [tools."github:nextest-rs/nextest".options]
 version_prefix = "cargo-nextest-"
-
-[[tools.mdbook]]
-version = "0.5.2"
-backend = "aqua:rust-lang/mdBook"
-"platforms.linux-x64" = { checksum = "sha256:8e9d802bbecea34380aabfc65bec4fdba23c07453ef2c7e06fa34c282082e2c4", url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-unknown-linux-musl.tar.gz"}
-"platforms.macos-arm64" = { checksum = "sha256:17cc64478ec279a73881420e850bd8f9d460552e56b50159ff465bc97eb90d6c", url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-apple-darwin.tar.gz"}
-"platforms.macos-x64" = { checksum = "sha256:17cc64478ec279a73881420e850bd8f9d460552e56b50159ff465bc97eb90d6c", url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-apple-darwin.tar.gz"}
-"platforms.windows-x64" = { checksum = "sha256:e78fa1159bfc381d03f9c6659c48c883706497dc63c9153007a8a4c8df8da166", url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-pc-windows-msvc.zip"}
 
 [[tools.node]]
 version = "22.22.0"
