@@ -55,8 +55,7 @@
         margin: 1.5rem auto;
       }
       nav { display: flex; justify-content: center; align-items: center; }
-      nav a + a::before {
-        content: "";
+      .sep {
         display: inline-block;
         width: 2px;
         height: 1.2em;
@@ -87,7 +86,9 @@
       <p>images to sand table paths</p>
       <nav>
         <a href="/app/">open app</a>
+        <span class="sep" role="separator" aria-hidden="true"></span>
         <a href="/book/tutorial/">read tutorial</a>
+        <span class="sep" role="separator" aria-hidden="true"></span>
         <a href="{{REPO_URL}}">view source</a>
       </nav>
     </main>
