@@ -163,9 +163,9 @@ async function extractIcons(page, outDir) {
 //   after    – async function run after *both* theme variants are captured
 //              (used for cleanup like resetting slider values)
 //
-// Steps are executed in order.  The `before` callback receives the page and
-// a boolean `isFirstTheme` — some actions (like changing a slider) should
-// only happen once per step, not re-applied when switching themes.
+// Steps are executed in order.  The `before` callback receives the page.
+// Each step is re-executed for each theme; page.reload() at dark-theme start
+// resets all state, so no extra guard is needed.
 
 function defineSteps() {
   return [
