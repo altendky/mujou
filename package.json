@@ -1,8 +1,12 @@
 {
   "private": true,
   "description": "Tailwind CSS build dependencies for build.rs. See: https://github.com/altendky/mujou/issues/12",
+  "scripts": {
+    "screenshots": "node scripts/capture-tutorial-screenshots.js"
+  },
   "devDependencies": {
     "@tailwindcss/cli": "4.1.18",
+    "playwright": "^1.58.2",
     "tailwindcss": "4.1.18"
   }
 }

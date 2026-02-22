@@ -251,7 +251,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         "Next, upload to your table"
                     }
                     p {
-                        "Oasis Mini / One: use SVG, upload at "
+                        "Oasis: use THR, upload at "
                         a {
                             href: "https://app.grounded.so",
                             target: "_blank",
@@ -262,7 +262,26 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         }
                     }
                     p {
-                        "Sisyphus / Dune Weaver / Sandsara: use THR, upload via your table's app"
+                        "Sisyphus: use THR, upload via the "
+                        a {
+                            href: "https://sisyphus-industries.com/community/",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "underline text-[var(--btn-primary)] hover:opacity-80",
+                            aria_label: "Sisyphus app (opens in new tab)",
+                            "Sisyphus app"
+                        }
+                    }
+                    p {
+                        "Dune Weaver: use THR, upload via your table\u{2019}s "
+                        a {
+                            href: "https://github.com/tuanchris/dune-weaver",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "underline text-[var(--btn-primary)] hover:opacity-80",
+                            aria_label: "Dune Weaver web UI (opens in new tab)",
+                            "web UI"
+                        }
                     }
                 }
             }

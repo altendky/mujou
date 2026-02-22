@@ -130,7 +130,7 @@ G1 X32.50 Y7.80 F3000
 ## SVG (.svg)
 
 The most versatile output format.
-Also accepted by the Oasis Mini app (upload at app.grounded.so).
+Also accepted by the Oasis Mini app (upload at app.grounded.so), though THR is preferred for Oasis because SVG sizing and centering can be incorrect in certain cases (see [Oasis SVG sizing](../ecosystem/formats.md#oasis)).
 Useful for plotters, laser cutters, vinyl cutters, or viewing in a browser.
 
 ### Format Specification

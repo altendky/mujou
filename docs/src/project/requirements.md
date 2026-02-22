@@ -63,7 +63,7 @@ See [Output Formats](formats.md) for detailed specifications.
 
 - Theta-Rho (.thr) -- Sisyphus / Oasis Mini / DIY polar sand tables
 - G-code (.gcode) -- XY/Cartesian sand tables (ZenXY, GRBL/Marlin)
-- SVG (.svg) -- Universal vector format, also accepted by Oasis Mini app
+- SVG (.svg) -- Universal vector format; also accepted by Oasis Mini app, though THR is preferred (SVG sizing/centering can be incorrect)
 - DXF (.dxf) -- CAD interchange
 - PNG preview -- Rasterized path render for sharing/thumbnailing
 

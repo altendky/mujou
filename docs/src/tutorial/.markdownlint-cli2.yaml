@@ -1,0 +1,5 @@
+# Inline HTML is required for theme-aware screenshot switching
+# (<div class="screenshot"> with light/dark <img> variants)
+# and for mdBook {{#include}} of extracted SVG icon snippets.
+config:
+  MD033: false
