@@ -268,7 +268,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                             target: "_blank",
                             rel: "noopener noreferrer",
                             class: "underline text-[var(--btn-primary)] hover:opacity-80",
-                            aria_label: "Sisyphus Industries website (opens in new tab)",
+                            aria_label: "Sisyphus app — Sisyphus Industries website (opens in new tab)",
                             "Sisyphus app"
                         }
                     }
