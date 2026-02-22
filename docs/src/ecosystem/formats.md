@@ -9,8 +9,8 @@ For mujou's implementation details of each format, see [Output Formats](../proje
 | --- | --- | --- | --- | --- | --- |
 | Sisyphus round tables (all) | Yes | -- | Yes (via [webcenter](https://webcenter.sisyphus-industries.com/)) | -- | Sisyphus app (Wi-Fi upload) |
 | Sisyphus XYLA tables | [No](#sisyphus-xyla-thr-does-not-work) | Yes | Yes (via webcenter) | -- | Sisyphus app (Wi-Fi upload) |
-| Oasis Mini | Yes | -- | Yes (via [app.grounded.so](https://app.grounded.so)) | -- | Oasis app / web upload |
-| Oasis Side/Coffee Table | Yes | -- | Yes (via app) | -- | Oasis app / web upload |
+| Oasis Mini | Yes | -- | [Partial*](#oasis) (via [app.grounded.so](https://app.grounded.so)) | -- | Oasis app / web upload |
+| Oasis Side/Coffee Table | Yes | -- | [Partial*](#oasis) (via app) | -- | Oasis app / web upload |
 | Sandsara (original firmware) | Yes | -- | -- | -- | SD card |
 | Sandsara Mini Pro (current) | -- | -- | -- | Yes ([.bin](#sandsara)) | BLE only (via app) |
 | CrunchLabs Sand Garden | -- | -- | -- | Yes (single-byte) | SD card / direct upload |
@@ -22,7 +22,7 @@ For mujou's implementation details of each format, see [Output Formats](../proje
 
 - **.thr is the dominant format** for polar sand tables. Supporting it covers Sisyphus (round), Oasis, Dune Weaver, and most DIY polar builds. This is mujou's primary export target.
 - **G-code covers Cartesian tables** like ZenXY and other GRBL/Marlin machines.
-- **SVG is a useful secondary format** -- Oasis accepts it via their web app, Sisyphus via their webcenter, and it's universally viewable.
+- **SVG is a useful secondary format** -- Sisyphus accepts it via their webcenter, and it's universally viewable. Oasis accepts SVG via their web app but THR is preferred because SVG sizing and centering can be incorrect in certain cases (see [Oasis SVG sizing](#oasis)).
 - **.thr does NOT work for Sisyphus XYLA** (rectangular/racetrack tables). SVG or G-code is required.
 - **Sandsara has two generations** -- the original firmware accepts .thr from SD card; the current Mini Pro uses a proprietary binary format over BLE.
 
@@ -32,6 +32,8 @@ SVG export needs device-appropriate document sizing. The requirements differ by 
 
 ### Oasis
 
+> **THR is the recommended format for Oasis.** SVG upload is supported but requires precise document sizing and centering that can be wrong in certain cases. THR avoids these issues entirely.
+
 The Oasis Mini requires specific mm-based SVG dimensions (sourced from the template on [app.grounded.so](https://app.grounded.so), behind login):
 
 | Model | SVG Document Size | Circle Diameter | Margin | Status |
@@ -40,7 +42,7 @@ The Oasis Mini requires specific mm-based SVG dimensions (sourced from the templ
 | Oasis Side Table | Unknown | Unknown | Unknown | Ships March 2026 (as of Feb 2026) |
 | Oasis Coffee Table | Unknown | Unknown | Unknown | Ships March 2026 (as of Feb 2026) |
 
-The 200mm value comes from the Oasis template file. The 195mm circle diameter leaves a 2.5mm margin per side -- this likely accounts for ball clearance but is not yet confirmed exactly. mujou currently hardcodes these values in `svg.rs` with a TODO to generalize.
+The 200mm value comes from the Oasis template file. The 195mm circle diameter leaves a 2.5mm margin per side -- this likely accounts for ball clearance but is not yet confirmed exactly. mujou currently hardcodes these values in `svg.rs` with a TODO to generalize. If the sizing or centering is even slightly off, the pattern may be clipped or misaligned on the table.
 
 ### Sisyphus
 

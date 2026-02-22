@@ -74,8 +74,8 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
     let mut show = props.show;
 
     let has_result = props.result.is_some();
-    let mut svg_selected = use_signal(|| true);
-    let mut thr_selected = use_signal(|| false);
+    let mut svg_selected = use_signal(|| false);
+    let mut thr_selected = use_signal(|| true);
     let mut export_error = use_signal(|| Option::<String>::None);
 
     // Clear stale export errors when the popup opens.  `show` is a
@@ -133,13 +133,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         config_json: config_json.as_deref(),
                     };
                     let polyline = res.final_polyline();
-                    let mask_shape = Some(&res.canvas.shape);
-                    let thr = mujou_export::to_thr(
-                        std::slice::from_ref(polyline),
-                        res.dimensions,
-                        &thr_metadata,
-                        mask_shape,
-                    );
+                    let thr = mujou_export::to_thr(std::slice::from_ref(polyline), &thr_metadata);
                     let download_name = format!("{filename}_{timestamp}.thr");
                     if let Err(e) = download::trigger_download(&thr, &download_name, "text/plain") {
                         export_error.set(Some(format!("THR download failed: {e}")));
@@ -257,7 +251,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         "Next, upload to your table"
                     }
                     p {
-                        "Oasis Mini / One: use SVG, upload at "
+                        "Oasis: use THR, upload at "
                         a {
                             href: "https://app.grounded.so",
                             target: "_blank",
@@ -268,7 +262,27 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         }
                     }
                     p {
-                        "Sisyphus / Dune Weaver / Sandsara: use THR, upload via your table's app"
+                        "Sisyphus: use THR, upload via the "
+                        a {
+                            href: "https://sisyphus-industries.com/",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "underline text-[var(--btn-primary)] hover:opacity-80",
+                            aria_label: "Sisyphus app — Sisyphus Industries website (opens in new tab)",
+                            "Sisyphus app"
+                        }
+                    }
+                    p {
+                        "Dune Weaver ("
+                        a {
+                            href: "https://github.com/tuanchris/dune-weaver",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            class: "underline text-[var(--btn-primary)] hover:opacity-80",
+                            aria_label: "Dune Weaver on GitHub (opens in new tab)",
+                            "GitHub"
+                        }
+                        "): use THR, upload via your table\u{2019}s web UI"
                     }
                 }
             }

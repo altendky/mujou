@@ -1,0 +1,54 @@
+/* Theme-aware screenshot switching for the mujou tutorial.
+ *
+ * mdBook applies a theme class on <html>: light, rust, coal, navy, ayu.
+ * We show the light screenshot variant for light/rust themes and the
+ * dark variant for coal/navy/ayu themes.
+ *
+ * Usage in markdown (raw HTML):
+ *
+ *   <div class="screenshot">
+ *     <img class="screenshot-light" src="images/01-landing-light.png" alt="...">
+ *     <img class="screenshot-dark"  src="images/01-landing-dark.png"  alt="...">
+ *   </div>
+ */
+
+/* Default: show light, hide dark. */
+.screenshot-light { display: block; }
+.screenshot-dark  { display: none;  }
+
+/* Dark mdBook themes: show dark, hide light. */
+.coal .screenshot-light,
+.navy .screenshot-light,
+.ayu  .screenshot-light { display: none;  }
+
+.coal .screenshot-dark,
+.navy .screenshot-dark,
+.ayu  .screenshot-dark  { display: block; }
+
+/* Ensure screenshots fill the content width and have consistent styling. */
+.screenshot img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--table-border-color, #ddd);
+  border-radius: 6px;
+}
+
+/* Inline Lucide icons within paragraph text.
+ *
+ * Usage:  <svg class="inline-icon" viewBox="0 0 24 24" ...>...</svg>
+ *
+ * Sized to match the surrounding text, vertically centered on the
+ * text baseline, and colored with currentColor so they follow the
+ * mdBook theme automatically (Lucide uses stroke="currentColor").
+ */
+.inline-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}

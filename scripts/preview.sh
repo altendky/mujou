@@ -10,6 +10,7 @@
 # Mirrors the GitHub Pages deployment structure:
 #   /          → static landing page  (from site/)
 #   /app/      → Dioxus WASM app      (from dx bundle)
+#   /book/     → mdBook documentation (from docs/)
 
 set -euo pipefail
 
@@ -53,6 +54,13 @@ if [ "$SKIP_BUILD" = false ]; then
 	cd "$ROOT"
 	dx bundle --release --package mujou-app --platform web --base-path app
 
+	echo "==> Building documentation (mdbook build)..."
+	if [ ! -d "$ROOT/target/tutorial" ]; then
+		echo "Error: target/tutorial/ not found. Run 'npm run screenshots' first (requires the app to be running)." >&2
+		exit 1
+	fi
+	mdbook build "$ROOT/docs"
+
 	echo "==> Assembling preview directory..."
 	rm -rf "$PREVIEW_DIR"
 	mkdir -p "$PREVIEW_DIR/app"
@@ -67,6 +75,9 @@ if [ "$SKIP_BUILD" = false ]; then
 	cp -r "$ROOT/target/dx/mujou-app/release/web/public/"* "$PREVIEW_DIR/app/"
 	cp "$PREVIEW_DIR/app/index.html" "$PREVIEW_DIR/app/404.html"
 
+	# mdBook documentation
+	cp -r "$ROOT/docs/book" "$PREVIEW_DIR/book"
+
 	echo "==> Preview directory assembled at $PREVIEW_DIR"
 else
 	if [ ! -d "$PREVIEW_DIR" ]; then
@@ -80,6 +91,7 @@ fi
 echo "==> Serving on http://localhost:$PORT"
 echo "    Landing page: http://localhost:$PORT/"
 echo "    App:          http://localhost:$PORT/app/"
+echo "    Book:         http://localhost:$PORT/book/"
 echo "    Press Ctrl+C to stop."
 echo ""
 

@@ -143,15 +143,15 @@ pub struct MstEdgeInfo {
     pub poly_a: usize,
     /// Index of the second polyline in the joiner's input contour list.
     pub poly_b: usize,
-    /// Connection point on polyline A (image coordinates, `(x, y)`).
+    /// Connection point on polyline A (normalized coordinates, `(x, y)`).
     pub point_a: (f64, f64),
-    /// Connection point on polyline B (image coordinates, `(x, y)`).
+    /// Connection point on polyline B (normalized coordinates, `(x, y)`).
     pub point_b: (f64, f64),
     /// Segment index within polyline A where the connection point lies.
     pub seg_a: usize,
     /// Segment index within polyline B where the connection point lies.
     pub seg_b: usize,
-    /// Euclidean distance between the two connection points (pixels).
+    /// Euclidean distance between the two connection points (normalized units).
     pub weight: f64,
 }
 
@@ -162,7 +162,7 @@ pub struct MstEdgeInfo {
 /// criterion) is already measured by the diagnostics layer's per-stage
 /// timing.
 ///
-/// All distance values are in working-resolution pixel units.
+/// All distance values are in normalized units (center-origin, mask edge = 1.0).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct JoinQualityMetrics {
     /// Number of MST edges (connections between polylines).

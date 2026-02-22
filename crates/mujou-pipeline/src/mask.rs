@@ -41,6 +41,10 @@ impl fmt::Display for CanvasShape {
 
 /// Resolved mask geometry used for both clipping and border generation.
 ///
+/// In the normalized coordinate system, shapes are centred at the origin.
+/// Circle: radius = 1.0 (mask edge).  Rectangle: half-short-side = 1.0,
+/// half-long-side = `aspect_ratio`.
+///
 /// Adding a new shape variant requires implementing both clipping (in
 /// [`apply_mask`]) and border generation (in [`MaskShape::border_polyline`]),
 /// enforced by exhaustive `match` arms.
@@ -48,18 +52,18 @@ impl fmt::Display for CanvasShape {
 pub enum MaskShape {
     /// Circular mask centred on a point with a given radius.
     Circle {
-        /// Centre of the circle in image coordinates.
+        /// Centre of the circle in normalized coordinates.
         center: Point,
-        /// Radius of the circle in pixels.
+        /// Radius of the circle (1.0 = mask edge in normalized space).
         radius: f64,
     },
     /// Axis-aligned rectangular mask.
     Rectangle {
-        /// Centre of the rectangle in image coordinates.
+        /// Centre of the rectangle in normalized coordinates.
         center: Point,
-        /// Half the width of the rectangle in pixels.
+        /// Half the width of the rectangle in normalized units.
         half_width: f64,
-        /// Half the height of the rectangle in pixels.
+        /// Half the height of the rectangle in normalized units.
         half_height: f64,
     },
 }
@@ -205,8 +209,11 @@ pub fn apply_mask(polylines: &[Polyline], shape: &MaskShape) -> Vec<ClippedPolyl
 // ──────────────────── Circle clipping (internal) ─────────────────────
 
 /// Arc-length spacing between consecutive points on a border polyline
-/// (pixels).
-const BORDER_POINT_SPACING: f64 = 3.0;
+/// (normalized units).
+///
+/// Old pixel value was 3.0 px at ~1000 px working resolution →
+/// `3.0 / 500.0 = 0.006` in normalized units.
+const BORDER_POINT_SPACING: f64 = 0.006;
 
 /// Minimum number of points on a border circle, even for very small
 /// radii.
@@ -473,11 +480,11 @@ fn generate_rectangle_border(center: Point, half_width: f64, half_height: f64) -
         half_width > 0.0 && half_height > 0.0,
         "border half-dimensions must be positive, got hw={half_width}, hh={half_height}",
     );
-    let tl = Point::new(center.x - half_width, center.y - half_height);
-    let tr = Point::new(center.x + half_width, center.y - half_height);
-    let br = Point::new(center.x + half_width, center.y + half_height);
-    let bl = Point::new(center.x - half_width, center.y + half_height);
-    Polyline::new(vec![tl, tr, br, bl, tl])
+    let bl = Point::new(center.x - half_width, center.y - half_height);
+    let br = Point::new(center.x + half_width, center.y - half_height);
+    let tr = Point::new(center.x + half_width, center.y + half_height);
+    let tl = Point::new(center.x - half_width, center.y + half_height);
+    Polyline::new(vec![bl, br, tr, tl, bl])
 }
 
 /// Check if a point is inside or on the axis-aligned rectangle.

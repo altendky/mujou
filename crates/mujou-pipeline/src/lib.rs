@@ -18,6 +18,7 @@ pub mod grayscale;
 pub mod join;
 pub mod mask;
 pub mod mst_join;
+pub mod normalize;
 pub mod optimize;
 pub mod pipeline;
 pub mod segment_analysis;
@@ -172,11 +173,11 @@ mod tests {
     #[test]
     fn process_sharp_edge_produces_path() {
         let png = sharp_edge_png(40, 40);
-        // Use scale=0.5 to produce a large canvas (radius=40) that covers
-        // the full image.  With default scale=1.25 the canvas (radius=16)
-        // clips the 2-point simplified contour at the image top.
+        // Use zoom=0.5 to produce a large canvas that covers the full
+        // image.  With default zoom=1.25 the tight canvas clips the
+        // 2-point simplified contour at the image top.
         let config = PipelineConfig {
-            scale: 0.5,
+            zoom: 0.5,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
@@ -200,7 +201,7 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             shape: CanvasShape::Circle,
-            scale: 0.8,
+            zoom: 0.8,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
@@ -209,16 +210,15 @@ mod tests {
             "expected Ok with circle shape, got {result:?}"
         );
 
-        // All points should be within the canvas circle.
-        // canvas_radius = min(w, h) / (2 * scale) = 40 / (2 * 0.8) = 25.0
+        // In normalized space: center = origin, mask radius = 1.0.
+        // All points should be within the unit circle.
         let process_result = result.unwrap();
-        let center = Point::new(20.0, 20.0);
-        let radius = 40.0_f64.min(40.0) / (2.0 * 0.8);
+        let center = Point::new(0.0, 0.0);
         for p in process_result.polyline.points() {
             let dist = p.distance(center);
             assert!(
-                dist <= radius + 1e-6,
-                "point ({}, {}) is outside canvas circle (dist={dist}, radius={radius})",
+                dist <= 1.0 + 1e-6,
+                "point ({}, {}) is outside unit circle (dist={dist})",
                 p.x,
                 p.y,
             );
@@ -227,11 +227,11 @@ mod tests {
 
     #[test]
     fn process_with_circular_shape_nonsquare() {
-        // Non-square image: canvas radius is based on min(w, h).
+        // Non-square image: normalization uses the shorter dimension.
         let png = sharp_edge_png(60, 40);
         let config = PipelineConfig {
             shape: CanvasShape::Circle,
-            scale: 1.0,
+            zoom: 1.0,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
@@ -240,15 +240,14 @@ mod tests {
             "expected Ok with circle shape, got {result:?}"
         );
 
-        // canvas_radius = min(60, 40) / (2 * 1.0) = 20.0
+        // In normalized space: center = origin, mask radius = 1.0.
         let process_result = result.unwrap();
-        let center = Point::new(30.0, 20.0);
-        let radius = 40.0_f64.min(60.0) / (2.0 * 1.0);
+        let center = Point::new(0.0, 0.0);
         for p in process_result.polyline.points() {
             let dist = p.distance(center);
             assert!(
-                dist <= radius + 1e-6,
-                "point ({}, {}) is outside canvas circle (dist={dist}, radius={radius})",
+                dist <= 1.0 + 1e-6,
+                "point ({}, {}) is outside unit circle (dist={dist})",
                 p.x,
                 p.y,
             );
@@ -256,29 +255,29 @@ mod tests {
     }
 
     #[test]
-    fn process_with_circular_shape_small_scale() {
-        // scale < 1.0 produces a larger circle.
+    fn process_with_circular_shape_small_zoom() {
+        // zoom < 1.0 shrinks normalized coords so more of the image
+        // fits within the unit circle.
         let png = sharp_edge_png(60, 40);
         let config = PipelineConfig {
             shape: CanvasShape::Circle,
-            scale: 0.5,
+            zoom: 0.5,
             ..PipelineConfig::default()
         };
         let result = process(&png, &config);
         assert!(
             result.is_ok(),
-            "expected Ok with scale < 1.0, got {result:?}"
+            "expected Ok with zoom < 1.0, got {result:?}"
         );
 
+        // In normalized space: center = origin, mask radius = 1.0.
         let process_result = result.unwrap();
-        let center = Point::new(30.0, 20.0);
-        // canvas_radius = min(60, 40) / (2 * 0.5) = 40.0
-        let radius = 40.0_f64.min(60.0) / (2.0 * 0.5);
+        let center = Point::new(0.0, 0.0);
         for p in process_result.polyline.points() {
             let dist = p.distance(center);
             assert!(
-                dist <= radius + 1e-6,
-                "point ({}, {}) is outside canvas circle (dist={dist}, radius={radius})",
+                dist <= 1.0 + 1e-6,
+                "point ({}, {}) is outside unit circle (dist={dist})",
                 p.x,
                 p.y,
             );
@@ -308,7 +307,7 @@ mod tests {
     fn process_staged_populates_all_intermediates() {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
-            scale: 0.5,
+            zoom: 0.5,
             ..PipelineConfig::default()
         };
         let staged = process_staged(&png, &config).unwrap();
@@ -345,13 +344,13 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             shape: CanvasShape::Circle,
-            scale: 1.0,
+            zoom: 1.0,
             ..PipelineConfig::default()
         };
         let staged = process_staged(&png, &config).unwrap();
 
-        // With scale=1.0, canvas_radius = min(40,40) / 2 = 20, so
-        // the vertical edge at x=20 on a 40×40 image should survive.
+        // With zoom=1.0, the vertical edge at x=20 on a 40×40 image
+        // maps to normalized x=0.0, which is within the unit circle.
         assert!(
             !staged.canvas.clipped.is_empty(),
             "expected non-empty canvas polylines with circle shape"
@@ -363,7 +362,7 @@ mod tests {
         let png = sharp_edge_png(40, 40);
         let config = PipelineConfig {
             shape: CanvasShape::Circle,
-            scale: 0.8,
+            zoom: 0.8,
             ..PipelineConfig::default()
         };
         let staged = process_staged(&png, &config).unwrap();

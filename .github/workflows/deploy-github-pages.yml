@@ -43,6 +43,11 @@ jobs:
         with:
           tool: dioxus-cli@0.7.3
 
+      - name: Install mdBook
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+
       - name: Build WASM app
         run: dx bundle --release --package mujou-app --platform web --base-path app
 
@@ -53,6 +58,32 @@ jobs:
             --line-width 0.3% \
             --fade-center 40,40 \
             --fade-angle 15
+
+      - name: Install Playwright browser
+        run: npx playwright install chromium
+
+      - name: Capture tutorial screenshots
+        run: |
+          # Serve the bundled app at /app/ to match --base-path app.
+          mkdir -p /tmp/serve/app
+          cp -r target/dx/mujou-app/release/web/public/* /tmp/serve/app/
+          python3 -m http.server 8080 --bind 127.0.0.1 --directory /tmp/serve &
+          SERVER_PID=$!
+          # shellcheck disable=SC2064  # intentional early expansion of $SERVER_PID
+          trap "kill $SERVER_PID 2>/dev/null || true" EXIT INT TERM
+          # Wait until the server is actually ready (up to 15 s).
+          for _i in $(seq 1 15); do
+            curl -sf http://localhost:8080/app/ > /dev/null && break
+            sleep 1
+          done
+          if ! curl -sf http://localhost:8080/app/ > /dev/null; then
+            echo "Error: HTTP server did not become ready after 15 s" >&2
+            exit 1
+          fi
+          npm run screenshots -- --url http://localhost:8080/app/
+
+      - name: Build documentation
+        run: mdbook build docs
 
       - name: Assemble deploy directory
         env:
@@ -66,6 +97,7 @@ jobs:
           cp target/og-image.png deploy/og-image.png
           cp -r target/dx/mujou-app/release/web/public/* deploy/app/
           cp deploy/app/index.html deploy/app/404.html
+          cp -r docs/book deploy/book
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5

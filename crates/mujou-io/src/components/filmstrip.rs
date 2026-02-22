@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 
-use mujou_export::build_path_data;
+use super::stage_preview::build_path_data_normalized;
 
 use crate::stage::StageId;
 use crate::worker::WorkerResult;
@@ -145,11 +145,9 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             render_img_thumb(url, "Edges thumbnail")
         }
 
-        StageId::Contours | StageId::Simplified | StageId::Canvas => {
+        StageId::Contours | StageId::Simplified => {
             let polylines = result.polylines_for_stage(stage);
-            let w = result.dimensions.width;
-            let h = result.dimensions.height;
-            let view_box = super::compute_view_box(&polylines, w, h);
+            let view_box = super::compute_view_box(&polylines);
 
             rsx! {
                 svg {
@@ -160,7 +158,26 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
                     "aria-hidden": "true",
 
                     for polyline in polylines.iter() {
-                        {render_thumbnail_path(polyline)}
+                        {render_thumbnail_path_normalized(polyline)}
+                    }
+                }
+            }
+        }
+
+        StageId::Canvas => {
+            let polylines = result.polylines_for_stage(stage);
+            let view_box = super::canvas_view_box(&result.canvas.shape);
+
+            rsx! {
+                svg {
+                    xmlns: "http://www.w3.org/2000/svg",
+                    view_box: "{view_box}",
+                    class: "w-full h-full",
+                    "preserveAspectRatio": "xMidYMid meet",
+                    "aria-hidden": "true",
+
+                    for polyline in polylines.iter() {
+                        {render_thumbnail_path_normalized(polyline)}
                     }
                 }
             }
@@ -172,10 +189,8 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
             } else {
                 &result.joined
             };
-            let w = result.dimensions.width;
-            let h = result.dimensions.height;
-            let view_box = super::compute_view_box(std::slice::from_ref(polyline), w, h);
-            let d = build_path_data(polyline);
+            let view_box = super::canvas_view_box(&result.canvas.shape);
+            let d = build_path_data_normalized(polyline);
 
             rsx! {
                 svg {
@@ -190,7 +205,8 @@ fn render_thumbnail(result: &WorkerResult, stage: StageId, is_dark: bool) -> Ele
                             d: "{d}",
                             fill: "none",
                             stroke: "var(--preview-stroke)",
-                            stroke_width: "1",
+                            stroke_width: THUMBNAIL_STROKE_WIDTH,
+                            "vector-effect": "non-scaling-stroke",
                         }
                     }
                 }
@@ -210,9 +226,18 @@ fn render_img_thumb(url: &str, alt: &str) -> Element {
     }
 }
 
-/// Render a single polyline as an SVG path for a thumbnail.
-fn render_thumbnail_path(polyline: &mujou_pipeline::Polyline) -> Element {
-    let d = build_path_data(polyline);
+/// Stroke width for filmstrip thumbnail SVG paths (CSS pixels).
+///
+/// With `vector-effect: non-scaling-stroke`, this is an absolute CSS
+/// pixel value.  A sub-pixel width produces anti-aliased lines that
+/// visually match the Edges raster thumbnail (which is a full-
+/// resolution image downscaled by the browser).
+const THUMBNAIL_STROKE_WIDTH: &str = "0.5";
+
+/// Render a single normalized-space polyline as an SVG path for a
+/// thumbnail, negating Y for SVG.
+fn render_thumbnail_path_normalized(polyline: &mujou_pipeline::Polyline) -> Element {
+    let d = build_path_data_normalized(polyline);
     if d.is_empty() {
         return rsx! {};
     }
@@ -222,7 +247,8 @@ fn render_thumbnail_path(polyline: &mujou_pipeline::Polyline) -> Element {
             d: "{d}",
             fill: "none",
             stroke: "var(--preview-stroke)",
-            stroke_width: "1",
+            stroke_width: THUMBNAIL_STROKE_WIDTH,
+            "vector-effect": "non-scaling-stroke",
         }
     }
 }
