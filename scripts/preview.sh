@@ -55,6 +55,10 @@ if [ "$SKIP_BUILD" = false ]; then
 	dx bundle --release --package mujou-app --platform web --base-path app
 
 	echo "==> Building documentation (mdbook build)..."
+	if [ ! -d "$ROOT/target/tutorial" ]; then
+		echo "Error: target/tutorial/ not found. Run 'npm run screenshots' first (requires the app to be running)." >&2
+		exit 1
+	fi
 	mdbook build "$ROOT/docs"
 
 	echo "==> Assembling preview directory..."
