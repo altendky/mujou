@@ -16,7 +16,7 @@
   "customManagers": [
     {
       "customType": "regex",
-      "managerFilePatterns": ["rust-toolchain\\.toml"],
+      "managerFilePatterns": ["/^rust-toolchain\\.toml$/"],
       "matchStrings": ["channel\\s*=\\s*\"(?<currentValue>\\d+\\.\\d+)\""],
       "depNameTemplate": "rust-lang/rust",
       "datasourceTemplate": "github-releases",
