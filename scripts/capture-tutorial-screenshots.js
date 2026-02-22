@@ -144,7 +144,7 @@ async function extractIcons(page, outDir) {
       continue;
     }
     // Strip Dioxus placeholder comments.
-    const cleaned = inner.replace(/<!--.*?-->/g, "");
+    const cleaned = inner.replace(/<!--[\s\S]*?-->/g, "");
     const html =
       `<svg class="inline-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${cleaned}</svg>`;
     const file = path.join(outDir, `${name}.html`);
