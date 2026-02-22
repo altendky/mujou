@@ -10,11 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: jdx/mise-action@v3
+
       # Node.js is required by build.rs to compile Tailwind CSS via
       # npx @tailwindcss/cli.  See: https://github.com/altendky/mujou/issues/12
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
       - run: npm ci
 
       - name: Setup Rust
@@ -22,21 +21,11 @@ jobs:
         with:
           target: wasm32-unknown-unknown
 
-      - name: Install wasm-pack
-        uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-pack
-
       - name: Check formatting
         run: cargo fmt --all --check
 
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-deny
 
       - name: Check dependencies
         run: cargo deny check
@@ -47,27 +36,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: jdx/mise-action@v3
+
       # Node.js is required by build.rs to compile Tailwind CSS via
       # npx @tailwindcss/cli.  See: https://github.com/altendky/mujou/issues/12
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
       - run: npm ci
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-pack
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
 
       - name: Run tests
         run: cargo nextest run --all-features --workspace --no-tests=warn

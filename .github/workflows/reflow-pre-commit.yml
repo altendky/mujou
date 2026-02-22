@@ -10,15 +10,10 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: actions/setup-python@v6
-        with:
-          python-version: '3.x'
+      - uses: jdx/mise-action@v3
 
       # Node.js is required by build.rs to compile Tailwind CSS via
       # npx @tailwindcss/cli.  See: https://github.com/altendky/mujou/issues/12
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
       - run: npm ci
 
       - name: Setup Rust
@@ -26,9 +21,9 @@ jobs:
         with:
           target: wasm32-unknown-unknown
 
-      - name: Install wasm-pack
-        uses: taiki-e/install-action@v2
+      - uses: actions/cache@v4
         with:
-          tool: wasm-pack
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
 
-      - uses: pre-commit/action@v3.0.1
+      - run: pre-commit run --show-diff-on-failure --color=always --all-files
