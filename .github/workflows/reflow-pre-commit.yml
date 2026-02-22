@@ -21,4 +21,9 @@ jobs:
         with:
           target: wasm32-unknown-unknown
 
-      - uses: pre-commit/action@v3.0.1
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - run: pre-commit run --show-diff-on-failure --color=always --all-files
