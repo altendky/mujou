@@ -12,7 +12,4 @@ jobs:
 
       - uses: jdx/mise-action@v3
         with:
-          install: false
-
-      - name: Check lockfile completeness
-        run: mise install --locked --dry-run
+          install_args: --locked --dry-run

@@ -21,4 +21,4 @@ jobs:
         with:
           target: wasm32-unknown-unknown
 
-      - run: pre-commit run --all-files
+      - uses: pre-commit/action@v3.0.1
