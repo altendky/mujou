@@ -279,7 +279,7 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                             target: "_blank",
                             rel: "noopener noreferrer",
                             class: "underline text-[var(--btn-primary)] hover:opacity-80",
-                            aria_label: "Dune Weaver web UI (opens in new tab)",
+                            aria_label: "Dune Weaver project on GitHub (opens in new tab)",
                             "web UI"
                         }
                     }
