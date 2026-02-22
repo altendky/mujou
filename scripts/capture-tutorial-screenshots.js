@@ -247,50 +247,54 @@ async function main() {
   const steps = defineSteps();
 
   const browser = await chromium.launch();
+  try {
+    // Start in light system theme.  localStorage is clean in a fresh
+    // context, so the theme-toggle.js defaults to "system" mode and
+    // resolves via prefers-color-scheme.
+    const context = await browser.newContext({
+      viewport: { width: config.width, height: config.height },
+      colorScheme: "light",
+    });
+    const page = await context.newPage();
 
-  // Start in light system theme.  localStorage is clean in a fresh
-  // context, so the theme-toggle.js defaults to "system" mode and
-  // resolves via prefers-color-scheme.
-  const context = await browser.newContext({
-    viewport: { width: config.width, height: config.height },
-    colorScheme: "light",
-  });
-  const page = await context.newPage();
+    console.log(`navigating to ${config.url}`);
+    await page.goto(config.url, { waitUntil: "load" });
+    await waitForPipelineIdle(page);
+    console.log("pipeline idle\n");
 
-  console.log(`navigating to ${config.url}`);
-  await page.goto(config.url, { waitUntil: "load" });
-  await waitForPipelineIdle(page);
-  console.log("pipeline idle\n");
+    console.log("--- icons ---");
+    await extractIcons(page, config.out);
+    console.log("");
 
-  console.log("--- icons ---");
-  await extractIcons(page, config.out);
-  console.log("");
+    for (const theme of themes) {
+      console.log(`--- ${theme} theme ---`);
 
-  for (const theme of themes) {
-    console.log(`--- ${theme} theme ---`);
+      if (theme === "dark") {
+        // Reload so we start from the same default state (Output stage
+        // selected, default slider values, diagnostics off, export closed).
+        await page.emulateMedia({ colorScheme: "dark" });
+        await page.reload({ waitUntil: "load" });
+        await waitForPipelineIdle(page);
+      }
 
-    if (theme === "dark") {
-      // Reload so we start from the same default state (Output stage
-      // selected, default slider values, diagnostics off, export closed).
-      await page.emulateMedia({ colorScheme: "dark" });
-      await page.reload({ waitUntil: "load" });
-      await waitForPipelineIdle(page);
-    }
-
-    for (const step of steps) {
-      await step.before(page);
-      // Brief settle for any transitions / re-renders.
-      await page.waitForTimeout(200);
-      await screenshot(page, config.out, step.slug, theme);
-      // Run cleanup immediately while the page is in the right state.
-      if (step.after) {
-        await step.after(page);
+      for (const step of steps) {
+        await step.before(page);
+        // Brief settle for any transitions / re-renders.
+        await page.waitForTimeout(200);
+        await screenshot(page, config.out, step.slug, theme);
+        // Run cleanup immediately while the page is in the right state.
+        if (step.after) {
+          await step.after(page);
+        }
       }
     }
-  }
 
-  await browser.close();
-  console.log(`\ndone — ${themes.length * steps.length} screenshots in ${config.out}`);
+    console.log(
+      `\ndone — ${themes.length * steps.length} screenshots in ${config.out}`,
+    );
+  } finally {
+    await browser.close();
+  }
 }
 
 main().catch((err) => {
