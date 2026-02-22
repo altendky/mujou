@@ -273,15 +273,16 @@ pub fn ExportPanel(props: ExportPanelProps) -> Element {
                         }
                     }
                     p {
-                        "Dune Weaver: use THR, upload via your table\u{2019}s "
+                        "Dune Weaver ("
                         a {
                             href: "https://github.com/tuanchris/dune-weaver",
                             target: "_blank",
                             rel: "noopener noreferrer",
                             class: "underline text-[var(--btn-primary)] hover:opacity-80",
-                            aria_label: "Dune Weaver project on GitHub (opens in new tab)",
-                            "web UI"
+                            aria_label: "Dune Weaver on GitHub (opens in new tab)",
+                            "GitHub"
                         }
+                        "): use THR, upload via your table\u{2019}s web UI"
                     }
                 }
             }
