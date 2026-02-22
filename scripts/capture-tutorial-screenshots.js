@@ -80,8 +80,13 @@ async function waitForPipelineIdle(page) {
       .getByText("Processing...")
       .first()
       .waitFor({ state: "visible", timeout: 5_000 });
-  } catch {
+  } catch (e) {
     // Already idle or completed instantly — fall through.
+    if (e.name !== "TimeoutError") {
+      console.warn(
+        `  note: unexpected error waiting for Processing: ${e.message}`,
+      );
+    }
   }
 
   // 2. Wait for the overlay to fully close.  After "Processing..."
@@ -93,8 +98,13 @@ async function waitForPipelineIdle(page) {
       .getByRole("button", { name: "Cancel" })
       .or(page.getByRole("button", { name: "Done" }))
       .waitFor({ state: "hidden", timeout: 60_000 });
-  } catch {
+  } catch (e) {
     // Already hidden — fall through.
+    if (e.name !== "TimeoutError") {
+      console.warn(
+        `  note: unexpected error waiting for overlay close: ${e.message}`,
+      );
+    }
   }
 
   // 3. Confirm at least one stage thumbnail is loaded.
