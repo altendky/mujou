@@ -2,18 +2,28 @@
 
 ## Prerequisites
 
+- [mise](https://mise.jdx.dev/) (tool version manager)
 - Rust (edition 2024, see `rust-toolchain.toml` for pinned version)
 - `wasm32-unknown-unknown` target: `rustup target add wasm32-unknown-unknown`
-- Dioxus CLI: `cargo install dioxus-cli` or `cargo binstall dioxus-cli`
-- Node.js / npm (for Tailwind CSS — see [issue #12](https://github.com/altendky/mujou/issues/12))
+
+All other tools (Node.js, Python, Dioxus CLI, cargo-nextest, cargo-llvm-cov,
+cargo-deny, wasm-pack, mdbook, pre-commit) are managed by mise.
+Versions are pinned in `.mise.toml`.
+
+### Setup
+
+```bash
+# Install all development tools (Node.js, Python, dx, cargo-nextest, etc.)
+mise install
+
+# Install Tailwind CSS dependencies (required before any cargo command).
+# build.rs compiles Tailwind CSS via `npx @tailwindcss/cli`.
+npm ci
+```
 
 ## Local Development
 
 ```bash
-# Install Tailwind CSS dependencies (required before any cargo command).
-# build.rs compiles Tailwind CSS via `npx @tailwindcss/cli`.
-npm ci
-
 # Start Dioxus dev server (web target)
 # Tailwind CSS is compiled by build.rs via `npx @tailwindcss/cli` so that
 # every cargo invocation (clippy, test, coverage, dx serve, etc.) works
@@ -37,22 +47,6 @@ cargo nextest run --all-features
 
 # Coverage
 cargo llvm-cov --all-features --workspace
-```
-
-### Installing Development Tools
-
-```bash
-# Dioxus CLI
-cargo install dioxus-cli
-
-# cargo-nextest (test runner)
-cargo install cargo-nextest --locked
-
-# cargo-llvm-cov (coverage)
-cargo install cargo-llvm-cov --locked
-
-# cargo-deny (dependency audit)
-cargo install cargo-deny --locked
 ```
 
 ## Testing Strategy

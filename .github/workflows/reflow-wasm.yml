@@ -10,27 +10,16 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - uses: jdx/mise-action@v2
+
       # Node.js is required by build.rs to compile Tailwind CSS via
       # npx @tailwindcss/cli.  See: https://github.com/altendky/mujou/issues/12
-      - uses: actions/setup-node@v6
-        with:
-          node-version: '22'
       - run: npm ci
 
       - name: Setup Rust
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           target: wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        uses: taiki-e/install-action@v2
-        with:
-          tool: wasm-pack@0.14.0
-
-      - name: Install Dioxus CLI
-        uses: taiki-e/install-action@v2
-        with:
-          tool: dioxus-cli@0.7.2
 
       - name: Build WASM
         run: dx build --package mujou-app --platform web

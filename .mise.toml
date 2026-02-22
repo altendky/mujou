@@ -1,0 +1,10 @@
+[tools]
+node = "22"
+python = "3"
+pre-commit = "4.5.1"
+mdbook = "0.5.2"
+"aqua:rustwasm/wasm-pack" = "0.14.0"
+"aqua:taiki-e/cargo-llvm-cov" = "0.8.4"
+"aqua:EmbarkStudios/cargo-deny" = "0.19.0"
+"github:nextest-rs/nextest" = { version = "0.9.128", version_prefix = "cargo-nextest-" }
+"github:DioxusLabs/dioxus" = "0.7.3"
