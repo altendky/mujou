@@ -111,7 +111,12 @@ async function selectStage(page, stageName) {
 
 async function screenshot(page, dir, slug, theme) {
   const file = path.join(dir, `${slug}-${theme}.png`);
-  await page.screenshot({ path: file, type: "png", fullPage: true });
+  await page.screenshot({
+    path: file,
+    type: "png",
+    fullPage: true,
+    animations: "disabled",
+  });
   console.log(`  captured ${path.basename(file)}`);
 }
 
