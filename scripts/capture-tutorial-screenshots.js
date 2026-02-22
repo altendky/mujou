@@ -222,8 +222,8 @@ function defineSteps() {
     {
       slug: "05-join-diagnostics",
       before: async (page) => {
-        // Diagnostics toggle is independent of stage selection — Join
-        // should already be selected from the previous step.
+        // Explicitly select Join so this step is self-contained.
+        await selectStage(page, "Join");
         await page
           .getByRole("button", { name: "Toggle diagnostic overlay" })
           .click();
