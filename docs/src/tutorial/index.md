@@ -143,6 +143,6 @@ Upload the downloaded file to your sand table:
 
 | Table | Format | How to upload |
 | ----- | ------ | ------------- |
-| **Sisyphus** | THR | Upload via the [Sisyphus app](https://sisyphus-industries.com/community/) or the [Web Center](https://webcenter.sisyphus-industries.com/). |
+| **Sisyphus** | THR | Upload via the [Sisyphus app](https://sisyphus-industries.com/) or the [Web Center](https://webcenter.sisyphus-industries.com/). |
 | **Oasis** | THR | Upload at [app.grounded.so](https://app.grounded.so). |
 | **Dune Weaver** | THR | Upload via your table's [web UI](https://github.com/tuanchris/dune-weaver). |
