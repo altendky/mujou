@@ -69,9 +69,14 @@ jobs:
           cp -r target/dx/mujou-app/release/web/public/* /tmp/serve/app/
           python3 -m http.server 8080 --bind 127.0.0.1 --directory /tmp/serve &
           SERVER_PID=$!
-          sleep 1
+          # shellcheck disable=SC2064  # intentional early expansion of $SERVER_PID
+          trap "kill $SERVER_PID 2>/dev/null || true" EXIT INT TERM
+          # Wait until the server is actually ready (up to 15 s).
+          for _i in $(seq 1 15); do
+            curl -sf http://localhost:8080/app/ > /dev/null && break
+            sleep 1
+          done
           npm run screenshots -- --url http://localhost:8080/app/
-          kill $SERVER_PID
 
       - name: Build documentation
         run: mdbook build docs
