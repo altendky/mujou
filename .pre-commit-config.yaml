@@ -26,6 +26,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: mise-lock
+        name: mise lock
+        entry: mise install --locked --dry-run
+        language: system
+        files: '(^|/)\.mise\.toml$|(^|/)mise\.lock$'
+        pass_filenames: false
+
       - id: cargo-fmt
         name: cargo fmt
         entry: cargo fmt --all --check
