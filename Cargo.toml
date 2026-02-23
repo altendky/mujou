@@ -4,7 +4,7 @@ members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.93"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/altendky/mujou"
 homepage = "https://github.com/altendky/mujou"
