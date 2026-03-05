@@ -34,7 +34,7 @@ jobs:
 
   all:
     name: all
-    if: always()
+    if: ${{ !cancelled() }}
     needs: [mise, pre-commit, rust, wasm, coverage]
     runs-on: ubuntu-latest
     steps:
