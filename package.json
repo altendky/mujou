@@ -5,8 +5,8 @@
     "screenshots": "node scripts/capture-tutorial-screenshots.js"
   },
   "devDependencies": {
-    "@tailwindcss/cli": "4.2.1",
+    "@tailwindcss/cli": "4.2.2",
     "playwright": "^1.58.2",
-    "tailwindcss": "4.2.1"
+    "tailwindcss": "4.2.2"
   }
 }
