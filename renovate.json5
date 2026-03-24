@@ -1,15 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
 
+  // Only rebase PRs when they have conflicts, not just for being behind
+  "rebaseWhen": "conflicted",
+
   // Extend recommended defaults + SHA pinning for GitHub Actions
   "extends": [
     "config:recommended",
     "helpers:pinGitHubActionDigests"
   ],
-
-  // Automerge PRs after approval + CI pass (uses GitHub native auto-merge)
-  "automerge": true,
-  "automergeStrategy": "merge-commit",
 
   // Enable the beta pre-commit manager
   "pre-commit": {
@@ -43,16 +42,20 @@
       "groupName": "Rust toolchain"
     },
 
-    // Group GitHub Actions updates
-    {
-      "matchManagers": ["github-actions"],
-      "groupName": "GitHub Actions"
-    },
-
     // Override extractVersion for nextest (version_prefix workaround)
     {
       "matchDepNames": ["github:nextest-rs/nextest"],
       "extractVersion": "^cargo-nextest-(?<version>.+)$"
+    },
+
+    // After bumping a mise tool version, re-lock just that tool
+    {
+      "matchManagers": ["mise"],
+      "postUpgradeTasks": {
+        "commands": ["mise lock {{{depName}}}"],
+        "fileFilters": ["mise.lock"],
+        "executionMode": "update"
+      }
     }
   ]
 }
