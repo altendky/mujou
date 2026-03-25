@@ -24,6 +24,11 @@ repos:
       - id: actionlint
         args: [-verbose]
 
+  - repo: https://github.com/Mergifyio/mergify-pre-commit
+    rev: 1.1.0
+    hooks:
+      - id: validate-mergify-config
+
   - repo: local
     hooks:
       - id: mise-lock
