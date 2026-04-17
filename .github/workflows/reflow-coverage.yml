@@ -7,6 +7,8 @@ jobs:
   check:
     name: Coverage
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -21,7 +23,13 @@ jobs:
         with:
           target: wasm32-unknown-unknown
 
-      # TODO: Upload lcov.info to Codecov once coverage reporting is set up.
-      #   See: docs/src/project/open-questions.md (Deferred > Infrastructure > Coverage reporting)
       - name: Generate coverage
         run: cargo llvm-cov nextest --all-features --workspace --no-tests=warn --lcov --output-path lcov.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: lcov.info
+          flags: rust
+          fail_ci_if_error: true
