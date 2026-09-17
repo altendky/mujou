@@ -456,7 +456,7 @@ mod tests {
         let sat = extract_saturation(&rgba);
         let s = sat.get_pixel(0, 0).0[0];
         // Allow ±1 for integer rounding.
-        assert!((i16::from(s) - 127).abs() <= 1, "expected ~127, got {s}",);
+        assert!((i16::from(s) - 127).abs() <= 1, "expected ~127, got {s}");
     }
 
     #[test]
