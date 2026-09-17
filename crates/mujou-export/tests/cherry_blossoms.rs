@@ -581,7 +581,7 @@ fn cherry_blossoms_pipeline_to_thr() {
         for part in line.split_whitespace() {
             let dot_pos = part.find('.').expect("should have decimal point");
             let decimals = &part[dot_pos + 1..];
-            assert_eq!(decimals.len(), 5, "expected 5 decimal places in {part}",);
+            assert_eq!(decimals.len(), 5, "expected 5 decimal places in {part}");
         }
     }
 
