@@ -7,5 +7,5 @@ pre-commit = "4.5.1"
 "aqua:rustwasm/wasm-pack" = "0.14.0"
 "aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
-"github:nextest-rs/nextest" = { version = "0.9.144", version_prefix = "cargo-nextest-" }
+"github:nextest-rs/nextest" = { version = "0.9.145", version_prefix = "cargo-nextest-" }
 "github:DioxusLabs/dioxus" = "0.7.3"
