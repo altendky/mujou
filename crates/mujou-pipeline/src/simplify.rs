@@ -227,7 +227,7 @@ mod tests {
             Point::new(4.0, 2.0),
         );
         let expected = 8.0 / 20.0_f64.sqrt();
-        assert!((d - expected).abs() < 1e-10, "got {d}, expected {expected}",);
+        assert!((d - expected).abs() < 1e-10, "got {d}, expected {expected}");
     }
 
     #[test]
