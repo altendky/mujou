@@ -24,5 +24,8 @@ jobs:
           docker-user: 12021:0
         env:
           RENOVATE_REPOSITORIES: '["${{ github.repository }}"]'
-          RENOVATE_ALLOWED_COMMANDS: '[".*"]'
+          # Only the configured mise tools may be re-locked, for all supported platforms.
+          RENOVATE_ALLOWED_COMMANDS: '["^mise lock (node|python|pre-commit|aqua:rust-lang/mdBook|aqua:rustwasm/wasm-pack|aqua:taiki-e/cargo-llvm-cov|aqua:EmbarkStudios/cargo-deny|github:nextest-rs/nextest|github:DioxusLabs/dioxus) --platform linux-arm64,linux-x64,macos-arm64,macos-x64,windows-x64$"]'
           RENOVATE_ALLOWED_UNSAFE_EXECUTIONS: '["mise"]'
+          # Also preserve platform coverage in Renovate's built-in mise lock invocation.
+          RENOVATE_CUSTOM_ENV_VARIABLES: '{"MISE_LOCKFILE_PLATFORMS":"linux-arm64,linux-x64,macos-arm64,macos-x64,windows-x64"}'
