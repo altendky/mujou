@@ -25,24 +25,28 @@ checksum = "sha256:413f0e2ce780d0d14ba8e9339f9fb033419a8a971ec7714faec518e4a664b
 url = "https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.0/cargo-deny-0.19.0-x86_64-pc-windows-msvc.tar.gz"
 
 [[tools."aqua:rust-lang/mdBook"]]
-version = "0.5.2"
+version = "0.5.4"
 backend = "aqua:rust-lang/mdBook"
 
 [tools."aqua:rust-lang/mdBook"."platforms.linux-x64"]
-checksum = "sha256:8e9d802bbecea34380aabfc65bec4fdba23c07453ef2c7e06fa34c282082e2c4"
-url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-unknown-linux-musl.tar.gz"
+checksum = "sha256:3f28de05dafca9d0f2eab99c662116b0e37b89b1d96a08f8f430b9eeae958cd7"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.4-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/468209394"
 
 [tools."aqua:rust-lang/mdBook"."platforms.macos-arm64"]
-checksum = "sha256:17cc64478ec279a73881420e850bd8f9d460552e56b50159ff465bc97eb90d6c"
-url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-apple-darwin.tar.gz"
+checksum = "sha256:a47d7bf0d5d670cff9ee6cce95537cbeb62dc10704d9e7131ffbd13e2b59a5de"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.4-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/468210169"
 
 [tools."aqua:rust-lang/mdBook"."platforms.macos-x64"]
-checksum = "sha256:17cc64478ec279a73881420e850bd8f9d460552e56b50159ff465bc97eb90d6c"
-url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-apple-darwin.tar.gz"
+checksum = "sha256:a47d7bf0d5d670cff9ee6cce95537cbeb62dc10704d9e7131ffbd13e2b59a5de"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.4-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/468210169"
 
 [tools."aqua:rust-lang/mdBook"."platforms.windows-x64"]
-checksum = "sha256:e78fa1159bfc381d03f9c6659c48c883706497dc63c9153007a8a4c8df8da166"
-url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.2/mdbook-v0.5.2-x86_64-pc-windows-msvc.zip"
+checksum = "sha256:8a6b2421aa522de06d746871d2b8fff9c8d71773467e310a4516d2566e7f2de4"
+url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.4-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/468210971"
 
 [[tools."aqua:rustwasm/wasm-pack"]]
 version = "0.14.0"
