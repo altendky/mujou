@@ -17,13 +17,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// Ordered from fastest/lowest-quality to slowest/highest-quality,
 /// with a `Disabled` variant to skip downsampling entirely.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DownsampleFilter {
     /// Disabled: skip downsampling regardless of image size.
     Disabled,
     /// Nearest-neighbor: fastest, blocky artifacts.
     Nearest,
     /// Bilinear interpolation: fast, decent quality.
+    #[default]
     Triangle,
     /// Bicubic (Catmull-Rom): moderate speed, good quality.
     CatmullRom,
@@ -31,12 +32,6 @@ pub enum DownsampleFilter {
     Gaussian,
     /// Lanczos with 3 lobes: slowest, sharpest/best for photos.
     Lanczos3,
-}
-
-impl Default for DownsampleFilter {
-    fn default() -> Self {
-        Self::Triangle
-    }
 }
 
 impl DownsampleFilter {

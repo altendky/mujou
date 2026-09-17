@@ -327,7 +327,7 @@ fn format_metrics(metrics: &StageMetrics) -> String {
                     "{original_width}x{original_height} -> {width}x{height} (target={max_dimension}, {filter})",
                 )
             } else {
-                format!("{original_width}x{original_height} (no change, <= {max_dimension})",)
+                format!("{original_width}x{original_height} (no change, <= {max_dimension})")
             }
         }
         StageMetrics::Blur { sigma } => format!("sigma={sigma:.2}"),
