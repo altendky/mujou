@@ -69,7 +69,7 @@ clap = { version = "4", features = ["derive"] }
 web-time = "1"
 
 # Geometry, spatial indexing, graph algorithms
-geo = "0.32"
+geo = "0.33"
 rstar = "0.12"
 petgraph = "0.8"
 
