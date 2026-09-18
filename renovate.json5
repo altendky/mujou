@@ -36,10 +36,18 @@
   ],
 
   "packageRules": [
-    // Group Rust toolchain updates (rust-toolchain.toml + Cargo.toml MSRV)
+    // Group development toolchain updates; MSRV changes remain manual below.
     {
       "matchDepNames": ["rust-lang/rust"],
       "groupName": "Rust toolchain"
+    },
+
+    // The root MSRV is a deliberate compatibility policy, not a toolchain pin.
+    {
+      "matchManagers": ["custom.regex"],
+      "matchFileNames": ["/^Cargo\\.toml$/"],
+      "matchDepNames": ["rust-lang/rust"],
+      "enabled": false
     },
 
     // Override extractVersion for nextest (version_prefix workaround)
@@ -48,11 +56,11 @@
       "extractVersion": "^cargo-nextest-(?<version>.+)$"
     },
 
-    // After bumping a mise tool version, re-lock just that tool
+    // After bumping a mise tool version, re-lock just that tool for every platform.
     {
       "matchManagers": ["mise"],
       "postUpgradeTasks": {
-        "commands": ["mise lock {{{depName}}}"],
+        "commands": ["mise lock {{{depName}}} --platform linux-arm64,linux-x64,macos-arm64,macos-x64,windows-x64"],
         "fileFilters": ["mise.lock"],
         "executionMode": "update"
       }
