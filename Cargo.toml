@@ -52,7 +52,7 @@ web-sys = { version = "0.3", features = [
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 
 # UI framework
 dioxus = "0.7"
