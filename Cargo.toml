@@ -70,7 +70,7 @@ web-time = "1"
 
 # Geometry, spatial indexing, graph algorithms
 geo = "0.33"
-rstar = "0.12"
+rstar = "0.13"
 petgraph = "0.8"
 
 # Hashing
