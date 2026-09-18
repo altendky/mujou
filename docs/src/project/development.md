@@ -30,6 +30,9 @@ Mise updates re-lock only the changed tool, targeting Linux ARM64/x64,
 macOS ARM64/x64, and Windows x64. The workflow's command allowlist must match
 the configured tool names and the post-upgrade command exactly. Its
 `MISE_LOCKFILE_PLATFORMS` environment also covers Renovate's built-in locking.
+Pre-commit uses the explicit `pipx:pre-commit` backend because Aqua's Python
+zipapp cannot run directly on Windows. Its legacy lock entry pins the version
+without platform-specific download URLs, matching the Python-package backend.
 For a local refresh, replace the tool name in:
 
 ```bash
