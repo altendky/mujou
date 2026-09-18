@@ -54,28 +54,33 @@ url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.
 url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/468210971"
 
 [[tools."aqua:rustwasm/wasm-pack"]]
-version = "0.14.0"
+version = "0.15.0"
 backend = "aqua:rustwasm/wasm-pack"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.linux-arm64"]
-checksum = "sha256:5941c7b05060440ff37ee50fe9009a408e63fa5ba607a3b0736f5a887ec5f2ca"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-aarch64-unknown-linux-musl.tar.gz"
+checksum = "sha256:e17ef0806381c3a0acb9c9ddad643a49facaa5a2ecf657a421d4d8f3357a24b7"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850444"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.linux-x64"]
-checksum = "sha256:278a8d668085821f4d1a637bd864f1713f872b0ae3a118c77562a308c0abfe8d"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-unknown-linux-musl.tar.gz"
+checksum = "sha256:c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850440"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.macos-arm64"]
-checksum = "sha256:46b66072ee9912b53f83841aecb04479a60e0705f7bb8b6681b377a07a512a23"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-apple-darwin.tar.gz"
+checksum = "sha256:0abff4a03d670b6c00ea31d0e1608a72407e355f3d3765e9c30eb45cd5b7e318"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850469"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.macos-x64"]
-checksum = "sha256:46b66072ee9912b53f83841aecb04479a60e0705f7bb8b6681b377a07a512a23"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-apple-darwin.tar.gz"
+checksum = "sha256:d3f1a4a33e95f8f0d7801b024e08624c479999ac96aa150908b2394015cd0363"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850460"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.windows-x64"]
-checksum = "sha256:d484c8e8bcd9e8c30097fbac78b52dd159598f99d11e43a50f5d143b67c721f1"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.14.0/wasm-pack-v0.14.0-x86_64-pc-windows-msvc.tar.gz"
+checksum = "sha256:518dc51180c7bc864699c9279b3bc99025bc109123e0249a34ba34d130a509bf"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-pc-windows-msvc.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850448"
 
 [[tools."aqua:taiki-e/cargo-llvm-cov"]]
 version = "0.9.1"
@@ -200,30 +205,6 @@ url = "https://nodejs.org/dist/v22.22.0/node-v22.22.0-darwin-x64.tar.gz"
 [tools.node."platforms.windows-x64"]
 checksum = "sha256:c97fa376d2becdc8863fcd3ca2dd9a83a9f3468ee7ccf7a6d076ec66a645c77a"
 url = "https://nodejs.org/dist/v22.22.0/node-v22.22.0-win-x64.zip"
-
-[[tools.node]]
-version = "24.14.0"
-backend = "core:node"
-
-[tools.node."platforms.linux-arm64"]
-checksum = "sha256:f44740cd218de8127f1c44c41510a3a740fa5c9c8d1cdce1c3bedada79f3cde7"
-url = "https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-arm64.tar.gz"
-
-[tools.node."platforms.linux-x64"]
-checksum = "sha256:dbf5b8665dec15e59e6359a517fefb47b23fdb9152d8def975b9bca3dfc6d355"
-url = "https://nodejs.org/dist/v24.14.0/node-v24.14.0-linux-x64.tar.gz"
-
-[tools.node."platforms.macos-arm64"]
-checksum = "sha256:a1a54f46a750d2523d628d924aab61758a51c9dad3e0238beb14141be9615dd3"
-url = "https://nodejs.org/dist/v24.14.0/node-v24.14.0-darwin-arm64.tar.gz"
-
-[tools.node."platforms.macos-x64"]
-checksum = "sha256:f2879eb810e25993a0578e5d878930266fd2eafcffe9f2839b3d8db354d4879e"
-url = "https://nodejs.org/dist/v24.14.0/node-v24.14.0-darwin-x64.tar.gz"
-
-[tools.node."platforms.windows-x64"]
-checksum = "sha256:313fa40c0d7b18575821de8cb17483031fe07d95de5994f6f435f3b345f85c66"
-url = "https://nodejs.org/dist/v24.14.0/node-v24.14.0-win-x64.zip"
 
 [[tools.pre-commit]]
 version = "4.5.1"
