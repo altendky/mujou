@@ -427,7 +427,7 @@ fn build_mst(polylines: &[&Polyline], k_nearest: usize, working_resolution: u32)
 
             let mut cross_count = 0;
             let mut iter_count = 0;
-            for candidate in tree.nearest_neighbor_iter(&query_pt) {
+            for candidate in tree.nearest_neighbor_iter(query_pt) {
                 iter_count += 1;
                 if iter_count > MAX_NN_ITERATIONS {
                     break;

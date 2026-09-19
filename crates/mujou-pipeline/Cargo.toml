@@ -12,6 +12,7 @@ categories = ["graphics"]
 
 [dependencies]
 geo.workspace = true
+geo-types.workspace = true
 image.workspace = true
 imageproc.workspace = true
 petgraph.workspace = true
