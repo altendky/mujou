@@ -1,7 +1,7 @@
 [tools]
 node = "22"
 python = "3.14.7"
-pre-commit = "4.5.1"
+"pipx:pre-commit" = "4.6.2"
 # Non-core tools: use explicit backend prefix (aqua:/github:) for Renovate compatibility
 "aqua:rust-lang/mdBook" = "0.5.4"
 "aqua:rustwasm/wasm-pack" = "0.15.0"
