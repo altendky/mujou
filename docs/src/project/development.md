@@ -21,6 +21,35 @@ mise install
 npm ci
 ```
 
+### Dependency automation
+
+Renovate updates the development Rust toolchain independently of the root
+`Cargo.toml` MSRV. Raising the MSRV requires a deliberate compatibility decision.
+
+Mise updates re-lock only the changed tool, targeting Linux ARM64/x64,
+macOS ARM64/x64, and Windows x64. The workflow's command allowlist must match
+the configured tool names and the post-upgrade command exactly. Its
+`MISE_LOCKFILE_PLATFORMS` environment also covers Renovate's built-in locking.
+Pre-commit uses the explicit `pipx:pre-commit` backend because Aqua's Python
+zipapp cannot run directly on Windows. Its legacy lock entry pins the version
+without platform-specific download URLs, matching the Python-package backend.
+For a local refresh, replace the tool name in:
+
+```bash
+mise lock aqua:rust-lang/mdBook --platform linux-arm64,linux-x64,macos-arm64,macos-x64,windows-x64
+```
+
+Compare platform entries before and after regeneration. Some upstream releases
+do not publish every platform: mdBook 0.5.4 publishes Linux ARM64 only for musl,
+so its lock has no GNU Linux ARM64 entry; Dioxus 0.7.3 has no macOS x64 artifact.
+Confirm any new omission against the upstream release assets before accepting it.
+
+After a lock-generation repair reaches main, merge main into an affected
+Renovate branch to preserve manual fixes, then let the next scheduled Renovate
+run retry artifact generation. Do not request a destructive Renovate rebase on
+a branch with manual commits. General lockfile maintenance remains tracked in
+[#245](https://github.com/altendky/mujou/issues/245).
+
 ## Local Development
 
 ```bash
