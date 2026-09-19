@@ -70,6 +70,8 @@ web-time = "1"
 
 # Geometry, spatial indexing, graph algorithms
 geo = "0.33"
+# Enable compatibility with our rstar version alongside geo's rstar 0.12.
+geo-types = { version = "0.7.20", features = ["rstar_0_13"] }
 rstar = "0.13"
 petgraph = "0.8"
 

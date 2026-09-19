@@ -993,6 +993,7 @@ dependencies = [
  "num-traits",
  "rayon",
  "rstar 0.12.2",
+ "rstar 0.13.0",
  "serde",
  "spade",
  "thiserror 2.0.20",
@@ -1569,6 +1570,7 @@ name = "mujou-pipeline"
 version = "0.1.0"
 dependencies = [
  "geo",
+ "geo-types",
  "image",
  "imageproc",
  "petgraph",
