@@ -256,7 +256,7 @@ mod tests {
     fn empty_polylines_produces_header_only() {
         let thr = to_thr(&[], &no_meta());
         let pairs = parse_pairs(&thr);
-        assert!(pairs.is_empty());
+        assert_eq!(pairs, []);
     }
 
     #[test]

@@ -646,7 +646,7 @@ mod tests {
     fn empty_polyline_returns_empty() {
         let pl = Polyline::new(vec![]);
         let result = clip_polyline_to_circle(&pl, CENTER, RADIUS);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [ClippedPolyline; 0]);
     }
 
     #[test]
@@ -672,7 +672,7 @@ mod tests {
             Point::new(30.0, 30.0),
         ]);
         let result = clip_polyline_to_circle(&pl, CENTER, RADIUS);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [ClippedPolyline; 0]);
     }
 
     #[test]
@@ -782,7 +782,7 @@ mod tests {
         // A single point can't form a segment (need >= 2 points).
         let pl = Polyline::new(vec![Point::new(0.0, 0.0)]);
         let result = clip_polyline_to_circle(&pl, CENTER, RADIUS);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [ClippedPolyline; 0]);
     }
 
     // ── apply_mask ───────────────────────────────────────────────────
@@ -951,7 +951,7 @@ mod tests {
     fn rect_empty_polyline_returns_empty() {
         let pl = Polyline::new(vec![]);
         let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [ClippedPolyline; 0]);
     }
 
     #[test]
@@ -976,7 +976,7 @@ mod tests {
             Point::new(30.0, 30.0),
         ]);
         let result = clip_polyline_to_rectangle(&pl, CENTER, HALF_W, HALF_H);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [ClippedPolyline; 0]);
     }
 
     #[test]
