@@ -1944,7 +1944,7 @@ mod tests {
             .detect_edges()
             .trace_contours()
             .unwrap();
-        assert!(!contours.contours().is_empty());
+        assert_ne!(contours.contours(), [] as [Polyline; 0]);
     }
 
     #[test]
@@ -1983,7 +1983,7 @@ mod tests {
             .trace_contours()
             .unwrap()
             .simplify();
-        assert!(!simplified.simplified().is_empty());
+        assert_ne!(simplified.simplified(), [] as [Polyline; 0]);
     }
 
     #[test]

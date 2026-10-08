@@ -86,7 +86,7 @@ mod tests {
     fn empty_image_produces_no_contours() {
         let img = GrayImage::new(10, 10); // all black
         let result = ContourTracerKind::BorderFollowing.trace(&img);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [Polyline; 0]);
     }
 
     #[test]

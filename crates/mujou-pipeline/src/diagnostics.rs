@@ -905,7 +905,7 @@ mod tests {
         };
 
         let report = diag.report();
-        assert!(!report.is_empty());
+        assert_ne!(report, "");
         assert!(report.contains("Pipeline Diagnostics Report"));
         assert!(report.contains("Edge Detection"));
         assert!(report.contains("Retrace"));
@@ -1011,7 +1011,7 @@ mod tests {
         };
 
         let report = diag.report();
-        assert!(!report.is_empty());
+        assert_ne!(report, "");
         // Verify the applied=true formatting path: "AxB -> CxD (target=N, Filter)"
         assert!(
             report.contains("800x600 -> 256x192"),

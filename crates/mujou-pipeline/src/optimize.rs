@@ -119,7 +119,7 @@ mod tests {
     #[test]
     fn empty_input_returns_empty() {
         let result = optimize_path_order(&[], TEST_STRATEGY, TEST_DIMS);
-        assert!(result.is_empty());
+        assert_eq!(result, [] as [Polyline; 0]);
     }
 
     #[test]
