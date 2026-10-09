@@ -47,6 +47,6 @@ Items to address after MVP:
 
 - [ ] GitHub Actions CI -- Linting, testing, WASM build, deployment
 - [ ] Release workflow -- Automated static site deployment on tag
-- [ ] Coverage reporting -- Codecov integration
+- [x] Coverage reporting -- Codecov integration
 - [ ] Auto-deploy on merge to main -- Currently deploy is manual (`workflow_dispatch`). Consider triggering on push to `main` once the workflow is proven reliable. If enabled, consider whether deploy should be gated on CI passing (via `workflow_run` trigger or a combined workflow) to prevent deploying broken builds.
 - [ ] PR preview deploys -- GitHub Pages does not support deploy previews from PRs natively. Options include external services (surge.sh, Cloudflare Pages for previews only), downloadable build artifacts for manual review, or no previews (rely on local `dx serve`). Revisit if reviewing UI changes from PRs becomes painful.
