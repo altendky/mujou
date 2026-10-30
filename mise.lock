@@ -54,33 +54,38 @@ url = "https://github.com/rust-lang/mdBook/releases/download/v0.5.4/mdbook-v0.5.
 url_api = "https://api.github.com/repos/rust-lang/mdBook/releases/assets/468210971"
 
 [[tools."aqua:rustwasm/wasm-pack"]]
-version = "0.15.0"
+version = "0.15.1"
 backend = "aqua:rustwasm/wasm-pack"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.linux-arm64"]
-checksum = "sha256:e17ef0806381c3a0acb9c9ddad643a49facaa5a2ecf657a421d4d8f3357a24b7"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-aarch64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850444"
+checksum = "sha256:7004853c7925ae1984033b5f25866ec604bbc921ef956d5e6c5595bc5af6d30c"
+checksum_source = "mise-versions"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.1/wasm-pack-v0.15.1-aarch64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/691077493"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.linux-x64"]
-checksum = "sha256:c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850440"
+checksum = "sha256:410101009739b9d01c7d5affaaad6e9c9a24b4cba6791a4805db8e89b9bf7af2"
+checksum_source = "mise-versions"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.1/wasm-pack-v0.15.1-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/691077448"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.macos-arm64"]
-checksum = "sha256:0abff4a03d670b6c00ea31d0e1608a72407e355f3d3765e9c30eb45cd5b7e318"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-aarch64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850469"
+checksum = "sha256:bcaf2a418ae39c874b072ea122fec58e11970862cbd8fd4eca2f00a17f76c536"
+checksum_source = "mise-versions"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.1/wasm-pack-v0.15.1-aarch64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/691077688"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.macos-x64"]
-checksum = "sha256:d3f1a4a33e95f8f0d7801b024e08624c479999ac96aa150908b2394015cd0363"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-apple-darwin.tar.gz"
-url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850460"
+checksum = "sha256:9387715ad345a1fe58751d60c80f49d9139957540728bafd0668d005a37cef62"
+checksum_source = "mise-versions"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.1/wasm-pack-v0.15.1-x86_64-apple-darwin.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/691077649"
 
 [tools."aqua:rustwasm/wasm-pack"."platforms.windows-x64"]
-checksum = "sha256:518dc51180c7bc864699c9279b3bc99025bc109123e0249a34ba34d130a509bf"
-url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.0/wasm-pack-v0.15.0-x86_64-pc-windows-msvc.tar.gz"
-url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/420850448"
+checksum = "sha256:80afe1f95aaa3f7442917c4457c8316bd1a383c1f27eb0e40601ff3ee3217583"
+checksum_source = "mise-versions"
+url = "https://github.com/wasm-bindgen/wasm-pack/releases/download/v0.15.1/wasm-pack-v0.15.1-x86_64-pc-windows-msvc.tar.gz"
+url_api = "https://api.github.com/repos/wasm-bindgen/wasm-pack/releases/assets/691077516"
 
 [[tools."aqua:taiki-e/cargo-llvm-cov"]]
 version = "0.9.1"
