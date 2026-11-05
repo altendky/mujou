@@ -77,6 +77,14 @@
       "allowedVersions": "/^22(?:\\.|$)/"
     },
 
+    // Raise the coupled manifests together so Cargo can resolve their exact cross-dependencies.
+    {
+      "description": "Resolve the coupled wasm-bindgen family together",
+      "matchManagers": ["cargo"],
+      "matchDepNames": ["js-sys", "wasm-bindgen", "wasm-bindgen-futures", "web-sys"],
+      "rangeStrategy": "bump"
+    },
+
     // Group development toolchain updates; MSRV changes remain manual below.
     {
       "matchDepNames": ["rust-lang/rust"],
