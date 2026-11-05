@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: "0 */6 * * *"
   workflow_dispatch:
+    inputs:
+      debug:
+        description: Enable debug logging
+        required: false
+        default: false
+        type: boolean
 
 permissions: {}
 
@@ -29,3 +35,4 @@ jobs:
           RENOVATE_ALLOWED_UNSAFE_EXECUTIONS: '["mise"]'
           # Also preserve platform coverage in Renovate's built-in mise lock invocation.
           RENOVATE_CUSTOM_ENV_VARIABLES: '{"MISE_LOCKFILE_PLATFORMS":"linux-arm64,linux-x64,macos-arm64,macos-x64,windows-x64"}'
+          LOG_LEVEL: ${{ inputs.debug && 'debug' || 'info' }}
