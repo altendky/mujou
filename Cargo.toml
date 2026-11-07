@@ -4,7 +4,7 @@ members = ["crates/*"]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/altendky/mujou"
 homepage = "https://github.com/altendky/mujou"
@@ -67,9 +67,7 @@ web-time = "1"
 
 # Geometry, spatial indexing, graph algorithms
 geo = "0.33"
-# Enable compatibility with our rstar version alongside geo's rstar 0.12.
-geo-types = { version = "0.7.20", features = ["rstar_0_13"] }
-rstar = "0.13"
+rstar = "0.14"
 petgraph = "0.8"
 
 # Hashing

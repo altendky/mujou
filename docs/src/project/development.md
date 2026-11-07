@@ -25,6 +25,8 @@ npm ci
 
 Renovate updates the development Rust toolchain independently of the root
 `Cargo.toml` MSRV. Raising the MSRV requires a deliberate compatibility decision.
+The rstar 0.14 dependency requires Rust 1.90. CI reads the supported minimum
+from the root `Cargo.toml` and checks all workspace targets and features.
 
 Mise updates re-lock only the changed tool, targeting Linux ARM64/x64,
 macOS ARM64/x64, and Windows x64. The workflow's command allowlist must match
