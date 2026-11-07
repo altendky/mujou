@@ -27,7 +27,7 @@ use petgraph::graph::{NodeIndex, UnGraph};
 use petgraph::unionfind::UnionFind;
 use petgraph::visit::EdgeRef;
 use rstar::RTree;
-use rstar::primitives::GeomWithData;
+use rstar::primitives::{GeomWithData, Line as RTreeLine};
 use serde::{Deserialize, Serialize};
 
 use crate::join::image_center;
@@ -93,7 +93,7 @@ const fn coord_to_point(c: geo::Coord<f64>) -> Point {
 }
 
 // ---------------------------------------------------------------------------
-// R-tree entry: a geo::Line tagged with a segment identifier
+// R-tree entry: a native rstar line tagged with a segment identifier
 // ---------------------------------------------------------------------------
 
 /// Identifies a segment within the input polyline set.
@@ -106,9 +106,9 @@ struct SegmentId {
     segment_idx: usize,
 }
 
-/// A `geo::Line` tagged with its [`SegmentId`], suitable for R\*-tree
-/// insertion.
-type IndexedSegment = GeomWithData<Line<f64>, SegmentId>;
+/// A native rstar line tagged with its [`SegmentId`]. Keeping the index
+/// geometry native avoids coupling rstar upgrades to geo-types' trait support.
+type IndexedSegment = GeomWithData<RTreeLine<[f64; 2]>, SegmentId>;
 
 // ---------------------------------------------------------------------------
 // Phase 1: MST via Kruskal
@@ -385,7 +385,7 @@ fn build_mst(polylines: &[&Polyline], k_nearest: usize, working_resolution: u32)
                 let a = point_to_coord(pts[si]);
                 let b = point_to_coord(pts[si + 1]);
                 GeomWithData::new(
-                    Line::new(a, b),
+                    RTreeLine::new([a.x, a.y], [b.x, b.y]),
                     SegmentId {
                         polyline_idx: pi,
                         segment_idx: si,
@@ -427,7 +427,7 @@ fn build_mst(polylines: &[&Polyline], k_nearest: usize, working_resolution: u32)
 
             let mut cross_count = 0;
             let mut iter_count = 0;
-            for candidate in tree.nearest_neighbor_iter(query_pt) {
+            for candidate in tree.nearest_neighbor_iter([query_pt.x(), query_pt.y()]) {
                 iter_count += 1;
                 if iter_count > MAX_NN_ITERATIONS {
                     break;
@@ -438,7 +438,8 @@ fn build_mst(polylines: &[&Polyline], k_nearest: usize, working_resolution: u32)
                     continue; // Same polyline, skip without counting.
                 }
 
-                let cand_line = *candidate.geom();
+                let indexed_line = candidate.geom();
+                let cand_line = Line::new(indexed_line.from, indexed_line.to);
                 let dist = Euclidean.distance(&my_line, &cand_line);
 
                 // Find exact connection points.
@@ -1911,6 +1912,43 @@ mod tests {
         let c = point_to_coord(p);
         let p2 = coord_to_point(c);
         assert_eq!(p, p2);
+    }
+
+    #[test]
+    fn spatial_index_distance_matches_geo() {
+        use rstar::PointDistance;
+
+        for (from, to) in [
+            ([0.0, 0.0], [10.0, 0.0]),
+            ([10.0, 0.0], [0.0, 0.0]),
+            ([-2.0, -3.0], [4.0, 5.0]),
+            ([2.0, 3.0], [2.0, 3.0]),
+        ] {
+            let indexed: RTreeLine<[f64; 2]> = RTreeLine::new(from, to);
+            let geometry = Line::new(from, to);
+            for query in [[-5.0, 0.0], [5.0, 3.0], [20.0, 10.0], [2.0, 3.0]] {
+                let expected = Euclidean.distance(&geo::Point::from(query), &geometry);
+                assert!((indexed.distance_2(&query).sqrt() - expected).abs() < 1e-10);
+            }
+        }
+    }
+
+    #[test]
+    fn spatial_index_orders_segments_by_exact_distance() {
+        // The long segment is nearest at its interior, despite its distant
+        // endpoints. A zero-length segment must also have a finite distance.
+        let tree: RTree<RTreeLine<[f64; 2]>> = RTree::bulk_load(vec![
+            RTreeLine::new([5.0, 0.0], [6.0, 0.0]),
+            RTreeLine::new([0.0, 2.0], [0.0, 2.0]),
+            RTreeLine::new([-10.0, 1.0], [10.0, 1.0]),
+        ]);
+        let distances: Vec<_> = tree
+            .nearest_neighbor_iter([0.0, 0.0])
+            .map(|line| {
+                Euclidean.distance(&geo::Point::new(0.0, 0.0), &Line::new(line.from, line.to))
+            })
+            .collect();
+        assert_eq!(distances, vec![1.0, 2.0, 5.0]);
     }
 
     #[test]
