@@ -1,3 +1,8 @@
+#![expect(
+    clippy::empty_enums,
+    reason = "Dioxus generates empty ConfigButtonsProps builder diagnostic enums"
+)]
+
 use std::rc::Rc;
 
 use dioxus::prelude::*;

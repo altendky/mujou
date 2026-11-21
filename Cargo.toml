@@ -7,10 +7,6 @@ edition = "2024"
 rust-version = "1.90"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/altendky/mujou"
-homepage = "https://github.com/altendky/mujou"
-description = "Convert raster images to vector paths for sand tables, pen plotters, and CNC devices"
-keywords = ["image-processing", "vector", "wasm", "sand-table"]
-categories = ["graphics", "wasm"]
 
 [workspace.dependencies]
 # Internal crates
@@ -23,7 +19,6 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 imageproc = { version = "0.27", default-features = false }
 
 # WASM support
-getrandom = { version = "0.4", features = ["wasm-bindgen"] }
 web-sys = { version = "0.3.107", features = [
     "Blob",
     "BlobPropertyBag",
@@ -61,9 +56,6 @@ serde_json = "1"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
-
-# Cross-platform time (uses performance.now() on WASM)
-web-time = "1"
 
 # Geometry, spatial indexing, graph algorithms
 geo = "0.33"

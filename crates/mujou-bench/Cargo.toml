@@ -6,7 +6,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "CLI tool for experimenting with pipeline parameters and collecting diagnostics"
 keywords = ["benchmark", "diagnostics"]
 categories = ["command-line-utilities"]
