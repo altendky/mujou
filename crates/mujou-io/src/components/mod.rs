@@ -4,11 +4,19 @@
 //! export panel, filmstrip stage navigation, per-stage controls, and
 //! stage preview.
 
+// Dioxus Props generates sibling empty enums for missing required fields.
+// These module expectations cover those helpers and fail when no longer needed.
+#[expect(clippy::empty_enums, reason = "Dioxus Props builder diagnostics")]
 mod export;
+#[expect(clippy::empty_enums, reason = "Dioxus Props builder diagnostics")]
 mod filmstrip;
+#[expect(clippy::empty_enums, reason = "Dioxus Props builder diagnostics")]
 mod preview;
+#[expect(clippy::empty_enums, reason = "Dioxus Props builder diagnostics")]
 mod stage_controls;
+#[expect(clippy::empty_enums, reason = "Dioxus Props builder diagnostics")]
 mod stage_preview;
+#[expect(clippy::empty_enums, reason = "Dioxus Props builder diagnostics")]
 mod upload;
 
 pub use export::ExportPanel;
