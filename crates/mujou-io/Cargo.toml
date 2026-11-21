@@ -5,7 +5,6 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
 description = "Browser I/O and Dioxus components for mujou"
 keywords = ["wasm", "dioxus", "file-upload"]
 categories = ["wasm"]
